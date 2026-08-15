@@ -10,6 +10,7 @@ const db = vi.hoisted(() => ({
   listAnalysesByUser: vi.fn().mockResolvedValue([]),
   getAnalysisById: vi.fn().mockResolvedValue(undefined),
   getVideosByAnalysis: vi.fn().mockResolvedValue([]),
+  getThumbnailsByAnalysis: vi.fn().mockResolvedValue([]),
   deleteAnalysis: vi.fn().mockResolvedValue(undefined),
   updateAnalysisProgress: vi.fn().mockResolvedValue(undefined),
   getUserStats: vi.fn().mockResolvedValue({ total: 3, completed: 2 }),

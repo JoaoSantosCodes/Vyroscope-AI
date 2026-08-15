@@ -2,7 +2,9 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
   addWatchedVideo,
+  listMetricsHistory,
   listWatchedVideos,
+  recordWatchedMetrics,
   removeWatchedVideo,
 } from "../db";
 import { fetchVideoStatsById } from "../youtube";
@@ -70,12 +72,20 @@ export const watchedRouter = router({
     const db = await getDb();
     if (db) {
       await Promise.all(
-        refreshed.map((r) =>
-          db
+        refreshed.map(async (r) => {
+          await db
             .update(watchedVideos)
             .set({ views: r.views, likes: r.likes, comments: r.comments, metricsUpdatedAt: r.metricsUpdatedAt })
-            .where(eq(watchedVideos.id, r.id))
-        )
+            .where(eq(watchedVideos.id, r.id));
+          // Grava um ponto no histórico de evolução de métricas
+          await recordWatchedMetrics({
+            userId: ctx.user.id,
+            watchedVideoId: r.id,
+            views: r.views,
+            likes: r.likes,
+            comments: r.comments,
+          }).catch(() => undefined);
+        })
       );
     }
     return refreshed;
@@ -101,4 +111,15 @@ export const watchedRouter = router({
     await removeWatchedVideo(ctx.user.id, input.id);
     return { success: true } as const;
   }),
+
+  /** Retorna a série histórica de views/likes/comments de um vídeo monitorado (para o gráfico). */
+  metrics: protectedProcedure
+    .input(z.object({ id: z.number().int().positive() }))
+    .query(async ({ ctx, input }) => {
+      const rows = await listWatchedVideos(ctx.user.id);
+      const owned = rows.find((r) => r.id === input.id);
+      if (!owned) throw new TRPCError({ code: "NOT_FOUND", message: "Vídeo monitorado não encontrado" });
+      const history = await listMetricsHistory(ctx.user.id, input.id);
+      return { youtubeId: owned.youtubeId, title: owned.title, history };
+    }),
 });

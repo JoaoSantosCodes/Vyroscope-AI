@@ -5,6 +5,8 @@ vi.mock("./db", () => ({
   addWatchedVideo: vi.fn(),
   listWatchedVideos: vi.fn(),
   removeWatchedVideo: vi.fn(),
+  recordWatchedMetrics: vi.fn(),
+  listMetricsHistory: vi.fn(),
   getDb: vi.fn(),
 }));
 
@@ -19,6 +21,8 @@ import { fetchVideoStatsById } from "./youtube";
 const mockedAdd = vi.mocked(db.addWatchedVideo);
 const mockedList = vi.mocked(db.listWatchedVideos);
 const mockedRemove = vi.mocked(db.removeWatchedVideo);
+const mockedRecordMetrics = vi.mocked(db.recordWatchedMetrics);
+const mockedListMetrics = vi.mocked(db.listMetricsHistory);
 const mockedStats = vi.mocked(fetchVideoStatsById);
 const mockedGetDb = vi.mocked(db.getDb);
 
@@ -94,7 +98,7 @@ describe("watched.list", () => {
       commentCount: 50,
       publishedAt: null,
     });
-    const updateFn = vi.fn();
+    mockedRecordMetrics.mockResolvedValueOnce(undefined as never);
     mockedGetDb.mockResolvedValueOnce({
       update: () => ({ set: () => ({ where: () => Promise.resolve(undefined) }) }),
     } as never);
@@ -106,7 +110,6 @@ describe("watched.list", () => {
     expect(result[0]?.views).toBe(10000);
     expect(result[0]?.performanceScore).toBeGreaterThan(0);
     expect(result[0]?.performanceScore).toBeLessThanOrEqual(100);
-    expect(updateFn).not.toHaveBeenCalled();
   });
 
   it("marks a row as refreshError when YouTube stats cannot be fetched", async () => {
@@ -123,5 +126,76 @@ describe("watched.remove", () => {
     const result = await caller.watched.remove({ id: 1 });
     expect(result.success).toBe(true);
     expect(mockedRemove).toHaveBeenCalledWith(1, 1);
+  });
+});
+
+describe("watched.metrics", () => {
+  it("returns the metrics history of a watched video", async () => {
+    const row = {
+      id: 42,
+      userId: 1,
+      youtubeId: "dQw4w9WgXcQ",
+      title: "Meu vídeo",
+      predictedScore: 70,
+      videoUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      publishedAt: new Date(),
+      metricsUpdatedAt: new Date(),
+    };
+    mockedList.mockResolvedValueOnce([row] as never);
+    // listMetricsHistory chama internamente getDb(); o mock de db lista o resultado via o mock da fn
+    mockedListMetrics.mockImplementationOnce(async () => [
+      {
+        recordedAt: new Date("2026-08-14T10:00:00Z"),
+        views: 100,
+        likes: 10,
+        comments: 5,
+      },
+      {
+        recordedAt: new Date("2026-08-15T10:00:00Z"),
+        views: 200,
+        likes: 25,
+        comments: 8,
+      },
+    ] as never);
+    const caller = appRouter.createCaller(createCtx());
+    const result = await caller.watched.metrics({ id: 42 });
+    expect(result.youtubeId).toBe("dQw4w9WgXcQ");
+    expect(result.history).toHaveLength(2);
+  });
+
+  it("records a new metrics snapshot when listing watched videos", async () => {
+    const row = {
+      id: 7,
+      userId: 1,
+      youtubeId: "dQw4w9WgXcQ",
+      title: "Meu vídeo",
+      suggestionTitle: null,
+      predictedScore: 70,
+      videoUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      publishedAt: new Date(),
+      views: 100,
+      likes: 10,
+      comments: 5,
+      metricsUpdatedAt: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    mockedList.mockResolvedValueOnce([row] as never);
+    mockedRecordMetrics.mockResolvedValueOnce(undefined as never);
+    mockedStats.mockResolvedValueOnce({
+      title: "Meu vídeo",
+      viewCount: 10000,
+      likeCount: 300,
+      commentCount: 50,
+      publishedAt: null,
+    });
+    mockedGetDb.mockResolvedValueOnce({
+      update: () => ({ set: () => ({ where: () => Promise.resolve(undefined) }) }),
+    } as never);
+    const caller = appRouter.createCaller(createCtx());
+    await caller.watched.list();
+    expect(mockedRecordMetrics).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 1, watchedVideoId: 7, views: 10000, likes: 300, comments: 50 })
+    );
   });
 });

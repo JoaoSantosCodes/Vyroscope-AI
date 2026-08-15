@@ -34,8 +34,10 @@ import { Calendar as CalendarIcon } from "lucide-react";
 import { exportAgendaPdf, exportAnalysisCsv, exportAnalysisPdf } from "@/lib/export";
 import { useMemo, useState } from "react";
 import ScriptDialog from "@/components/ScriptDialog";
+import AlternativeTitlesDialog from "@/components/AlternativeTitlesDialog";
 import { toast } from "sonner";
 import { useLocation, useParams } from "wouter";
+import { Heart } from "lucide-react";
 
 export default function Result() {
   const params = useParams<{ id: string }>();
@@ -129,7 +131,7 @@ export default function Result() {
         {isRunning && <StillRunning />}
         {isFailed && <FailedState message={data.errorMessage ?? "Erro desconhecido"} niche={data.niche} />}
         {!isRunning && !isFailed && data.result && (
-          <Dashboard result={data.result} videos={data.videos} analysisId={data.id} />
+          <Dashboard result={data.result} videos={data.videos} analysisId={data.id} thumbnails={data.thumbnails ?? []} />
         )}
       </div>
     </SiteLayout>
@@ -259,10 +261,12 @@ function Dashboard({
   result,
   videos,
   analysisId,
+  thumbnails,
 }: {
   result: AnalysisResult;
   videos: VideoWithScore[];
   analysisId: string;
+  thumbnails: { id: number; suggestionTitle: string; imageUrl: string; prompt: string; favorite: number; createdAt: number }[];
 }) {
   const patterns = [...(result.patterns ?? [])].sort((a, b) => b.score - a.score);
   const [sortBy, setSortBy] = useState<"score" | "duration">("score");
@@ -298,7 +302,7 @@ function Dashboard({
           </div>
         </div>
         {suggestions.map((s, i) => (
-          <SuggestionCard key={i} suggestion={s} index={i} analysisId={analysisId} />
+          <SuggestionCard key={i} suggestion={s} index={i} analysisId={analysisId} thumbnails={thumbnails} />
         ))}
       </TabsContent>
 
@@ -466,14 +470,18 @@ function SuggestionCard({
   suggestion,
   index,
   analysisId,
+  thumbnails,
 }: {
   suggestion: NonNullable<AnalysisResult["suggestions"]>[number];
   index: number;
   analysisId: string;
+  thumbnails: { id: number; suggestionTitle: string; imageUrl: string; prompt: string; favorite: number; createdAt: number }[];
 }) {
   const [copied, setCopied] = useState(false);
   const [scriptDialog, setScriptDialog] = useState(false);
   const [thumbnail, setThumbnail] = useState<string | null>(null);
+  const [altTitlesOpen, setAltTitlesOpen] = useState(false);
+  const utils = trpc.useUtils();
   const generateScriptMutation = trpc.extended.generateScript.useMutation({
     onSuccess: () => setScriptDialog(true),
     onError: (err) => toast.error(err.message),
@@ -482,9 +490,57 @@ function SuggestionCard({
     onSuccess: (data) => {
       setThumbnail(data.imageUrl);
       toast.success("Thumbnail gerada com sucesso.");
+      // Recarrega a análise para que a nova thumbnail apareça vinculada ao coração de favoritos
+      utils.analysis.get.invalidate({ id: analysisId }).then(() => {
+        utils.analysis.get.fetch({ id: analysisId }).then((fresh) => {
+          const matches = (fresh?.thumbnails ?? []).filter((t) => t.suggestionTitle === suggestion.title);
+          const latest = matches.reduce((a, b) => (b.createdAt > (a?.createdAt ?? -1) ? b : a), undefined as typeof matches[number] | undefined);
+          if (latest) setThumbnail(latest.imageUrl);
+        });
+      });
     },
     onError: (err) => toast.error(err.message),
   });
+  const toggleFavoriteMutation = trpc.extended.toggleFavorite.useMutation({
+    onMutate: async ({ thumbnailId, favorite }) => {
+      await utils.analysis.get.cancel({ id: analysisId });
+      const previous = utils.analysis.get.getData({ id: analysisId });
+      utils.analysis.get.setData({ id: analysisId }, (old) => {
+        if (!old) return old;
+        return {
+          ...old,
+          thumbnails: old.thumbnails.map((t) => (t.id === thumbnailId ? { ...t, favorite: favorite ? 1 : 0 } : t)),
+        };
+      });
+      return { previous };
+    },
+    onError: (err, _vars, context) => {
+      if (context?.previous) utils.analysis.get.setData({ id: analysisId }, context.previous);
+      toast.error(err.message);
+    },
+    onSettled: () => {
+      utils.extended.listFavorites.invalidate();
+      utils.analysis.get.invalidate({ id: analysisId });
+    },
+  });
+  const generateAltTitlesMutation = trpc.extended.generateAlternativeTitles.useMutation({
+    onSuccess: () => setAltTitlesOpen(true),
+    onError: (err) => toast.error(err.message),
+  });
+  // Se a imagem gerada já existe nas thumbnails da análise (recarregada), vincula o id para favoritar
+  const linkedThumbnail = useMemo(
+    () => (thumbnail ? thumbnails.find((t) => t.imageUrl === thumbnail) ?? null : null),
+    [thumbnail, thumbnails]
+  );
+  const thumbnailFav = linkedThumbnail !== null && linkedThumbnail.favorite === 1;
+  const handleFavorite = async () => {
+    if (linkedThumbnail === null) {
+      toast.error("Gere a thumbnail primeiro para salvá-la nos favoritos.");
+      return;
+    }
+    toggleFavoriteMutation.mutate({ thumbnailId: linkedThumbnail.id, favorite: !thumbnailFav });
+    toast.success(thumbnailFav ? "Removida dos favoritos." : "Adicionada aos favoritos.");
+  };
   const openThumbnail = () => {
     if (!thumbnail) return;
     const a = document.createElement("a");
@@ -579,9 +635,40 @@ function SuggestionCard({
                 </>
               )}
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => generateAltTitlesMutation.mutate({ analysisId, suggestionIndex: index })}
+              disabled={generateAltTitlesMutation.isPending}
+            >
+              {generateAltTitlesMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Gerando…
+                </>
+              ) : (
+                <>
+                  <Sparkles className="mr-1.5 h-3.5 w-3.5" /> Títulos alternativos
+                </>
+              )}
+            </Button>
           </div>
           {thumbnail && (
             <div className="mt-4 w-full overflow-hidden rounded-lg border border-border/60">
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={handleFavorite}
+                  disabled={toggleFavoriteMutation.isPending}
+                  aria-label={thumbnailFav ? "Remover dos favoritos" : "Salvar nos favoritos"}
+                  className={`absolute right-3 top-3 rounded-full p-2 backdrop-blur-md transition-all active:scale-90 ${
+                    thumbnailFav
+                      ? "bg-primary text-primary-foreground shadow-lg shadow-primary/40"
+                      : "bg-black/50 text-white hover:bg-primary hover:text-primary-foreground"
+                  }`}
+                >
+                  <Heart className={`h-4 w-4 ${thumbnailFav ? "fill-current" : ""}`} />
+                </button>
+              </div>
               <div className="flex items-start justify-between gap-2 bg-background/60 px-4 py-2.5">
                 <p className="text-xs font-semibold uppercase tracking-wider text-primary">Thumbnail sugerida</p>
                 <button
@@ -601,6 +688,14 @@ function SuggestionCard({
             script={generateScriptMutation.data}
             open={scriptDialog}
             onOpenChange={setScriptDialog}
+          />
+        )}
+        {altTitlesOpen && generateAltTitlesMutation.data && (
+          <AlternativeTitlesDialog
+            titles={generateAltTitlesMutation.data.titles}
+            originalTitle={generateAltTitlesMutation.data.suggestionTitle}
+            open={altTitlesOpen}
+            onOpenChange={setAltTitlesOpen}
           />
         )}
         </div>

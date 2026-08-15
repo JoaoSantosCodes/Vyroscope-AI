@@ -6,6 +6,7 @@ import {
   deleteAnalysis as dbDeleteAnalysis,
   getAnalysisById,
   getUserStats,
+  getThumbnailsByAnalysis,
   getVideosByAnalysis,
   listAnalysesByUser,
   saveVideos,
@@ -67,6 +68,7 @@ export const analysisRouter = router({
       throw new TRPCError({ code: "FORBIDDEN", message: "Você não tem acesso a esta análise" });
     }
     const videos = await getVideosByAnalysis(row.id);
+    const thumbnails = await getThumbnailsByAnalysis(row.id);
     let result: AnalysisResult | null = null;
     try {
       result = row.result ? (JSON.parse(row.result) as AnalysisResult) : null;
@@ -82,6 +84,14 @@ export const analysisRouter = router({
       videos: videos.map((v) => ({
         ...v,
         score: result?.videoScores.find((s) => s.videoId === v.youtubeId)?.viralityScore ?? null,
+      })),
+      thumbnails: thumbnails.map((t) => ({
+        id: t.id,
+        suggestionTitle: t.suggestionTitle,
+        imageUrl: t.imageUrl,
+        prompt: t.prompt,
+        favorite: t.favorite,
+        createdAt: t.createdAt.getTime(),
       })),
       result,
     };

@@ -6,6 +6,7 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Analysis from "./pages/Analysis";
 import Compare from "./pages/Compare";
+import Favorites from "./pages/Favorites";
 import History from "./pages/History";
 import Home from "./pages/Home";
 import Monitoring from "./pages/Monitoring";
@@ -23,6 +24,7 @@ function Router() {
       <Route path={"/comparador"} component={Compare} />
       <Route path={"/monitorar"} component={Monitoring} />
       <Route path={"/perfil"} component={Profile} />
+      <Route path={"/favoritos"} component={Favorites} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />

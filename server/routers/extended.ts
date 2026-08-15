@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import type { AnalysisResult } from "../analysis";
-import { analyzeNicheComparison, buildThumbnailPrompt, generateContentAgenda, generateExtendedScript } from "../extended";
+import { analyzeNicheComparison, buildThumbnailPrompt, generateAlternativeTitles, generateContentAgenda, generateExtendedScript } from "../extended";
 import { fetchTrendingVideosForNiche } from "../youtube";
 import { protectedProcedure, router } from "../_core/trpc";
 
@@ -130,6 +130,46 @@ export const extendedRouter = router({
       });
       return { imageUrl, prompt, suggestionTitle: suggestion.title } as const;
     }),
+
+  /** Gera 5 títulos alternativos com score de viralidade para uma sugestão. */
+  generateAlternativeTitles: protectedProcedure.input(scriptInput).mutation(async ({ ctx, input }) => {
+    const { getAnalysisById } = await import("../db");
+    const analysis = await getAnalysisById(input.analysisId);
+    if (!analysis) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "Análise não encontrada." });
+    }
+    if (analysis.userId !== ctx.user.id) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Esta análise não pertence a você." });
+    }
+    const result = parseResult(analysis.result);
+    if (!result) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Esta análise ainda não foi concluída." });
+    }
+    const suggestion = result.suggestions?.[input.suggestionIndex];
+    if (!suggestion) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "Sugestão não encontrada." });
+    }
+    return generateAlternativeTitles(analysis.niche, suggestion, result.patterns ?? []);
+  }),
+
+  /** Marca/desmarca uma thumbnail como favorita (galeria). */
+  toggleFavorite: protectedProcedure
+    .input(z.object({ thumbnailId: z.number().int().positive(), favorite: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const { setThumbnailFavorite } = await import("../db");
+      try {
+        await setThumbnailFavorite(ctx.user.id, input.thumbnailId, input.favorite);
+      } catch (err) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "Erro ao favoritar" });
+      }
+      return { success: true } as const;
+    }),
+
+  /** Lista as thumbnails favoritas do usuário (galeria de favoritos). */
+  listFavorites: protectedProcedure.query(async ({ ctx }) => {
+    const { listFavoriteThumbnails } = await import("../db");
+    return listFavoriteThumbnails(ctx.user.id);
+  }),
 
   /** Gera agenda de conteúdo de 4 semanas a partir das sugestões de uma análise. */
   generateAgenda: protectedProcedure.input(agendaInput).mutation(async ({ ctx, input }) => {

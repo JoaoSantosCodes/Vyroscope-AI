@@ -49,3 +49,15 @@
 - [x] Tela de monitoramento (/monitorar) com atualização de métricas do YouTube e comparação
 - [x] Testes vitest das novas funcionalidades (35 testes passando)
 - [x] Verificação visual (screenshots desktop)
+
+## Melhorias solicitadas (rodada 5)
+- [x] Entregar/validar a skill vyroscope-video-analyst (card de skill ao usuário)
+- [x] Schema: tabela de histórico de métricas (evolução views/likes por vídeo) e coluna favorite em thumbnails
+- [x] Backend: salvar ponto de métricas em cada refresh e retornar série temporal (watched.metrics)
+- [x] Backend: gerador de títulos alternativos (5 variações com score via LLM, extended.generateAlternativeTitles)
+- [x] Backend: endpoints de favoritos de thumbnails (toggleFavorite/listFavorites)
+- [x] Frontend: gráfico interativo (Recharts) de views/likes ao longo do tempo na página /monitorar
+- [x] Frontend: botão "Gerar títulos alternativos" por sugestão com modal/lista de 5 títulos pontuados
+- [x] Frontend: galeria de favoritos (rota /favoritos + link no header) com botão de favoritar nas thumbnails
+- [x] Testes vitest das novas funcionalidades (40 testes passando)
+- [x] Verificação visual e checkpoint

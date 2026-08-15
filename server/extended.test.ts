@@ -4,7 +4,7 @@ vi.mock("./_core/llm", () => ({
   invokeLLM: vi.fn(),
 }));
 
-import { analyzeNicheComparison, buildThumbnailPrompt, generateContentAgenda, generateExtendedScript } from "./extended";
+import { analyzeNicheComparison, buildThumbnailPrompt, generateContentAgenda, generateExtendedScript, generateAlternativeTitles } from "./extended";
 import { invokeLLM } from "./_core/llm";
 
 const mockedInvokeLLM = vi.mocked(invokeLLM);
@@ -190,5 +190,70 @@ describe("generateContentAgenda", () => {
       ],
     } as never);
     await expect(generateContentAgenda("moda", [suggestion()])).rejects.toThrow("llm_invalid_structure");
+  });
+});
+
+describe("generateAlternativeTitles", () => {
+  it("returns five titles with virality scores", async () => {
+    mockedInvokeLLM.mockResolvedValueOnce({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              titles: [
+                { title: "Título variado 1", viralityScore: 90, rationale: "Usa curiosidade" },
+                { title: "Título variado 2", viralityScore: 85, rationale: "Número específico" },
+                { title: "Título variado 3", viralityScore: 80, rationale: "Promessa clara" },
+                { title: "Título variado 4", viralityScore: 75, rationale: "Antes e depois" },
+                { title: "Título variado 5", viralityScore: 70, rationale: "Erro comum" },
+              ],
+            }),
+          },
+        },
+      ],
+    } as never);
+
+    const result = await generateAlternativeTitles("finanças", suggestion("O dinheiro que sobra"), [
+      { pattern: "curiosidade", explanation: "x", evidenceVideoCount: 5, score: 90 },
+    ]);
+
+    expect(result.titles).toHaveLength(5);
+    expect(result.suggestionTitle).toBe("O dinheiro que sobra");
+    expect(result.titles.every((t) => typeof t.rationale === "string" && t.viralityScore >= 0 && t.viralityScore <= 100)).toBe(true);
+  });
+
+  it("throws on empty response, invalid JSON and too few titles", async () => {
+    mockedInvokeLLM.mockResolvedValueOnce({ choices: [] } as never);
+    await expect(generateAlternativeTitles("IA", suggestion(), [])).rejects.toThrow("llm_empty_response");
+
+    mockedInvokeLLM.mockResolvedValueOnce({ choices: [{ message: { content: "{x" } }] } as never);
+    await expect(generateAlternativeTitles("IA", suggestion(), [])).rejects.toThrow("llm_invalid_json");
+
+    mockedInvokeLLM.mockResolvedValueOnce({
+      choices: [{ message: { content: JSON.stringify({ titles: [{ title: "um" }] }) } }],
+    } as never);
+    await expect(generateAlternativeTitles("IA", suggestion(), [])).rejects.toThrow("llm_invalid_structure");
+  });
+
+  it("clamps virality scores to the 0-100 range", async () => {
+    mockedInvokeLLM.mockResolvedValueOnce({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              titles: Array.from({ length: 5 }, (_, i) => ({
+                title: `T${i}`,
+                viralityScore: i === 0 ? 250 : i === 1 ? -30 : 80,
+                rationale: "r",
+              })),
+            }),
+          },
+        },
+      ],
+    } as never);
+
+    const result = await generateAlternativeTitles("IA", suggestion(), []);
+    expect(result.titles[0]?.viralityScore).toBe(100);
+    expect(result.titles[1]?.viralityScore).toBe(0);
   });
 });

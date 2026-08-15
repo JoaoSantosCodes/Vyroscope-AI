@@ -1,4 +1,12 @@
 import SiteLayout from "@/components/SiteLayout";
+import {
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -245,6 +253,24 @@ function VideoRow({
   onRemove: () => void;
   removeDisabled: boolean;
 }) {
+  const [chartOpen, setChartOpen] = useState(true);
+  const metricsQuery = trpc.watched.metrics.useQuery({ id: video.id }, { enabled: true, refetchInterval: 0 });
+
+  const chartData = useMemo(() => {
+    if (!metricsQuery.data?.history?.length) return [];
+    const points = metricsQuery.data.history.map((row) => ({
+      t: row.recordedAt.getTime(),
+      date: formatDate(row.recordedAt.valueOf()),
+      views: row.views,
+      likes: row.likes,
+      comments: row.comments,
+    }));
+    // Deduplica leituras da mesma hora para o gráfico não plotar degraus verticais
+    const dedup = new Map<number, (typeof points)[number]>();
+    for (const p of points) dedup.set(Math.floor(p.t / 3600_000), p);
+    return Array.from(dedup.values()).sort((a, b) => a.t - b.t);
+  }, [metricsQuery.data]);
+
   const delta = useMemo(() => {
     if (video.predictedScore === null || video.performanceScore === null) return null;
     return video.performanceScore - video.predictedScore;
@@ -272,7 +298,15 @@ function VideoRow({
               )}
               {video.refreshError && <span className="text-destructive">não foi possível atualizar as métricas</span>}
             </div>
-            <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <button
+                type="button"
+                onClick={() => setChartOpen((o) => !o)}
+                className="flex items-center gap-1 text-muted-foreground transition-colors hover:text-primary"
+              >
+                <TrendingUp className={`h-3.5 w-3.5 transition-transform duration-200 ${chartOpen ? "" : "-rotate-90"}`} />
+                {chartData.length > 1 ? `Evolução (${chartData.length} leituras)` : "Evolução (aguardando leituras)"}
+              </button>
               {video.performanceScore !== null && (
                 <div className="flex items-center gap-1.5">
                   <span className={`rounded-full border px-2.5 py-0.5 font-bold ${scoreColor(video.performanceScore)} border-current/25 bg-accent/50`}>
@@ -320,6 +354,58 @@ function VideoRow({
             </Button>
           </div>
         </div>
+        {chartOpen && (
+          <div className="mt-4 border-t border-border/50 pt-4">
+            {metricsQuery.isLoading ? (
+              <Skeleton className="h-48 w-full" />
+            ) : chartData.length < 2 ? (
+              <p className="flex items-center justify-center gap-2 py-6 text-center text-xs text-muted-foreground">
+                <Clock className="h-3.5 w-3.5" /> Atualize as métricas mais de uma vez ao longo do tempo para ver o gráfico de evolução de visualizações e curtidas.
+              </p>
+            ) : (
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div>
+                  <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
+                    <Eye className="h-3 w-3" /> Visualizações
+                  </p>
+                  <div className="h-44">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={chartData} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+                        <XAxis dataKey="date" tick={{ fontSize: 10, fill: "currentColor" }} tickFormatter={(v) => (v as string).slice(0, 10)} stroke="currentColor" opacity={0.5} />
+                        <YAxis tick={{ fontSize: 10, fill: "currentColor" }} tickFormatter={(v) => formatCompact(v as number)} stroke="currentColor" opacity={0.5} width={42} />
+                        <Tooltip
+                          contentStyle={{ background: "var(--popover)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }}
+                          formatter={(value: number) => [formatCompact(value), "Visualizações"]}
+                          labelFormatter={(label) => `Atualizado em ${label}`}
+                        />
+                        <Line type="monotone" dataKey="views" stroke="var(--primary)" strokeWidth={2} dot={false} isAnimationActive={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+                <div>
+                  <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
+                    <ThumbsUp className="h-3 w-3" /> Curtidas
+                  </p>
+                  <div className="h-44">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={chartData} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+                        <XAxis dataKey="date" tick={{ fontSize: 10, fill: "currentColor" }} tickFormatter={(v) => (v as string).slice(0, 10)} stroke="currentColor" opacity={0.5} />
+                        <YAxis tick={{ fontSize: 10, fill: "currentColor" }} tickFormatter={(v) => formatCompact(v as number)} stroke="currentColor" opacity={0.5} width={42} />
+                        <Tooltip
+                          contentStyle={{ background: "var(--popover)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }}
+                          formatter={(value: number) => [formatCompact(value), "Curtidas"]}
+                          labelFormatter={(label) => `Atualizado em ${label}`}
+                        />
+                        <Line type="monotone" dataKey="likes" stroke="var(--primary)" strokeWidth={2} dot={false} isAnimationActive={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

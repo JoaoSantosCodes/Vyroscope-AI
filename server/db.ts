@@ -206,7 +206,7 @@ export async function updateUserProfile(userId: number, patch: { name?: string |
   }
   return db.select().from(users).where(eq(users.id, userId)).limit(1).then((r) => r[0]);
 }
-import { suggestionThumbnails, InsertSuggestionThumbnail, watchedVideos, InsertWatchedVideo } from "../drizzle/schema";
+import { analyses as analysesTable, suggestionThumbnails, InsertSuggestionThumbnail, watchedVideos, InsertWatchedVideo } from "../drizzle/schema";
 
 export async function saveSuggestionThumbnail(row: InsertSuggestionThumbnail) {
   const db = await getDb();
@@ -237,4 +237,50 @@ export async function removeWatchedVideo(userId: number, id: number) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   await db.delete(watchedVideos).where(and(eq(watchedVideos.id, id), eq(watchedVideos.userId, userId)));
+}
+import { watchedMetricsHistory, InsertWatchedMetricsHistory, suggestionThumbnails as stCols } from "../drizzle/schema";
+
+export async function setThumbnailFavorite(userId: number, thumbnailId: number, favorite: boolean) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  // Garante que a thumbnail pertence ao usuário (via análise dele)
+  const rows = await db
+    .select({ analysisId: stCols.analysisId })
+    .from(stCols)
+    .where(eq(stCols.id, thumbnailId))
+    .limit(1);
+  const owner = rows[0];
+  if (!owner) throw new Error("Thumbnail não encontrada");
+  const owns = await db.select().from(analysesTable).where(and(eq(analysesTable.id, owner.analysisId), eq(analysesTable.userId, userId))).limit(1);
+  if (owns.length === 0) throw new Error("Thumbnail não pertence a este usuário");
+  await db.update(stCols).set({ favorite: favorite ? 1 : 0 }).where(eq(stCols.id, thumbnailId));
+  return { success: true } as const;
+}
+
+export async function listFavoriteThumbnails(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select()
+    .from(stCols)
+    .innerJoin(analysesTable, eq(stCols.analysisId, analysesTable.id))
+    .where(and(eq(stCols.favorite, 1), eq(analysesTable.userId, userId)))
+    .orderBy(stCols.createdAt);
+}
+
+export async function recordWatchedMetrics(row: InsertWatchedMetricsHistory) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.insert(watchedMetricsHistory).values(row);
+}
+
+export async function listMetricsHistory(userId: number, watchedVideoId: number, limit = 60) {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select()
+    .from(watchedMetricsHistory)
+    .where(and(eq(watchedMetricsHistory.userId, userId), eq(watchedMetricsHistory.watchedVideoId, watchedVideoId)))
+    .orderBy(watchedMetricsHistory.recordedAt)
+    .limit(limit);
 }

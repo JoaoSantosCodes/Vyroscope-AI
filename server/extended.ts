@@ -364,3 +364,96 @@ export function buildThumbnailPrompt(
     `Sem marcas d'água, sem logotipos, sem texto extra além do título.`,
   ].join("\n");
 }
+
+export type AlternativeTitle = {
+  /** Título alternativo proposto */
+  title: string;
+  /** Score de viralidade previsto (0-100) */
+  viralityScore: number;
+  /** Justificativa curta de por que este título tende a performar */
+  rationale: string;
+};
+
+export type AlternativeTitlesResult = {
+  titles: AlternativeTitle[];
+  suggestionTitle: string;
+};
+
+const ALT_TITLES_SCHEMA = {
+  type: "json_schema",
+  json_schema: {
+    name: "alternative_titles",
+    strict: true,
+    schema: {
+      type: "object",
+      properties: {
+        titles: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              title: { type: "string", description: "Título alternativo do vídeo, no máximo 70 caracteres" },
+              viralityScore: { type: "integer", description: "Score de viralidade previsto de 0 a 100", minimum: 0, maximum: 100 },
+              rationale: { type: "string", description: "Justificativa em 1 frase de por que este título tende a performar", maxLength: 200 },
+            },
+            required: ["title", "viralityScore", "rationale"],
+            additionalProperties: false,
+          },
+          minItems: 5,
+          maxItems: 5,
+        },
+      },
+      required: ["titles"],
+      additionalProperties: false,
+    },
+  },
+} as const;
+
+/**
+ * Gera 5 variações de título para uma sugestão, cada uma pontuada com um
+ * score de viralidade previsto, considerando os padrões do nicho.
+ */
+export async function generateAlternativeTitles(
+  niche: string,
+  suggestion: Suggestion,
+  patterns: ViralityPattern[]
+): Promise<AlternativeTitlesResult> {
+  const patternsText = patterns
+    .slice(0, 4)
+    .map((p) => `• ${p.pattern} (score ${p.score}): ${p.explanation}`)
+    .join("\n");
+
+  const messages: LlmMessage[] = [
+    {
+      role: "system",
+      content: `Você é um especialista em títulos de YouTube. Crie variações de título que mantenham o ângulo único da sugestão original, mas explorem gatilhos diferentes (curiosidade, urgência, especificidade numérica, contrarianismo, transformação). Escreva em português brasileiro, títulos curtos (até 70 caracteres), clicáveis mas sem clickbait enganoso. Responda apenas com o JSON solicitado.`,
+    },
+    {
+      role: "user",
+      content: `Nicho: "${niche}"\n\nPadrões de viralidade do nicho:\n${patternsText}\n\nSugestão original:\n• Título: ${suggestion.title}\n• Hook: ${suggestion.hook}\n• Ângulo: ${suggestion.angle}\n• Score original: ${suggestion.viralityScore}\n\nInstruções:\n1. Crie exatamente 5 títulos alternativos, cada um explorando um gatilho diferente (curiosidade, número específico, urgência/tempo, contrarianismo, antes/depois ou transformação).\n2. Para cada título, atribua um viralityScore de 0 a 100, calibrado de forma que títulos mais alinhados aos padrões do nicho recebam scores maiores.\n3. Em rationale, explique em 1 frase por que o título tende a performar neste nicho.`,
+    },
+  ];
+
+  const response = await invokeLLM({ messages, response_format: ALT_TITLES_SCHEMA });
+  const raw = response.choices[0]?.message?.content;
+  if (!raw || typeof raw !== "string") {
+    throw new Error("llm_empty_response");
+  }
+  let parsed: { titles: AlternativeTitle[] };
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("llm_invalid_json");
+  }
+  if (!Array.isArray(parsed.titles) || parsed.titles.length < 5) {
+    throw new Error("llm_invalid_structure");
+  }
+  return {
+    titles: parsed.titles.map((t) => ({
+      title: t.title,
+      viralityScore: Math.min(100, Math.max(0, Number(t.viralityScore) || 0)),
+      rationale: t.rationale,
+    })),
+    suggestionTitle: suggestion.title,
+  };
+}

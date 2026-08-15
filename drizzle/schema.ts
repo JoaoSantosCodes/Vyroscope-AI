@@ -77,6 +77,8 @@ export const suggestionThumbnails = mysqlTable("suggestion_thumbnails", {
   imageUrl: text("imageUrl").notNull(),
   /** Prompt usado na geração (para rastreabilidade e reuso) */
   prompt: text("prompt").notNull(),
+  /** Thumbnail salva na galeria de favoritos do usuário */
+  favorite: int("favorite").default(0).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -110,3 +112,20 @@ export const watchedVideos = mysqlTable("watched_videos", {
 
 export type WatchedVideo = typeof watchedVideos.$inferSelect;
 export type InsertWatchedVideo = typeof watchedVideos.$inferInsert;
+
+/**
+ * Histórico de métricas dos vídeos monitorados (evolução no tempo).
+ * Um ponto é gravado a cada atualização de métricas do watched.videos.list.
+ */
+export const watchedMetricsHistory = mysqlTable("watched_metrics_history", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  watchedVideoId: int("watchedVideoId").notNull(),
+  views: int("views").default(0).notNull(),
+  likes: int("likes").default(0).notNull(),
+  comments: int("comments").default(0).notNull(),
+  recordedAt: timestamp("recordedAt").defaultNow().notNull(),
+});
+
+export type WatchedMetricsHistory = typeof watchedMetricsHistory.$inferSelect;
+export type InsertWatchedMetricsHistory = typeof watchedMetricsHistory.$inferInsert;
