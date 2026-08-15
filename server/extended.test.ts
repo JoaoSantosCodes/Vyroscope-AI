@@ -257,3 +257,157 @@ describe("generateAlternativeTitles", () => {
     expect(result.titles[1]?.viralityScore).toBe(0);
   });
 });
+
+/**
+ * Testes do router de favoritos/pastas/ideia-do-dia via caller do tRPC.
+ * Os helpers de db são carregados por import() dinâmico dentro dos procedures,
+ * então mockamos o módulo "./db" completo via vi.mock.
+ */
+import { appRouter } from "./routers";
+import type { TrpcContext } from "./_core/context";
+
+vi.mock("./db", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("./db")>();
+  return {
+    ...mod,
+    listThumbnailFolders: vi.fn(),
+    createThumbnailFolder: vi.fn(),
+    updateThumbnailFolder: vi.fn(),
+    deleteThumbnailFolder: vi.fn(),
+    moveThumbnailToFolder: vi.fn(),
+    listAnalysesByUser: vi.fn(),
+  };
+});
+
+import * as db from "./db";
+
+const mockedListFolders = vi.mocked(db.listThumbnailFolders);
+const mockedCreateFolder = vi.mocked(db.createThumbnailFolder);
+const mockedUpdateFolder = vi.mocked(db.updateThumbnailFolder);
+const mockedDeleteFolder = vi.mocked(db.deleteThumbnailFolder);
+const mockedMoveThumbnail = vi.mocked(db.moveThumbnailToFolder);
+const mockedListAnalyses = vi.mocked(db.listAnalysesByUser);
+
+const folderUser = {
+  id: 2,
+  openId: "folder-user",
+  email: "folder@example.com",
+  name: "Folder User",
+  loginMethod: "manus",
+  role: "user" as const,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  lastSignedIn: new Date(),
+};
+
+function createFolderCtx(): TrpcContext {
+  return {
+    user: folderUser,
+    req: { protocol: "https", headers: {} } as TrpcContext["req"],
+    res: { clearCookie: () => undefined } as unknown as TrpcContext["res"],
+  };
+}
+
+describe("extended folders (list/create/update/delete/move)", () => {
+  it("lists the user's folders", async () => {
+    mockedListFolders.mockResolvedValueOnce([
+      { id: 1, userId: 2, name: "Canal principal", color: "#f59e0b", createdAt: new Date(), updatedAt: new Date() },
+    ] as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.listFolders();
+    expect(result).toHaveLength(1);
+    expect(result[0]?.name).toBe("Canal principal");
+  });
+
+  it("creates a folder with a color", async () => {
+    mockedCreateFolder.mockResolvedValueOnce({
+      id: 3,
+      userId: 2,
+      name: "Shorts",
+      color: "#8b5cf6",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.createFolder({ name: "Shorts", color: "#8b5cf6" });
+    expect(mockedCreateFolder).toHaveBeenCalledWith(2, "Shorts", "#8b5cf6");
+    expect(result.name).toBe("Shorts");
+  });
+
+  it("renames a folder", async () => {
+    mockedUpdateFolder.mockResolvedValueOnce(undefined as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    await caller.extended.updateFolder({ folderId: 1, name: "Campanha X" });
+    expect(mockedUpdateFolder).toHaveBeenCalledWith(2, 1, { name: "Campanha X", color: undefined });
+  });
+
+  it("deletes a folder", async () => {
+    mockedDeleteFolder.mockResolvedValueOnce({ success: true } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.deleteFolder({ folderId: 1 });
+    expect(result.success).toBe(true);
+  });
+
+  it("moves a thumbnail to a folder and back to the root", async () => {
+    mockedMoveThumbnail.mockResolvedValueOnce(undefined as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    await caller.extended.moveThumbnail({ thumbnailId: 10, folderId: 1 });
+    expect(mockedMoveThumbnail).toHaveBeenCalledWith(2, 10, 1);
+
+    mockedMoveThumbnail.mockResolvedValueOnce(undefined as never);
+    await caller.extended.moveThumbnail({ thumbnailId: 10, folderId: null });
+    expect(mockedMoveThumbnail).toHaveBeenCalledWith(2, 10, null);
+  });
+});
+
+describe("extended.ideaOfTheDay", () => {
+  function analysisRow(id: string, niche: string, createdAt: Date, suggestions: unknown[] = []) {
+    return {
+      id,
+      userId: 2,
+      niche,
+      status: "completed",
+      result: JSON.stringify({ suggestions, videos: [], patterns: [] }),
+      createdAt,
+      updatedAt: createdAt,
+    } as never;
+  }
+
+  it("returns no_completed_analyses when the user has no completed analyses", async () => {
+    mockedListAnalyses.mockResolvedValueOnce([] as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.ideaOfTheDay();
+    expect(result).toEqual({ idea: null, reason: "no_completed_analyses" });
+  });
+
+  it("returns a suggestion from the primary niche, rotated by day", async () => {
+    const a1 = analysisRow("a1", "fitness", new Date("2026-08-01"), [
+      { title: "Treino de 10 min", hook: "Acorde e treine", angle: "Rotina rápida", viralityScore: 88 },
+      { title: "Dieta flexível", hook: "Coma o que gosta", angle: "Liberdade alimentar", viralityScore: 70 },
+    ]);
+    const a2 = analysisRow("a2", "fitness", new Date("2026-08-05"), [
+      { title: "Alongamento matinal", hook: "5 min de mobilidade", angle: "Saúde preventiva", viralityScore: 82 },
+    ]);
+    // Outro nicho com menos análises
+    const a3 = analysisRow("a3", "games", new Date("2026-08-10"), [
+      { title: "Setup barato", hook: "Jogue sem gastar", angle: "Custo-benefício", viralityScore: 90 },
+    ]);
+    mockedListAnalyses.mockResolvedValueOnce([a1, a2, a3] as never);
+
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.ideaOfTheDay();
+
+    expect(result.reason).toBeNull();
+    expect(result.idea?.niche).toBe("fitness");
+    expect(typeof result.idea?.analysisId).toBe("string");
+    expect(result.idea?.suggestion.title).toBeTruthy();
+    expect(result.idea?.date).toBe(new Date().toISOString().slice(0, 10));
+  });
+
+  it("returns no_suggestions when the completed analysis has no suggestions", async () => {
+    mockedListAnalyses.mockResolvedValueOnce([analysisRow("x", "IA", new Date())] as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.ideaOfTheDay();
+    expect(result).toEqual({ idea: null, reason: "no_suggestions" });
+  });
+});

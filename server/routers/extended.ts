@@ -171,6 +171,96 @@ export const extendedRouter = router({
     return listFavoriteThumbnails(ctx.user.id);
   }),
 
+  /** Lista as pastas de favoritos do usuário. */
+  listFolders: protectedProcedure.query(async ({ ctx }) => {
+    const { listThumbnailFolders } = await import("../db");
+    return listThumbnailFolders(ctx.user.id);
+  }),
+
+  /** Cria uma pasta na galeria de favoritos. */
+  createFolder: protectedProcedure
+    .input(z.object({ name: z.string().trim().min(1).max(120), color: z.string().trim().max(16).optional() }))
+    .mutation(async ({ ctx, input }) => {
+      const { createThumbnailFolder } = await import("../db");
+      return createThumbnailFolder(ctx.user.id, input.name, input.color);
+    }),
+
+  /** Renomeia ou muda a cor de uma pasta. */
+  updateFolder: protectedProcedure
+    .input(z.object({ folderId: z.number().int().positive(), name: z.string().trim().min(1).max(120).optional(), color: z.string().trim().max(16).nullable().optional() }))
+    .mutation(async ({ ctx, input }) => {
+      const { updateThumbnailFolder } = await import("../db");
+      try {
+        return await updateThumbnailFolder(ctx.user.id, input.folderId, { name: input.name, color: input.color });
+      } catch (err) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "Erro ao atualizar pasta" });
+      }
+    }),
+
+  /** Exclui uma pasta (thumbnails voltam para a raiz da galeria). */
+  deleteFolder: protectedProcedure
+    .input(z.object({ folderId: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const { deleteThumbnailFolder } = await import("../db");
+      try {
+        return await deleteThumbnailFolder(ctx.user.id, input.folderId);
+      } catch (err) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "Erro ao excluir pasta" });
+      }
+    }),
+
+  /** Move uma thumbnail para uma pasta (folderId null = volta para a raiz). */
+  moveThumbnail: protectedProcedure
+    .input(z.object({ thumbnailId: z.number().int().positive(), folderId: z.number().int().positive().nullable() }))
+    .mutation(async ({ ctx, input }) => {
+      const { moveThumbnailToFolder } = await import("../db");
+      try {
+        return await moveThumbnailToFolder(ctx.user.id, input.thumbnailId, input.folderId);
+      } catch (err) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "Erro ao mover thumbnail" });
+      }
+    }),
+
+  /** Painel "Ideia do dia": escolhe automaticamente uma sugestão do dia com base no nicho principal do usuário.
+   *  Nicho principal = o nicho mais analisado; se empatado, o mais recente. A sugestão do dia
+   *  é selecionada de forma determinística pela data atual, rotacionando entre as análises concluídas. */
+  ideaOfTheDay: protectedProcedure.query(async ({ ctx }) => {
+    const { listAnalysesByUser } = await import("../db");
+    const analyses = await listAnalysesByUser(ctx.user.id);
+    const completed = analyses.filter((a) => a.status === "completed" && a.result);
+    if (completed.length === 0) return { idea: null, reason: "no_completed_analyses" as const };
+    // Nicho principal: maior número de análises concluídas; empate → mais recente
+    const byNiche = new Map<string, typeof completed>();
+    for (const a of completed) {
+      const list = byNiche.get(a.niche) ?? [];
+      list.push(a);
+      byNiche.set(a.niche, list);
+    }
+    const primaryNiche = Array.from(byNiche.entries()).sort(
+      (a, b) => b[1].length - a[1].length || new Date(b[1][0].createdAt).getTime() - new Date(a[1][0].createdAt).getTime()
+    )[0][0];
+    const nicheAnalyses = byNiche.get(primaryNiche)!.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    // Rotação determinística pela data atual
+    const today = new Date().toISOString().slice(0, 10);
+    const dayIndex = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
+    const suggestionIdx = dayIndex % nicheAnalyses.length;
+    const analysis = nicheAnalyses[suggestionIdx];
+    const result = parseResult(analysis.result);
+    if (!result || !result.suggestions?.length) return { idea: null, reason: "no_suggestions" as const };
+    const topSuggestions = [...result.suggestions].sort((a, b) => (b.viralityScore ?? 0) - (a.viralityScore ?? 0));
+    const suggestion = topSuggestions[dayIndex % topSuggestions.length];
+    return {
+      idea: {
+        niche: primaryNiche,
+        analysisId: analysis.id,
+        analysisDate: new Date(analysis.createdAt).getTime(),
+        suggestion,
+        date: today,
+      },
+      reason: null,
+    } as const;
+  }),
+
   /** Gera agenda de conteúdo de 4 semanas a partir das sugestões de uma análise. */
   generateAgenda: protectedProcedure.input(agendaInput).mutation(async ({ ctx, input }) => {
     const { getAnalysisById } = await import("../db");

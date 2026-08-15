@@ -163,6 +163,45 @@ describe("watched.metrics", () => {
     expect(result.history).toHaveLength(2);
   });
 
+  it("returns daily averages and growth indicators vs. the previous week", async () => {
+    const row = {
+      id: 5,
+      userId: 1,
+      youtubeId: "dQw4w9WgXcQ",
+      title: "Meu vídeo",
+      predictedScore: 70,
+      videoUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      publishedAt: new Date(),
+      metricsUpdatedAt: new Date(),
+    };
+    mockedList.mockResolvedValueOnce([row] as never);
+    mockedListMetrics.mockImplementationOnce(async () => {
+      // Semana anterior (3 pontos), última semana (2 pontos), hoje (2 leituras no mesmo dia)
+      const points = [] as never;
+      const add = (iso: string, views: number, likes: number) =>
+        points.push({ recordedAt: new Date(iso), views, likes, comments: 0 } as never);
+      add("2026-08-01T10:00:00Z", 100, 10);
+      add("2026-08-02T10:00:00Z", 200, 20);
+      add("2026-08-03T10:00:00Z", 150, 15);
+      add("2026-08-11T10:00:00Z", 300, 30);
+      add("2026-08-12T10:00:00Z", 500, 50);
+      add("2026-08-15T08:00:00Z", 600, 60);
+      add("2026-08-15T20:00:00Z", 700, 70);
+      return points;
+    });
+    const caller = appRouter.createCaller(createCtx());
+    const result = await caller.watched.metrics({ id: 5 });
+    expect(result.history).toHaveLength(7);
+    // Médias diárias: 2026-08-15 média (600+700)/2=650; demais dias 1 ponto cada
+    expect(result.daily).toEqual(
+      expect.arrayContaining([expect.objectContaining({ date: "2026-08-15", views: 650, likes: 65 })])
+    );
+    expect(result.growth).not.toBeNull();
+    expect(result.growth!.viewsPercent).toBeGreaterThan(0);
+    expect(result.growth!.likesPercent).toBeGreaterThan(0);
+    expect(result.growth!.lastWeekAvgViews).toBeGreaterThan(result.growth!.prevWeekAvgViews);
+  });
+
   it("records a new metrics snapshot when listing watched videos", async () => {
     const row = {
       id: 7,

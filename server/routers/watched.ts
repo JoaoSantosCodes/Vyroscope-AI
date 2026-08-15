@@ -112,7 +112,9 @@ export const watchedRouter = router({
     return { success: true } as const;
   }),
 
-  /** Retorna a série histórica de views/likes/comments de um vídeo monitorado (para o gráfico). */
+  /** Retorna a série histórica de views/likes/comments de um vídeo monitorado (para o gráfico).
+   *  daily: médias diárias agregadas (quando há múltiplos pontos no mesmo dia).
+   *  growth: crescimento percentual de views/likes vs. a semana anterior (7 dias atrás). */
   metrics: protectedProcedure
     .input(z.object({ id: z.number().int().positive() }))
     .query(async ({ ctx, input }) => {
@@ -120,6 +122,50 @@ export const watchedRouter = router({
       const owned = rows.find((r) => r.id === input.id);
       if (!owned) throw new TRPCError({ code: "NOT_FOUND", message: "Vídeo monitorado não encontrado" });
       const history = await listMetricsHistory(ctx.user.id, input.id);
-      return { youtubeId: owned.youtubeId, title: owned.title, history };
+      const now = Date.now();
+      const day = 24 * 60 * 60 * 1000;
+      const weekAgo = now - 7 * day;
+      // Médias diárias: agrupa pontos do mesmo dia em uma média
+      const dayBuckets = new Map<string, { views: number[]; likes: number[]; comments: number[] }>();
+      for (const h of history) {
+        const key = new Date(h.recordedAt).toISOString().slice(0, 10);
+        const bucket = dayBuckets.get(key) ?? { views: [], likes: [], comments: [] };
+        bucket.views.push(h.views);
+        bucket.likes.push(h.likes);
+        bucket.comments.push(h.comments);
+        dayBuckets.set(key, bucket);
+      }
+      const daily = Array.from(dayBuckets.entries())
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([date, bucket]) => ({
+          date,
+          views: Math.round(bucket.views.reduce((s, v) => s + v, 0) / bucket.views.length),
+          likes: Math.round(bucket.likes.reduce((s, v) => s + v, 0) / bucket.likes.length),
+          comments: Math.round(bucket.comments.reduce((s, v) => s + v, 0) / bucket.comments.length),
+        }));
+      // Crescimento vs. semana anterior: média dos últimos 7 dias vs. média dos 7 dias anteriores
+      const lastWeek = history.filter((h) => h.recordedAt.getTime() >= weekAgo - day);
+      const prevWeek = history.filter((h) => h.recordedAt.getTime() < weekAgo - day && h.recordedAt.getTime() >= weekAgo - 8 * day);
+      const avg = (arr: typeof history) => ({
+        views: arr.length ? Math.round(arr.reduce((s, h) => s + h.views, 0) / arr.length) : 0,
+        likes: arr.length ? Math.round(arr.reduce((s, h) => s + h.likes, 0) / arr.length) : 0,
+      });
+      const growthPercent = (prev: number, curr: number) => (prev === 0 ? (curr > 0 ? 100 : null) : Math.round(((curr - prev) / prev) * 100));
+      const lw = avg(lastWeek);
+      const pw = avg(prevWeek);
+      return {
+        youtubeId: owned.youtubeId,
+        title: owned.title,
+        history,
+        daily,
+        growth: {
+          viewsPercent: growthPercent(pw.views, lw.views),
+          likesPercent: growthPercent(pw.likes, lw.likes),
+          lastWeekAvgViews: lw.views,
+          lastWeekAvgLikes: lw.likes,
+          prevWeekAvgViews: pw.views,
+          prevWeekAvgLikes: pw.likes,
+        },
+      };
     }),
 });

@@ -126,6 +126,7 @@ export async function listAnalysesByUser(userId: number) {
       id: analyses.id,
       niche: analyses.niche,
       status: analyses.status,
+      result: analyses.result,
       createdAt: analyses.createdAt,
     })
     .from(analyses)
@@ -206,18 +207,28 @@ export async function updateUserProfile(userId: number, patch: { name?: string |
   }
   return db.select().from(users).where(eq(users.id, userId)).limit(1).then((r) => r[0]);
 }
-import { analyses as analysesTable, suggestionThumbnails, InsertSuggestionThumbnail, watchedVideos, InsertWatchedVideo } from "../drizzle/schema";
+import {
+  analyses as analysesTable,
+  suggestionThumbnails as stCols,
+  InsertSuggestionThumbnail,
+  watchedVideos,
+  InsertWatchedVideo,
+  watchedMetricsHistory,
+  InsertWatchedMetricsHistory,
+  thumbnailFolders,
+} from "../drizzle/schema";
 
 export async function saveSuggestionThumbnail(row: InsertSuggestionThumbnail) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.insert(suggestionThumbnails).values(row);
+
+  await db.insert(stCols).values(row);
 }
 
 export async function getThumbnailsByAnalysis(analysisId: string) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(suggestionThumbnails).where(eq(suggestionThumbnails.analysisId, analysisId));
+  return db.select().from(stCols).where(eq(stCols.analysisId, analysisId));
 }
 
 export async function listWatchedVideos(userId: number) {
@@ -238,7 +249,7 @@ export async function removeWatchedVideo(userId: number, id: number) {
   if (!db) throw new Error("Database not available");
   await db.delete(watchedVideos).where(and(eq(watchedVideos.id, id), eq(watchedVideos.userId, userId)));
 }
-import { watchedMetricsHistory, InsertWatchedMetricsHistory, suggestionThumbnails as stCols } from "../drizzle/schema";
+
 
 export async function setThumbnailFavorite(userId: number, thumbnailId: number, favorite: boolean) {
   const db = await getDb();
@@ -283,4 +294,75 @@ export async function listMetricsHistory(userId: number, watchedVideoId: number,
     .where(and(eq(watchedMetricsHistory.userId, userId), eq(watchedMetricsHistory.watchedVideoId, watchedVideoId)))
     .orderBy(watchedMetricsHistory.recordedAt)
     .limit(limit);
+}
+
+// ---------- Pastas da galeria de favoritos ----------
+
+export async function createThumbnailFolder(userId: number, name: string, color?: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const result = await db.insert(thumbnailFolders).values({ userId, name, color: color ?? null });
+  const id = result[0].insertId;
+  return { id };
+}
+
+export async function listThumbnailFolders(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(thumbnailFolders).where(eq(thumbnailFolders.userId, userId)).orderBy(thumbnailFolders.createdAt);
+}
+
+export async function updateThumbnailFolder(userId: number, folderId: number, patch: { name?: string; color?: string | null }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const owned = await db
+    .select({ id: thumbnailFolders.id })
+    .from(thumbnailFolders)
+    .where(and(eq(thumbnailFolders.id, folderId), eq(thumbnailFolders.userId, userId)))
+    .limit(1);
+  if (owned.length === 0) throw new Error("Pasta não encontrada");
+  await db.update(thumbnailFolders).set(patch).where(eq(thumbnailFolders.id, folderId));
+  return { success: true } as const;
+}
+
+export async function deleteThumbnailFolder(userId: number, folderId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const owned = await db
+    .select({ id: thumbnailFolders.id })
+    .from(thumbnailFolders)
+    .where(and(eq(thumbnailFolders.id, folderId), eq(thumbnailFolders.userId, userId)))
+    .limit(1);
+  if (owned.length === 0) throw new Error("Pasta não encontrada");
+  // Remove as thumbnails da pasta (volta para a raiz, mantendo os favoritos)
+  await db.update(stCols).set({ folderId: null }).where(eq(stCols.folderId, folderId));
+  await db.delete(thumbnailFolders).where(eq(thumbnailFolders.id, folderId));
+  return { success: true } as const;
+}
+
+export async function moveThumbnailToFolder(userId: number, thumbnailId: number, folderId: number | null) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  if (folderId !== null) {
+    const folder = await db
+      .select({ id: thumbnailFolders.id })
+      .from(thumbnailFolders)
+      .where(and(eq(thumbnailFolders.id, folderId), eq(thumbnailFolders.userId, userId)))
+      .limit(1);
+    if (folder.length === 0) throw new Error("Pasta não encontrada");
+  }
+  const rows = await db
+    .select({ analysisId: stCols.analysisId, favorite: stCols.favorite })
+    .from(stCols)
+    .where(eq(stCols.id, thumbnailId))
+    .limit(1);
+  if (rows.length === 0) throw new Error("Thumbnail não encontrada");
+  const owns = await db
+    .select()
+    .from(analysesTable)
+    .where(and(eq(analysesTable.id, rows[0].analysisId), eq(analysesTable.userId, userId)))
+    .limit(1);
+  if (owns.length === 0) throw new Error("Thumbnail não pertence a este usuário");
+  await db.update(stCols).set({ folderId }).where(eq(stCols.id, thumbnailId));
+  return { success: true } as const;
 }

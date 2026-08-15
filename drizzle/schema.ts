@@ -79,6 +79,8 @@ export const suggestionThumbnails = mysqlTable("suggestion_thumbnails", {
   prompt: text("prompt").notNull(),
   /** Thumbnail salva na galeria de favoritos do usuário */
   favorite: int("favorite").default(0).notNull(),
+  /** Pasta de organização da thumbnail (NULL = fora de pasta) */
+  folderId: int("folderId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -129,3 +131,18 @@ export const watchedMetricsHistory = mysqlTable("watched_metrics_history", {
 
 export type WatchedMetricsHistory = typeof watchedMetricsHistory.$inferSelect;
 export type InsertWatchedMetricsHistory = typeof watchedMetricsHistory.$inferInsert;
+
+/**
+ * Pastas da galeria de favoritos para organizar thumbnails por projeto/canal.
+ */
+export const thumbnailFolders = mysqlTable("thumbnail_folders", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  name: varchar("name", { length: 120 }).notNull(),
+  /** Cor do rótulo da pasta (hex, opcional) */
+  color: varchar("color", { length: 16 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type ThumbnailFolder = typeof thumbnailFolders.$inferSelect;
+export type InsertThumbnailFolder = typeof thumbnailFolders.$inferInsert;

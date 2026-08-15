@@ -61,3 +61,14 @@
 - [x] Frontend: galeria de favoritos (rota /favoritos + link no header) com botão de favoritar nas thumbnails
 - [x] Testes vitest das novas funcionalidades (40 testes passando)
 - [x] Verificação visual e checkpoint
+
+## Melhorias solicitadas (rodada 6)
+- [x] Backend: watched.metrics retorna médias diárias agregadas (agrupando múltiplos pontos do mesmo dia) e indicadores de crescimento % vs. semana anterior (views/likes)
+- [x] Frontend: gráfico do /monitorar exibe médias diárias + card de crescimento percentual (↑/↓ X% vs semana anterior)
+- [x] Schema: tabela thumbnail_folders (userId, name, color) + coluna folderId em suggestion_thumbnails
+- [x] Backend: CRUD de pastas (create/rename/delete) e mover thumbnail entre pastas (extended.router)
+- [x] Frontend: Favoritos com pastas (criar, renomear, excluir, mover thumbnail, filtro por pasta)
+- [x] Backend: procedure ideaOfTheDay — retorna sugestão do dia baseada no nicho principal (maior número de análises do usuário) + rotação determinística pela data
+- [x] Frontend: painel "Ideia do dia" na home (após login) com card de sugestão, score, hook, ângulo e atalhos (abrir análise completa/copiar)
+- [x] Testes vitest das novas funcionalidades (49 testes passando)
+- [x] Verificação visual (screenshots) e checkpoint

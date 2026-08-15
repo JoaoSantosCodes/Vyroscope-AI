@@ -1,13 +1,19 @@
 import SiteLayout from "@/components/SiteLayout";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { startLogin } from "@/const";
+import { scoreColor, scoreLabel } from "@/lib/score";
+import { trpc } from "@/lib/trpc";
 import {
+  Calendar,
   Clock,
   Lightbulb,
+  Loader2,
   Radar,
+  RefreshCcw,
   Sparkles,
   TrendingUp,
   Video,
@@ -21,7 +27,11 @@ const EXAMPLE_NICHES = ["inteligência artificial", "fitness", "finanças", "gam
 export default function Home() {
   const [niche, setNiche] = useState("");
   const [, navigate] = useLocation();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
+  const ideaQuery = trpc.extended.ideaOfTheDay.useQuery(undefined, {
+    enabled: isAuthenticated,
+    refetchInterval: 0,
+  });
 
   const handleAnalyze = () => {
     const trimmed = niche.trim();
@@ -95,7 +105,7 @@ export default function Home() {
             </CardContent>
           </Card>
 
-          {!isAuthenticated && (
+          {!isAuthenticated ? (
             <p className="max-w-xl text-sm text-muted-foreground">
               Análises ficam salvas no seu histórico pessoal.{" "}
               <button
@@ -106,6 +116,8 @@ export default function Home() {
               </button>{" "}
               para começar.
             </p>
+          ) : (
+            <IdeaOfTheDayCard />
           )}
         </div>
       </section>
@@ -204,5 +216,113 @@ export default function Home() {
         </div>
       </section>
     </SiteLayout>
+  );
+}
+
+function IdeaOfTheDayCard() {
+  const [, navigate] = useLocation();
+  const utils = trpc.useUtils();
+  const ideaQuery = trpc.extended.ideaOfTheDay.useQuery(undefined, { refetchInterval: 0 });
+
+  const handleRefresh = () => {
+    utils.extended.ideaOfTheDay.invalidate();
+    toast.success("Sugestão atualizada.");
+  };
+
+  return (
+    <Card className="w-full max-w-2xl border-primary/25 bg-gradient-to-br from-primary/10 via-card to-card shadow-2xl shadow-black/30">
+      <CardContent className="p-5 sm:p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/15 text-primary">
+              <Lightbulb className="h-5 w-5" />
+            </span>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Ideia do dia</p>
+              <p className="text-xs text-muted-foreground">
+                {new Date().toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long" })}
+                {ideaQuery.data?.idea ? ` · ${ideaQuery.data.idea.niche}` : ""}
+              </p>
+            </div>
+          </div>
+          {ideaQuery.data?.idea && (
+            <button
+              type="button"
+              onClick={handleRefresh}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-primary"
+            >
+              <RefreshCcw className="h-3.5 w-3.5" /> Trocar ideia
+            </button>
+          )}
+        </div>
+        {ideaQuery.isLoading ? (
+          <div className="mt-4 flex min-h-[120px] items-center justify-center">
+            <Loader2 className="h-5 w-5 animate-spin text-primary" />
+          </div>
+        ) : ideaQuery.data?.reason === "no_completed_analyses" ? (
+          <div className="mt-4 space-y-2">
+            <p className="text-sm text-muted-foreground">
+              Ainda não há análises concluídas na sua conta. Execute sua primeira análise para
+              receber ideias diárias baseadas nos padrões do seu nicho principal.
+            </p>
+            <Button variant="outline" size="sm" className="mt-2" onClick={() => {
+              const input = document.querySelector<HTMLInputElement>('input[aria-label="Nicho do seu canal"]');
+              input?.focus();
+            }}>
+              Fazer minha primeira análise
+            </Button>
+          </div>
+        ) : !ideaQuery.data?.idea ? (
+          <p className="mt-4 text-sm text-muted-foreground">
+            Não foi possível gerar uma ideia para hoje. Tente novamente mais tarde.
+          </p>
+        ) : (
+          <div className="mt-4 space-y-3">
+            <h3 className="font-display text-xl font-semibold leading-snug sm:text-2xl">
+              {ideaQuery.data.idea.suggestion.title}
+            </h3>
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`rounded-full border px-2.5 py-0.5 text-xs font-bold ${scoreColor(ideaQuery.data.idea.suggestion.viralityScore ?? 0)} border-current/25 bg-accent/50`}
+              >
+                {ideaQuery.data.idea.suggestion.viralityScore} · {scoreLabel(ideaQuery.data.idea.suggestion.viralityScore ?? 0)}
+              </span>
+              <Badge variant="outline" className="text-xs font-normal">
+                {scoreLabel(ideaQuery.data.idea.suggestion.viralityScore ?? 0)} de chance de viralização
+              </Badge>
+            </div>
+            <blockquote className="border-l-2 border-primary/50 pl-3 text-sm italic leading-relaxed text-muted-foreground">
+              {ideaQuery.data.idea.suggestion.hook}
+            </blockquote>
+            {ideaQuery.data.idea.suggestion.angle && (
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                <strong className="text-foreground">Ângulo: </strong>
+                {ideaQuery.data.idea.suggestion.angle}
+              </p>
+            )}
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              <Button size="sm" onClick={() => navigate(`/resultado/${ideaQuery.data.idea!.analysisId}`)}>
+                Abrir análise completa <Radar className="ml-2 h-4 w-4" />
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  navigator.clipboard
+                    .writeText(`${ideaQuery.data.idea!.suggestion.title}${ideaQuery.data.idea!.suggestion.hook ? `\nHook: ${ideaQuery.data.idea!.suggestion.hook}` : ""}`)
+                    .then(() => toast.success("Título e hook copiados."))
+                    .catch(() => toast.error("Não foi possível copiar."));
+                }}
+              >
+                Copiar título + hook
+              </Button>
+              <span className="ml-auto flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <Calendar className="h-3.5 w-3.5" /> rotaciona todo dia, baseada no seu nicho principal
+              </span>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

@@ -256,6 +256,18 @@ function VideoRow({
   const [chartOpen, setChartOpen] = useState(true);
   const metricsQuery = trpc.watched.metrics.useQuery({ id: video.id }, { enabled: true, refetchInterval: 0 });
 
+  const [granularity, setGranularity] = useState<"all" | "daily">("all");
+
+  const dailyData = useMemo(() => {
+    const daily = metricsQuery.data?.daily ?? [];
+    return daily.map((d) => ({
+      date: d.date,
+      views: d.views,
+      likes: d.likes,
+      comments: d.comments,
+    }));
+  }, [metricsQuery.data]);
+
   const chartData = useMemo(() => {
     if (!metricsQuery.data?.history?.length) return [];
     const points = metricsQuery.data.history.map((row) => ({
@@ -270,6 +282,8 @@ function VideoRow({
     for (const p of points) dedup.set(Math.floor(p.t / 3600_000), p);
     return Array.from(dedup.values()).sort((a, b) => a.t - b.t);
   }, [metricsQuery.data]);
+
+  const seriesData = granularity === "daily" && dailyData.length > 0 ? dailyData : chartData;
 
   const delta = useMemo(() => {
     if (video.predictedScore === null || video.performanceScore === null) return null;
@@ -305,8 +319,24 @@ function VideoRow({
                 className="flex items-center gap-1 text-muted-foreground transition-colors hover:text-primary"
               >
                 <TrendingUp className={`h-3.5 w-3.5 transition-transform duration-200 ${chartOpen ? "" : "-rotate-90"}`} />
-                {chartData.length > 1 ? `Evolução (${chartData.length} leituras)` : "Evolução (aguardando leituras)"}
+                {seriesData.length > 1 ? `Evolução (${seriesData.length} ${granularity === "daily" ? "médias diárias" : "leituras"})` : "Evolução (aguardando leituras)"}
               </button>
+              <span className="flex items-center gap-1 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setGranularity("all")}
+                  className={`rounded-md px-2 py-0.5 transition-colors ${granularity === "all" ? "bg-primary/15 font-medium text-primary" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  Todas as leituras
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGranularity("daily")}
+                  className={`rounded-md px-2 py-0.5 transition-colors ${granularity === "daily" ? "bg-primary/15 font-medium text-primary" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  Médias diárias
+                </button>
+              </span>
               {video.performanceScore !== null && (
                 <div className="flex items-center gap-1.5">
                   <span className={`rounded-full border px-2.5 py-0.5 font-bold ${scoreColor(video.performanceScore)} border-current/25 bg-accent/50`}>
@@ -358,25 +388,47 @@ function VideoRow({
           <div className="mt-4 border-t border-border/50 pt-4">
             {metricsQuery.isLoading ? (
               <Skeleton className="h-48 w-full" />
-            ) : chartData.length < 2 ? (
+            ) : seriesData.length < 2 ? (
               <p className="flex items-center justify-center gap-2 py-6 text-center text-xs text-muted-foreground">
                 <Clock className="h-3.5 w-3.5" /> Atualize as métricas mais de uma vez ao longo do tempo para ver o gráfico de evolução de visualizações e curtidas.
               </p>
             ) : (
-              <div className="grid gap-4 lg:grid-cols-2">
+              <>
+                {/* Indicadores de crescimento vs. semana anterior */}
+                {metricsQuery.data?.growth && (
+                  <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <GrowthCard
+                      label="Visualizações"
+                      icon={<Eye className="h-4 w-4" />}
+                      percent={metricsQuery.data.growth.viewsPercent}
+                      current={metricsQuery.data.growth.lastWeekAvgViews}
+                      previous={metricsQuery.data.growth.prevWeekAvgViews}
+                      metricName="visualizações"
+                    />
+                    <GrowthCard
+                      label="Curtidas"
+                      icon={<ThumbsUp className="h-4 w-4" />}
+                      percent={metricsQuery.data.growth.likesPercent}
+                      current={metricsQuery.data.growth.lastWeekAvgLikes}
+                      previous={metricsQuery.data.growth.prevWeekAvgLikes}
+                      metricName="curtidas"
+                    />
+                  </div>
+                )}
+                <div className="grid gap-4 lg:grid-cols-2">
                 <div>
                   <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
                     <Eye className="h-3 w-3" /> Visualizações
                   </p>
                   <div className="h-44">
                     <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={chartData} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+                      <LineChart data={seriesData} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
                         <XAxis dataKey="date" tick={{ fontSize: 10, fill: "currentColor" }} tickFormatter={(v) => (v as string).slice(0, 10)} stroke="currentColor" opacity={0.5} />
                         <YAxis tick={{ fontSize: 10, fill: "currentColor" }} tickFormatter={(v) => formatCompact(v as number)} stroke="currentColor" opacity={0.5} width={42} />
                         <Tooltip
                           contentStyle={{ background: "var(--popover)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }}
                           formatter={(value: number) => [formatCompact(value), "Visualizações"]}
-                          labelFormatter={(label) => `Atualizado em ${label}`}
+                          labelFormatter={(label) => granularity === "daily" ? `Média do dia ${label}` : `Atualizado em ${label}`}
                         />
                         <Line type="monotone" dataKey="views" stroke="var(--primary)" strokeWidth={2} dot={false} isAnimationActive={false} />
                       </LineChart>
@@ -389,13 +441,13 @@ function VideoRow({
                   </p>
                   <div className="h-44">
                     <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={chartData} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+                      <LineChart data={seriesData} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
                         <XAxis dataKey="date" tick={{ fontSize: 10, fill: "currentColor" }} tickFormatter={(v) => (v as string).slice(0, 10)} stroke="currentColor" opacity={0.5} />
                         <YAxis tick={{ fontSize: 10, fill: "currentColor" }} tickFormatter={(v) => formatCompact(v as number)} stroke="currentColor" opacity={0.5} width={42} />
                         <Tooltip
                           contentStyle={{ background: "var(--popover)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }}
                           formatter={(value: number) => [formatCompact(value), "Curtidas"]}
-                          labelFormatter={(label) => `Atualizado em ${label}`}
+                          labelFormatter={(label) => granularity === "daily" ? `Média do dia ${label}` : `Atualizado em ${label}`}
                         />
                         <Line type="monotone" dataKey="likes" stroke="var(--primary)" strokeWidth={2} dot={false} isAnimationActive={false} />
                       </LineChart>
@@ -403,10 +455,58 @@ function VideoRow({
                   </div>
                 </div>
               </div>
+              </>
             )}
           </div>
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function GrowthCard({
+  label,
+  icon,
+  percent,
+  current,
+  previous,
+  metricName,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  percent: number | null;
+  current: number;
+  previous: number;
+  metricName: string;
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-border/60 bg-accent/30 px-3 py-2.5">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/15 text-primary">{icon}</span>
+      <div className="min-w-0">
+        <p className="text-xs text-muted-foreground">{label} · média última semana: {formatCompact(current)}</p>
+        {percent === null ? (
+          <p className="text-xs text-muted-foreground">sem dados da semana anterior</p>
+        ) : percent === 100 && previous === 0 ? (
+          <p className="flex items-center gap-1 text-xs font-semibold text-emerald-400">
+            <ArrowUpRight className="h-3.5 w-3.5" /> nova atividade — +{percent}% vs. semana anterior
+          </p>
+        ) : percent > 0 ? (
+          <p className="flex items-center gap-1 text-xs font-semibold text-emerald-400">
+            <ArrowUpRight className="h-3.5 w-3.5" /> +{percent}% vs. semana anterior
+          </p>
+        ) : percent === 0 ? (
+          <p className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+            <TrendingUp className="h-3.5 w-3.5" /> estável (0%) vs. semana anterior
+          </p>
+        ) : (
+          <p className="flex items-center gap-1 text-xs font-semibold text-destructive">
+            <TrendingUp className="h-3.5 w-3.5 rotate-180" /> {percent}% vs. semana anterior
+          </p>
+        )}
+        <p className="truncate text-[11px] text-muted-foreground/70">
+          média da semana anterior: {formatCompact(previous)} {metricName}
+        </p>
+      </div>
+    </div>
   );
 }
