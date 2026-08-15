@@ -3,6 +3,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
 import { analysisRouter } from "./routers/analysis";
+import { extendedRouter } from "./routers/extended";
 import { profileRouter } from "./routers/profile";
 
 export const appRouter = router({
@@ -21,6 +22,7 @@ export const appRouter = router({
 
   analysis: analysisRouter,
   profile: profileRouter,
+  extended: extendedRouter,
 
   // TODO: add feature routers here, e.g.
   // todo: router({

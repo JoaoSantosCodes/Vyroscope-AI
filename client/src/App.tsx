@@ -5,6 +5,7 @@ import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Analysis from "./pages/Analysis";
+import Compare from "./pages/Compare";
 import History from "./pages/History";
 import Home from "./pages/Home";
 import Profile from "./pages/Profile";
@@ -18,6 +19,7 @@ function Router() {
       <Route path={"/analise"} component={Analysis} />
       <Route path={"/resultado/:id"} component={Result} />
       <Route path={"/historico"} component={History} />
+      <Route path={"/comparador"} component={Compare} />
       <Route path={"/perfil"} component={Profile} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}

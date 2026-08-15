@@ -28,3 +28,14 @@
 - [x] Filtro/ordenação no dashboard por duração
 - [x] Barra de progresso detalhada durante a análise (etapas reais via backend, coluna progressStep)
 - [x] Área de perfil do usuário (rota /perfil, dados da conta, estatísticas, edição de nome/email)
+
+## Melhorias solicitadas (rodada 3)
+- [x] Gerador de roteiro estendido a partir de uma sugestão (roteiro 1.500–3.000 palavras com tela, B-roll e CTAs)
+- [x] Botão "Gerar roteiro" no card de cada sugestão no dashboard de resultado
+- [x] Modal de visualização do roteiro gerado (ScriptDialog) com abas e exportação (copiar + TXT)
+- [x] Comparador de nichos: analisar 2 nichos lado a lado (vídeos em alta + padrões + veredito)
+- [x] Rota /comparador com interface de seleção de 2 nichos e relatório comparativo
+- [x] Agenda de conteúdo: transformar sugestões numa agenda de 4 semanas (1 vídeo/semana)
+- [x] Visualização da agenda no dashboard (nova aba "Agenda do mês")
+- [x] Testes vitest das novas funcionalidades (27 testes passando)
+- [x] Verificação visual (screenshots desktop)

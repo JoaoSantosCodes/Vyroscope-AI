@@ -23,14 +23,17 @@ import {
   Flame,
   MessageCircle,
   Radar,
+  Loader2,
   RotateCcw,
   Sparkles,
   Trash2,
   ThumbsUp,
   TrendingUp,
 } from "lucide-react";
+import { Calendar as CalendarIcon } from "lucide-react";
 import { exportAnalysisCsv, exportAnalysisPdf } from "@/lib/export";
 import { useMemo, useState } from "react";
+import ScriptDialog from "@/components/ScriptDialog";
 import { toast } from "sonner";
 import { useLocation, useParams } from "wouter";
 
@@ -126,7 +129,7 @@ export default function Result() {
         {isRunning && <StillRunning />}
         {isFailed && <FailedState message={data.errorMessage ?? "Erro desconhecido"} niche={data.niche} />}
         {!isRunning && !isFailed && data.result && (
-          <Dashboard result={data.result} videos={data.videos} />
+          <Dashboard result={data.result} videos={data.videos} analysisId={data.id} />
         )}
       </div>
     </SiteLayout>
@@ -255,13 +258,19 @@ type VideoWithScore = {
 function Dashboard({
   result,
   videos,
+  analysisId,
 }: {
   result: AnalysisResult;
   videos: VideoWithScore[];
+  analysisId: string;
 }) {
   const patterns = [...(result.patterns ?? [])].sort((a, b) => b.score - a.score);
   const [sortBy, setSortBy] = useState<"score" | "duration">("score");
   const suggestions = useMemoSortedSuggestions(result.suggestions ?? [], sortBy);
+  const generateAgendaMutation = trpc.extended.generateAgenda.useMutation({
+    onError: (err) => toast.error(err.message),
+  });
+  const agenda = generateAgendaMutation.data;
   const videoMap = new Map(videos.map((v) => [v.youtubeId, v]));
   const scoredVideos = (result.videoScores ?? [])
     .map((s) => ({ ...s, video: videoMap.get(s.videoId) }))
@@ -270,10 +279,11 @@ function Dashboard({
 
   return (
     <Tabs defaultValue="suggestions" className="space-y-8">
-      <TabsList className="grid w-full grid-cols-3">
+      <TabsList className="grid w-full grid-cols-4">
         <TabsTrigger value="suggestions">Sugestões para gravar</TabsTrigger>
         <TabsTrigger value="patterns">Padrões de viralidade</TabsTrigger>
         <TabsTrigger value="videos">Vídeos analisados</TabsTrigger>
+        <TabsTrigger value="agenda">Agenda do mês</TabsTrigger>
       </TabsList>
 
       <TabsContent value="suggestions" className="space-y-5">
@@ -288,7 +298,7 @@ function Dashboard({
           </div>
         </div>
         {suggestions.map((s, i) => (
-          <SuggestionCard key={i} suggestion={s} index={i} />
+          <SuggestionCard key={i} suggestion={s} index={i} analysisId={analysisId} />
         ))}
       </TabsContent>
 
@@ -313,6 +323,62 @@ function Dashboard({
             </Card>
           ))}
         </div>
+      </TabsContent>
+
+      <TabsContent value="agenda">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <p className="max-w-2xl text-sm text-muted-foreground">
+            Plano de publicação de 4 semanas (1 vídeo por semana), sequenciado para ganhar tração
+            inicial e sustentar o crescimento do canal.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => generateAgendaMutation.mutate({ analysisId })}
+            disabled={generateAgendaMutation.isPending}
+          >
+            {generateAgendaMutation.isPending ? (
+              <>
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Gerando agenda…
+              </>
+            ) : (
+              <>
+                <CalendarIcon className="mr-1.5 h-3.5 w-3.5" /> Gerar agenda do mês
+              </>
+            )}
+          </Button>
+        </div>
+        {agenda ? (
+          <div className="space-y-4">
+            <div className="rounded-lg border border-primary/30 bg-accent/20 p-4 text-sm leading-relaxed">
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-primary">Estratégia do mês</p>
+              {agenda.strategy}
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              {[...agenda.items].sort((a, b) => a.week - b.week).map((item) => (
+                <Card key={item.week} className="border-border/60">
+                  <CardContent className="p-5">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-xs font-bold uppercase tracking-[0.15em] text-primary">Semana {item.week}</p>
+                      <ScorePill score={item.viralityScore} />
+                    </div>
+                    <h3 className="mt-2 text-base font-semibold leading-snug">{item.title}</h3>
+                    <p className="mt-1.5 text-sm italic text-muted-foreground">“{item.hook}”</p>
+                    <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" /> {item.targetLength}</span>
+                      <span>{item.goal}</span>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="flex min-h-[24vh] flex-col items-center justify-center gap-3 text-center">
+            <CalendarIcon className="h-9 w-9 text-muted-foreground/40" />
+            <p className="text-sm text-muted-foreground">Nenhuma agenda gerada ainda para esta análise.</p>
+          </div>
+        )}
       </TabsContent>
 
       <TabsContent value="videos">
@@ -383,11 +449,18 @@ function ScorePill({ score }: { score: number }) {
 function SuggestionCard({
   suggestion,
   index,
+  analysisId,
 }: {
   suggestion: NonNullable<AnalysisResult["suggestions"]>[number];
   index: number;
+  analysisId: string;
 }) {
   const [copied, setCopied] = useState(false);
+  const [scriptDialog, setScriptDialog] = useState(false);
+  const generateScriptMutation = trpc.extended.generateScript.useMutation({
+    onSuccess: () => setScriptDialog(true),
+    onError: (err) => toast.error(err.message),
+  });
 
   const copyAll = async () => {
     const text = [
@@ -423,15 +496,41 @@ function SuggestionCard({
               </div>
             </div>
           </div>
-          <Button variant="outline" size="sm" onClick={copyAll}>
-            {copied ? (
-              <>Copiado</>
-            ) : (
-              <>
-                <Copy className="mr-1.5 h-3.5 w-3.5" /> Copiar tudo
-              </>
-            )}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => generateScriptMutation.mutate({ analysisId, suggestionIndex: index })}
+              disabled={generateScriptMutation.isPending}
+            >
+              {generateScriptMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Gerando…
+                </>
+              ) : (
+                <>
+                  <Sparkles className="mr-1.5 h-3.5 w-3.5" /> Gerar roteiro
+                </>
+              )}
+            </Button>
+            <Button variant="outline" size="sm" onClick={copyAll}>
+              {copied ? (
+                <>Copiado</>
+              ) : (
+                <>
+                  <Copy className="mr-1.5 h-3.5 w-3.5" /> Copiar tudo
+                </>
+              )}
+            </Button>
+          </div>
+        {scriptDialog && generateScriptMutation.data && (
+          <ScriptDialog
+            suggestion={suggestion}
+            script={generateScriptMutation.data}
+            open={scriptDialog}
+            onOpenChange={setScriptDialog}
+          />
+        )}
         </div>
 
         <div className="mt-5 grid gap-4 md:grid-cols-2">

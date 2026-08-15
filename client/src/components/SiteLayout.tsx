@@ -44,6 +44,16 @@ export default function SiteLayout({ children }: { children: React.ReactNode }) 
             </Link>
             {isAuthenticated && (
               <Link
+                href="/comparador"
+                className={`rounded-md px-3.5 py-2 text-sm font-medium transition-colors ${
+                  location === "/comparador" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Comparador
+              </Link>
+            )}
+            {isAuthenticated && (
+              <Link
                 href="/historico"
                 className={`rounded-md px-3.5 py-2 text-sm font-medium transition-colors ${
                   location === "/historico" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground"
