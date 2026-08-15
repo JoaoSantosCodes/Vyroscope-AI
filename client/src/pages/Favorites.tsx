@@ -253,11 +253,11 @@ export default function Favorites() {
       const previous = utils.extended.listFavorites.getData();
       utils.extended.listFavorites.setData(undefined, (old) => {
         if (!old) return old;
-        return old.map((row) =>
-          row.suggestion_thumbnails.id === thumbnailId
-            ? { ...row, suggestion_thumbnails: { ...row.suggestion_thumbnails, favorite: favorite ? 1 : 0 } }
-            : row
-        );
+        // Ao desfavoritar, remove imediatamente da galeria (mantém re-favoritar no invalidate)
+        if (!favorite) {
+          return old.filter((row) => row.suggestion_thumbnails.id !== thumbnailId);
+        }
+        return old;
       });
       return { previous };
     },

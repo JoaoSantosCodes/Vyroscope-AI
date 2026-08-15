@@ -91,9 +91,13 @@
 - [x] Verificação visual e checkpoint
 
 ## Melhorias solicitadas (rodada 10)
-- [ ] Atualizar habilidade vyroscope-video-analyst (skill-creator) com todo o processo usado até aqui (skill já existe em /home/ubuntu/skills/vyroscope-video-analyst)
-- [ ] PDF de favoritos: incluir título sugerido associado a cada thumbnail na exportação (buildFavoritesPdf)
-- [ ] Favoritos: contador de thumbnails por pasta atualizado em tempo real durante ações em lote
-- [ ] Favoritos: atalho de teclado Ctrl+A para selecionar todas as thumbnails na galeria
-- [ ] Testes vitest das novas funcionalidades
-- [ ] Verificação visual e checkpoint
+- [x] Atualizar habilidade vyroscope-video-analyst (skill-creator) com todo o processo usado até aqui (SKILL.md reescrito com 7 passos + referência features-roadmap.md; validada)
+- [x] PDF de favoritos: incluir título sugerido associado a cada thumbnail na exportação (seção "SUGESTÃO ASSOCIADA" em buildFavoritesPdf)
+- [x] Favoritos: contador de thumbnails por pasta atualizado em tempo real durante ações em lote (countInFolder reativo ao cache otimista)
+- [x] Favoritos: atalho de teclado Ctrl+A (Meta+A) para selecionar todas as thumbnails visíveis na galeria
+- [x] Testes vitest das novas funcionalidades (59 testes passando)
+- [x] Verificação visual e checkpoint
+
+## Revisão pós-rodada 10
+- [x] Correção de otimização: toggleFavorite com favorite=false agora remove o item imediatamente da galeria (desfavoritar em lote com contadores atualizados em tempo real)
+- [x] Teste vitest novo: buildFavoritesPdf valida no texto extraído do PDF os títulos das sugestões associadas e nomes de pastas (60 testes passando)

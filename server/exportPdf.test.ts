@@ -160,6 +160,54 @@ describe("buildFavoritesPdf", () => {
     await expect(buildFavoritesPdf([])).rejects.toThrow();
   });
 
+  it("inclui os títulos das sugestões associadas a cada thumbnail no texto do PDF", async () => {
+    const { execaSync } = await import("pdf-parse");
+    const buffer = await buildFavoritesPdf(sampleFavoritesRows);
+    // As classes ESM do pdf-parse 2.x quebram dentro do ambiente vitest (VerbosityLevel
+    // undefined). Validar o conteúdo textual fora do vitest via o CLI executável do pacote.
+    const { spawnSync } = await import("node:child_process");
+    const { writeFileSync, mkdtempSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const tmp = mkdtempSync("/tmp/pdf-test-");
+    const file = join(tmp, "fav.pdf");
+    writeFileSync(file, buffer);
+    // pdf-parse 2.x é ESM e não exporta package.json; localizar cli.mjs pelo main do pacote
+    const mainModule = await import("pdf-parse");
+    const mainUrl = (mainModule as unknown as { __filename?: string }).__filename;
+    let cli = "";
+    if (mainUrl && mainUrl.endsWith("index.js")) {
+      cli = mainUrl.replace(/index\.js$/, "bin/cli.mjs");
+    }
+    if (!cli) {
+      const candidates = [
+        join(import.meta.dirname!, "node_modules/pdf-parse/bin/cli.mjs"),
+        join(import.meta.dirname!, "../node_modules/.pnpm/node_modules/pdf-parse/bin/cli.mjs"),
+        "/home/ubuntu/vyroscope-ai/node_modules/pdf-parse/bin/cli.mjs",
+      ];
+      for (const c of candidates) {
+        try {
+          await import("node:fs/promises").then((fs) => fs.access(c));
+          cli = c;
+          break;
+        } catch {
+          /* não existe */
+        }
+      }
+    }
+    if (!cli) throw new Error("cli.mjs do pdf-parse não encontrado");
+    const run = spawnSync(process.execPath, [cli, "text", file], { encoding: "utf-8", cwd: import.meta.dirname });
+    const text = run.stdout + run.stderr;
+    // Título da sugestão associada à thumbnail com folder
+    // Validar que o CLI pdf-parse está disponível antes de depender dele
+    if (run.status !== 0) throw new Error(`pdf-parse CLI falhou: ${text}`);
+    expect(text).toContain("Vídeo reordenado número um");
+    // Thumbnails sem pasta ficam na seção raiz com seus títulos
+    expect(text).toContain("Thumbnail raiz");
+    // Nomes de pastas também devem constar no PDF
+    // O pdfkit espaça os cabeçalhos de pasta (C A N A L P R I N C I P A L)
+    expect(text.replace(/[\s ]/g, "").toUpperCase()).toContain("CANALPRINCIPAL");
+  });
+
   it("tenta baixar as imagens e ainda gera o PDF mesmo com imagem falha", async () => {
     const broken = [
       {
