@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import type { AnalysisResult } from "../analysis";
-import { analyzeNicheComparison, buildThumbnailPrompt, generateAlternativeTitles, generateContentAgenda, generateExtendedScript } from "../extended";
+import { analyzeNicheComparison, buildThumbnailPrompt, generateAlternativeTitles, generateContentAgenda, generateExtendedScript, generateOutline } from "../extended";
 import { fetchTrendingVideosForNiche } from "../youtube";
 import { protectedProcedure, router } from "../_core/trpc";
 
@@ -259,6 +259,36 @@ export const extendedRouter = router({
       },
       reason: null,
     } as const;
+  }),
+
+  /** Gera um esboço de roteiro automático a partir da sugestão da ideia do dia do usuário. */
+  generateIdeaOutline: protectedProcedure.mutation(async ({ ctx }) => {
+    const { listAnalysesByUser } = await import("../db");
+    const analyses = await listAnalysesByUser(ctx.user.id);
+    const completed = analyses.filter((a) => a.status === "completed" && a.result);
+    if (completed.length === 0) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Você ainda não concluiu nenhuma análise para gerar um esboço." });
+    }
+    const byNiche = new Map<string, typeof completed>();
+    for (const a of completed) {
+      const list = byNiche.get(a.niche) ?? [];
+      list.push(a);
+      byNiche.set(a.niche, list);
+    }
+    const primaryNiche = Array.from(byNiche.entries()).sort(
+      (a, b) => b[1].length - a[1].length || new Date(b[1][0].createdAt).getTime() - new Date(a[1][0].createdAt).getTime()
+    )[0][0];
+    const nicheAnalyses = byNiche.get(primaryNiche)!.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const dayIndex = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
+    const analysis = nicheAnalyses[dayIndex % nicheAnalyses.length];
+    const result = parseResult(analysis.result);
+    if (!result || !result.suggestions?.length) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Não há sugestões disponíveis na análise escolhida." });
+    }
+    const topSuggestions = [...result.suggestions].sort((a, b) => (b.viralityScore ?? 0) - (a.viralityScore ?? 0));
+    const suggestion = topSuggestions[dayIndex % topSuggestions.length];
+    const outline = await generateOutline(primaryNiche, suggestion, result.patterns ?? []);
+    return { niche: primaryNiche, analysisId: analysis.id, suggestion, outline };
   }),
 
   /** Gera agenda de conteúdo de 4 semanas a partir das sugestões de uma análise. */

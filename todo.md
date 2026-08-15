@@ -72,3 +72,11 @@
 - [x] Frontend: painel "Ideia do dia" na home (após login) com card de sugestão, score, hook, ângulo e atalhos (abrir análise completa/copiar)
 - [x] Testes vitest das novas funcionalidades (49 testes passando)
 - [x] Verificação visual (screenshots) e checkpoint
+
+## Melhorias solicitadas (rodada 7)
+- [x] Backend: endpoint para gerar esboço de roteiro (resumo estruturado, não o roteiro completo de 1.5k palavras) a partir da sugestão da ideia do dia (generateIdeaOutline)
+- [x] Frontend: botão "Gerar esboço de roteiro" no painel Ideia do dia com modal de resultado (copiar/exportar TXT)
+- [x] Frontend: drag-and-drop de thumbnails entre pastas na galeria de Favoritos (HTML5 DnD API: cards arrastáveis + pills como drop targets com destaque)
+- [x] Frontend: tooltip nos growth cards do /monitorar com os números exatos (médias da semana atual e anterior usadas no cálculo %)
+- [x] Testes vitest das novas funcionalidades (52 testes passando)
+- [x] Verificação visual (screenshots) e checkpoint

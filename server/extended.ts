@@ -14,6 +14,14 @@ export type ScriptSection = {
   dialogue: string;
 };
 
+export type ScriptOutline = {
+  title: string;
+  totalLength: string;
+  /** Esboço estruturado em 3 atos (abertura, desenvolvimento, fechamento) */
+  acts: { act: string; label: string; duration: string; points: string[]; keyLine: string }[];
+  notes: string[];
+};
+
 export type ExtendedScript = {
   title: string;
   totalLength: string;
@@ -99,6 +107,79 @@ export async function generateExtendedScript(
   }
   parsed.title = suggestion.title;
   if (!Array.isArray(parsed.sections) || !parsed.sections.length) {
+    throw new Error("llm_invalid_structure");
+  }
+  return parsed;
+}
+
+const OUTLINE_SCHEMA = {
+  type: "json_schema",
+  json_schema: {
+    name: "script_outline",
+    strict: true,
+    schema: {
+      type: "object",
+      properties: {
+        totalLength: { type: "string", description: "Duração alvo total do vídeo" },
+        acts: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              act: { type: "string", description: "Identificador do ato, ex: 'abertura', 'desenvolvimento', 'fechamento'" },
+              label: { type: "string", description: "Nome curto do ato em português, ex: 'Abertura com hook'" },
+              duration: { type: "string", description: "Duração estimada do ato, ex: '0:00–0:45'" },
+              points: { type: "array", items: { type: "string" }, description: "2 a 4 tópicos que devem ser cobertos neste ato" },
+              keyLine: { type: "string", description: "Fala-chave literal sugerida para o ato" },
+            },
+            required: ["act", "label", "duration", "points", "keyLine"],
+            additionalProperties: false,
+          },
+          minItems: 3,
+          maxItems: 3,
+        },
+        notes: {
+          type: "array",
+          items: { type: "string" },
+          description: "Notas de produção (thumbnail, edição, CTA, retenção)",
+        },
+      },
+      required: ["totalLength", "acts", "notes"],
+      additionalProperties: false,
+    },
+  },
+} as const;
+
+/**
+ * Gera um esboço de roteiro compacto a partir de uma sugestão,
+ * enriquecido com os padrões de viralidade do nicho.
+ */
+export async function generateOutline(niche: string, suggestion: Suggestion, patterns: ViralityPattern[]): Promise<ScriptOutline> {
+  const patternsText = patterns.slice(0, 3).map((p) => `• ${p.pattern} (score ${p.score}): ${p.explanation}`).join("\n");
+  const messages: LlmMessage[] = [
+    {
+      role: "system",
+      content: `Você é um roteirista sênior de YouTube que transforma sugestões de vídeo em esboços de roteiro prontos para gravar. Escreva sempre em português brasileiro, com linguagem natural de criador de conteúdo, sem clichês de marketing. Responda apenas com o JSON solicitado.`,
+    },
+    {
+      role: "user",
+      content: `Nicho: "${niche}"\n\nPadrões de viralidade do nicho:\n${patternsText}\n\nSugestão escolhida:\n• Título: ${suggestion.title}\n• Hook de abertura: ${suggestion.hook}\n• Ângulo: ${suggestion.angle}\n• Estrutura narrativa: ${suggestion.narrativeStructure}\n• Duração alvo: ${suggestion.targetLength}\n• Score: ${suggestion.viralityScore}\n\nInstruções:\n1. Retorne exatamente 3 atos (abertura, desenvolvimento, fechamento), cada um com 2 a 4 tópicos concretos e uma fala-chave literal.\n2. Divida a duração alvo de forma realista entre os atos (abertura curta, ~10% do total).\n3. Aplique os padrões de viralidade do nicho e mantenha o ângulo único da sugestão.\n4. Em notes, liste 3–5 notas práticas de produção.`,
+    },
+  ];
+
+  const response = await invokeLLM({ messages, response_format: OUTLINE_SCHEMA });
+  const raw = response.choices[0]?.message?.content;
+  if (!raw || typeof raw !== "string") {
+    throw new Error("llm_empty_response");
+  }
+  let parsed: ScriptOutline;
+  try {
+    parsed = JSON.parse(raw) as ScriptOutline;
+  } catch {
+    throw new Error("llm_invalid_json");
+  }
+  parsed.title = suggestion.title;
+  if (!Array.isArray(parsed.acts) || parsed.acts.length < 3) {
     throw new Error("llm_invalid_structure");
   }
   return parsed;

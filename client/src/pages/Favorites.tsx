@@ -78,6 +78,30 @@ export default function Favorites() {
   const [renameTarget, setRenameTarget] = useState<{ id: number; name: string } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null);
   const [moveTarget, setMoveTarget] = useState<{ thumbnailId: number; currentName: string; currentFolderId: number | null } | null>(null);
+  const [draggedId, setDraggedId] = useState<number | null>(null);
+  const [dropOverFolder, setDropOverFolder] = useState<number | null>(null);
+
+  const handleDragStart = (e: React.DragEvent, thumbnailId: number) => {
+    setDraggedId(thumbnailId);
+    e.dataTransfer.setData("text/plain", String(thumbnailId));
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDragEnd = () => {
+    setDraggedId(null);
+    setDropOverFolder(null);
+  };
+
+  const handleDrop = (e: React.DragEvent, targetFolderId: number | null) => {
+    e.preventDefault();
+    setDropOverFolder(null);
+    const raw = e.dataTransfer.getData("text/plain");
+    const id = Number(raw);
+    if (!Number.isFinite(id)) return;
+    moveMutation.mutate({ thumbnailId: id, folderId: targetFolderId });
+    const destName = folderName(targetFolderId);
+    toast.success(destName ? `Movida para "${destName}".` : "Movida para a galeria.");
+  };
 
   const toggleMutation = trpc.extended.toggleFavorite.useMutation({
     onMutate: async ({ thumbnailId, favorite }) => {
@@ -206,11 +230,18 @@ export default function Favorites() {
           <button
             type="button"
             onClick={() => setFolderFilter(null)}
+            onDragOver={(e) => {
+              if (draggedId !== null) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+              }
+            }}
+            onDrop={(e) => handleDrop(e, null)}
             className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-medium transition-colors ${
               folderFilter === null
                 ? "border-primary bg-primary/15 text-primary"
                 : "border-border text-muted-foreground hover:text-foreground"
-            }`}
+            } ${draggedId !== null ? "border-primary/60 bg-primary/10" : ""}`}
           >
             <Heart className="h-3.5 w-3.5" />
             Todas ({items.length})
@@ -220,16 +251,27 @@ export default function Favorites() {
               <button
                 type="button"
                 onClick={() => setFolderFilter(f.id)}
+                onDragOver={(e) => {
+                  if (draggedId !== null) {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    setDropOverFolder(f.id);
+                  }
+                }}
+                onDragLeave={() => setDropOverFolder((prev) => (prev === f.id ? null : prev))}
+                onDrop={(e) => handleDrop(e, f.id)}
                 className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-medium transition-colors ${
-                  folderFilter === f.id
-                    ? "border-primary bg-primary/15 text-primary"
-                    : "border-border text-muted-foreground hover:text-foreground"
+                  dropOverFolder === f.id
+                    ? "border-primary bg-primary/25 text-primary ring-2 ring-primary/40"
+                    : folderFilter === f.id
+                      ? "border-primary bg-primary/15 text-primary"
+                      : "border-border text-muted-foreground hover:text-foreground"
                 }`}
               >
                 <span className="h-2 w-2 rounded-full" style={{ background: f.color ?? "#f59e0b" }} />
                 {f.name} ({countInFolder(f.id)})
               </button>
-              <div className="absolute -top-0.5 right-0 hidden translate-y-1/2 group-hover:flex">
+              <div className={`absolute -top-0.5 right-0 hidden translate-y-1/2 group-hover:flex ${dropOverFolder === f.id ? "!flex" : ""}`}>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <button
@@ -306,7 +348,14 @@ export default function Favorites() {
               const folder = folderName(t.folderId);
               const color = folderColor(t.folderId);
               return (
-                <Card key={t.id} className="group overflow-hidden border-border/60 transition-colors hover:border-primary/30">
+                <Card
+                  key={t.id}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, t.id)}
+                  onDragEnd={handleDragEnd}
+                  className={`group cursor-grab overflow-hidden border-border/60 transition-all hover:border-primary/30 active:cursor-grabbing ${draggedId === t.id ? "scale-[0.97] opacity-50" : ""}`}
+                  title="Arraste e solte em uma pasta acima para movê-la"
+                >
                   <CardContent className="p-0">
                     <div className="relative aspect-video overflow-hidden bg-background/60">
                       <img

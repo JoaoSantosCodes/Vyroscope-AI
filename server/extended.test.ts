@@ -411,3 +411,59 @@ describe("extended.ideaOfTheDay", () => {
     expect(result).toEqual({ idea: null, reason: "no_suggestions" });
   });
 });
+
+describe("extended.generateIdeaOutline", () => {
+  function outlineRow(id: string, niche: string, createdAt: Date, suggestions: unknown[] = []) {
+    return {
+      id,
+      userId: 2,
+      niche,
+      status: "completed",
+      result: JSON.stringify({ suggestions, videos: [], patterns: [] }),
+      createdAt,
+      updatedAt: createdAt,
+    } as never;
+  }
+
+  it("throws when the user has no completed analyses", async () => {
+    mockedListAnalyses.mockResolvedValueOnce([] as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    await expect(caller.extended.generateIdeaOutline()).rejects.toThrow("análise");
+  });
+
+  it("generates an outline from the primary niche suggestion of the day", async () => {
+    const outlinePayload = {
+      title: "Como fazer X em 10 min",
+      totalLength: "8-12 min",
+      acts: [
+        { act: "open", label: "Abertura", duration: "1-2 min", points: ["gancho inicial"], keyLine: "fique até o final" },
+        { act: "body", label: "Desenvolvimento", duration: "5-7 min", points: ["conteúdo"], keyLine: "o segredo é" },
+        { act: "close", label: "Fechamento", duration: "1-2 min", points: ["CTA"], keyLine: "inscreva-se" },
+      ],
+      notes: ["usar cortes rápidos"],
+    };
+    mockedInvokeLLM.mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify(outlinePayload) } }] } as never);
+
+    const a = outlineRow("a1", "fitness", new Date("2026-08-01"), [
+      { title: "Treino de 10 min", hook: "Acorde e treine", angle: "Rotina rápida", viralityScore: 88 },
+    ]);
+    mockedListAnalyses.mockResolvedValueOnce([a] as never);
+
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.generateIdeaOutline();
+
+    expect(result.niche).toBe("fitness");
+    expect(result.analysisId).toBe("a1");
+    // O título do outline é padronizado com o título da sugestão pelo backend
+    expect(result.outline.title).toBe("Treino de 10 min");
+    expect(result.outline.acts).toHaveLength(3);
+    expect(mockedInvokeLLM).toHaveBeenCalled();
+  });
+
+  it("throws when the chosen analysis has no suggestions", async () => {
+    mockedInvokeLLM.mockClear();
+    mockedListAnalyses.mockResolvedValueOnce([outlineRow("a2", "games", new Date())] as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    await expect(caller.extended.generateIdeaOutline()).rejects.toThrow("sugestões");
+  });
+});

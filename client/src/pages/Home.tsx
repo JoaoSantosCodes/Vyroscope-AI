@@ -19,7 +19,9 @@ import {
   Video,
 } from "lucide-react";
 import { useState } from "react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { FileText } from "lucide-react";
 import { useLocation } from "wouter";
 
 const EXAMPLE_NICHES = ["inteligência artificial", "fitness", "finanças", "games", "produtividade", "moda"];
@@ -219,10 +221,117 @@ export default function Home() {
   );
 }
 
+function OutlineDialog({ outline, onOpenChange }: { outline: { niche: string; analysisId: string; suggestion: { title: string; viralityScore: number | null } | null; outline: { title: string; totalLength: string; acts: { act: string; label: string; duration: string; points: string[]; keyLine: string }[]; notes: string[] } } | null; onOpenChange: (open: boolean) => void }) {
+  const handleCopy = async () => {
+    if (!outline) return;
+    const text = [
+      `# ${outline.outline.title}`,
+      ``,
+      `Duração alvo: ${outline.outline.totalLength}`,
+      ``,
+      ...outline.outline.acts.map(
+        (a) =>
+          `## ${a.label} (${a.duration})\n\n` +
+          a.points.map((p) => `- ${p}`).join("\n") +
+          `\n\nFala-chave: "${a.keyLine}"`
+      ),
+      ``,
+      `Notas de produção:\n${outline.outline.notes.map((n) => `- ${n}`).join("\n")}`,
+    ].join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success("Esboço copiado.");
+    } catch {
+      toast.error("Não foi possível copiar.");
+    }
+  };
+
+  const handleExportTxt = () => {
+    if (!outline) return;
+    const text = [
+      `ESBOÇO DE ROTEIRO — ${outline.outline.title.toUpperCase()}`,
+      `Duração alvo: ${outline.outline.totalLength}`,
+      ``,
+      ...outline.outline.acts.map(
+        (a) =>
+          `== ${a.label} (${a.duration}) ==\n` +
+          a.points.map((p) => `• ${p}`).join("\n") +
+          `\nFala-chave: "${a.keyLine}"\n`
+      ),
+      `Notas de produção:`,
+      ...outline.outline.notes.map((n) => `- ${n}`),
+    ].join("\n");
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `esboco-${outline.outline.title.slice(0, 40).trim()}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("Esboço exportado em TXT.");
+  };
+
+  return (
+    <Dialog open={!!outline} onOpenChange={(open) => { if (!open) onOpenChange(false); }}>
+      <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle className="font-display text-lg">Esboço de roteiro</DialogTitle>
+          <DialogDescription>{outline?.outline.title} · {outline?.outline.totalLength}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          {outline?.outline.acts.map((a) => (
+            <div key={a.act} className="rounded-lg border border-border/50 bg-background/60 p-4">
+              <div className="flex items-center gap-2">
+                <span className="rounded-full bg-primary/15 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-primary">{a.label}</span>
+                <span className="text-[11px] text-muted-foreground">{a.duration}</span>
+              </div>
+              <ul className="mt-2.5 space-y-1.5">
+                {a.points.map((p, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-foreground/85">
+                    <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-primary" />
+                    {p}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2.5 border-l-2 border-primary/50 pl-2.5 text-sm italic leading-relaxed text-muted-foreground">
+                "{a.keyLine}"
+              </p>
+            </div>
+          ))}
+          {outline?.outline.notes && outline.outline.notes.length > 0 && (
+            <div className="rounded-lg border border-border/50 bg-background/60 p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Notas de produção</p>
+              <ul className="mt-2 space-y-1.5">
+                {outline.outline.notes.map((n, i) => (
+                  <li key={i} className="text-sm text-foreground/85">• {n}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" onClick={handleCopy}>Copiar esboço</Button>
+            <Button size="sm" variant="outline" onClick={handleExportTxt}>Exportar TXT</Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function IdeaOfTheDayCard() {
   const [, navigate] = useLocation();
   const utils = trpc.useUtils();
   const ideaQuery = trpc.extended.ideaOfTheDay.useQuery(undefined, { refetchInterval: 0 });
+  const [outline, setOutline] = useState<{ niche: string; analysisId: string; suggestion: { title: string; viralityScore: number | null; hook?: string; angle?: string; targetLength?: string }; outline: { title: string; totalLength: string; acts: { act: string; label: string; duration: string; points: string[]; keyLine: string }[]; notes: string[] } } | null>(null);
+  const [outlineDialogOpen, setOutlineDialogOpen] = useState(false);
+  const outlineMutation = trpc.extended.generateIdeaOutline.useMutation({
+    onSuccess: (data) => {
+      setOutline(data);
+      setOutlineDialogOpen(true);
+      toast.success("Esboço de roteiro gerado.");
+    },
+    onError: (err) => toast.error(err.message || "Falha ao gerar o esboço."),
+  });
 
   const handleRefresh = () => {
     utils.extended.ideaOfTheDay.invalidate();
@@ -306,6 +415,15 @@ function IdeaOfTheDayCard() {
               </Button>
               <Button
                 size="sm"
+                variant="secondary"
+                disabled={outlineMutation.isPending}
+                onClick={() => outlineMutation.mutate()}
+              >
+                {outlineMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <FileText className="mr-2 h-3.5 w-3.5" />}
+                Gerar esboço de roteiro
+              </Button>
+              <Button
+                size="sm"
                 variant="outline"
                 onClick={() => {
                   navigator.clipboard
@@ -322,6 +440,7 @@ function IdeaOfTheDayCard() {
             </div>
           </div>
         )}
+        <OutlineDialog outline={outline} onOpenChange={(open) => !open && setOutline(null)} />
       </CardContent>
     </Card>
   );

@@ -479,8 +479,15 @@ function GrowthCard({
   previous: number;
   metricName: string;
 }) {
+  const detail =
+    percent !== null
+      ? `${formatCompact(previous)} → ${formatCompact(current)} ${metricName}/dia: diferença de ${formatCompact(Math.abs(current - previous))} ${metricName}/dia (${percent >= 0 ? "crescimento" : "queda"} de ${formatCompact(current)} ÷ ${formatCompact(previous)} − 1) × 100 = ${percent}%`
+      : "Ainda não há média registrada na semana anterior para calcular o percentual.";
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-border/60 bg-accent/30 px-3 py-2.5">
+    <div
+      className="group flex items-center gap-3 rounded-lg border border-border/60 bg-accent/30 px-3 py-2.5 transition-colors hover:border-primary/40"
+      title={detail}
+    >
       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/15 text-primary">{icon}</span>
       <div className="min-w-0">
         <p className="text-xs text-muted-foreground">{label} · média última semana: {formatCompact(current)}</p>
@@ -503,6 +510,16 @@ function GrowthCard({
             <TrendingUp className="h-3.5 w-3.5 rotate-180" /> {percent}% vs. semana anterior
           </p>
         )}
+        <div className="invisible absolute z-10 mt-1 min-w-[240px] rounded-lg border border-border/70 bg-popover p-3 text-xs leading-relaxed text-popover-foreground shadow-xl opacity-0 transition-opacity group-hover:visible group-hover:opacity-100">
+          <p className="mb-1 font-semibold">Números do cálculo</p>
+          <p>Média diária última semana: <strong>{formatCompact(current)}</strong> {metricName}</p>
+          <p>Média diária semana anterior: <strong>{formatCompact(previous)}</strong> {metricName}</p>
+          {percent !== null && (
+            <p>
+              Variação: <strong>{percent >= 0 ? "+" : ""}{percent}%</strong> = ({formatCompact(current)} ÷ {formatCompact(previous)} − 1) × 100
+            </p>
+          )}
+        </div>
         <p className="truncate text-[11px] text-muted-foreground/70">
           média da semana anterior: {formatCompact(previous)} {metricName}
         </p>
