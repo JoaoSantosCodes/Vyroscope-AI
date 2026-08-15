@@ -51,8 +51,106 @@ type PinnedIdea = {
   viralityScore: number | null;
   sortOrder: number | null;
   notes: string | null;
+  status: string;
   createdAt: Date;
 };
+
+type SuggestionData = {
+  title: string;
+  hook: string;
+  angle: string;
+  narrativeStructure: string;
+  targetLength: string;
+  viralityScore: number;
+  reasoning: string;
+};
+
+/** Modal da sugestão duplicada a partir de uma ideia fixada. */
+function SuggestionDialog({
+  suggestion,
+  onOpenChange,
+}: {
+  suggestion: SuggestionData | null;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <Dialog open={Boolean(suggestion)} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Sugestão pronta para gravação</DialogTitle>
+        </DialogHeader>
+        {suggestion && (
+          <div className="space-y-3 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className="rounded-full px-2 py-0.5 text-[10px] font-bold"
+                style={{ backgroundColor: scoreColor(suggestion.viralityScore) + "33", color: scoreColor(suggestion.viralityScore) }}
+              >
+                {suggestion.viralityScore}/100
+              </span>
+              <span className="text-xs text-muted-foreground">Duração alvo: {suggestion.targetLength}</span>
+            </div>
+            <div>
+              <p className="mb-0.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Título</p>
+              <p className="font-semibold leading-snug">{suggestion.title}</p>
+            </div>
+            <div>
+              <p className="mb-0.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Hook</p>
+              <p className="italic text-muted-foreground">{suggestion.hook}</p>
+            </div>
+            <div>
+              <p className="mb-0.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Ângulo</p>
+              <p className="text-muted-foreground">{suggestion.angle}</p>
+            </div>
+            <div>
+              <p className="mb-0.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Estrutura narrativa</p>
+              <p className="text-muted-foreground">{suggestion.narrativeStructure}</p>
+            </div>
+            {suggestion.reasoning && (
+              <div>
+                <p className="mb-0.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Por que tende a viralizar</p>
+                <p className="text-muted-foreground">{suggestion.reasoning}</p>
+              </div>
+            )}
+            <DialogFooter>
+              <Button
+                size="sm"
+                onClick={() => {
+                  const text = `${suggestion.title}\n\nHook: ${suggestion.hook}\n\nÂngulo: ${suggestion.angle}\n\nEstrutura: ${suggestion.narrativeStructure}\n\nDuração alvo: ${suggestion.targetLength}\n\nScore de viralidade: ${suggestion.viralityScore}/100\n\n${suggestion.reasoning}`;
+                  navigator.clipboard
+                    .writeText(text)
+                    .then(() => toast.success("Sugestão copiada."))
+                    .catch(() => toast.error("Não foi possível copiar."));
+                }}
+              >
+                <FileText className="mr-2 h-3.5 w-3.5" /> Copiar sugestão
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  const text = `${suggestion.title}\n\nHook: ${suggestion.hook}\n\nÂngulo: ${suggestion.angle}\n\nEstrutura: ${suggestion.narrativeStructure}\n\nDuração alvo: ${suggestion.targetLength}\n\nScore de viralidade: ${suggestion.viralityScore}/100\n\n${suggestion.reasoning}\n`;
+                  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+                  const url = URL.createObjectURL(blob);
+                  const link = document.createElement("a");
+                  link.href = url;
+                  link.download = "sugestao-vyroscope.txt";
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                  URL.revokeObjectURL(url);
+                  toast.success("TXT da sugestão baixado.");
+                }}
+              >
+                Exportar TXT
+              </Button>
+            </DialogFooter>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 /** Modal do esboço de roteiro (mesmo estilo do painel "Ideia do dia" da home). */
 function OutlineDialog({
@@ -166,7 +264,7 @@ export default function IdeaHistory() {
     onMutate: async ({ date, analysisId, suggestionTitle, niche, viralityScore }) => {
       await utils.extended.listPinnedIdeas.cancel();
       const prev = utils.extended.listPinnedIdeas.getData();
-      utils.extended.listPinnedIdeas.setData(undefined, { ideas: [{ id: 0, date, analysisId, suggestionTitle, niche, viralityScore, sortOrder: null, notes: null, createdAt: new Date() }, ...(prev?.ideas ?? [])] });
+      utils.extended.listPinnedIdeas.setData(undefined, { ideas: [{ id: 0, date, analysisId, suggestionTitle, niche, viralityScore, sortOrder: null, notes: null, status: "planejada", createdAt: new Date() }, ...(prev?.ideas ?? [])] });
       return { prev };
     },
     onError: (_, __, ctx) => {
@@ -192,6 +290,31 @@ export default function IdeaHistory() {
       utils.extended.listPinnedIdeas.invalidate();
     },
     onSuccess: () => toast.success("Fixação removida."),
+  });
+
+  const [suggestion, setSuggestion] = useState<SuggestionData | null>(null);
+  const [suggestionDialogOpen, setSuggestionDialogOpen] = useState(false);
+
+  const duplicateMutation = trpc.extended.buildSuggestionFromPinned.useMutation({
+    onSuccess: (data) => {
+      setSuggestion(data);
+      setSuggestionDialogOpen(true);
+    },
+    onError: (err) => toast.error(err.message || "Falha ao transformar a ideia em sugestão."),
+  });
+
+  const statusMutation = trpc.extended.updateIdeaStatus.useMutation({
+    onMutate: async ({ pinnedId, status }) => {
+      await utils.extended.listPinnedIdeas.cancel();
+      const prev = utils.extended.listPinnedIdeas.getData();
+      utils.extended.listPinnedIdeas.setData(undefined, {
+        ideas: (prev?.ideas ?? []).map((i) => (i.id === pinnedId ? { ...i, status } : i)),
+      });
+      return { prev };
+    },
+    onError: (_, __, ctx) => utils.extended.listPinnedIdeas.setData(undefined, ctx?.prev ?? { ideas: [] }),
+    onSettled: () => utils.extended.listPinnedIdeas.invalidate(),
+    onSuccess: () => toast.success("Status atualizado."),
   });
 
   const exportMutation = trpc.extended.exportIdeaHistoryPdf.useMutation({
@@ -258,11 +381,12 @@ export default function IdeaHistory() {
     onMutate: async ({ orderedIds }) => {
       await utils.extended.listPinnedIdeas.cancel();
       const prev = utils.extended.listPinnedIdeas.getData();
+      const list = (prev?.ideas ?? []) as PinnedIdea[];
       const reordered = orderedIds
-        .map((id) => (prev?.ideas ?? []).find((i) => i.id === id))
+        .map((id) => list.find((i) => i.id === id))
         .filter((p): p is PinnedIdea => Boolean(p))
         .map((p, idx) => ({ ...p, sortOrder: idx + 1 }));
-      const rest = (prev?.ideas ?? []).filter((p) => !orderedIds.includes(p.id));
+      const rest = list.filter((p) => !orderedIds.includes(p.id));
       utils.extended.listPinnedIdeas.setData(undefined, { ideas: [...reordered, ...rest] });
       return { prev };
     },
@@ -285,6 +409,44 @@ export default function IdeaHistory() {
     const [moved] = next.splice(from, 1);
     next.splice(targetIndex, 0, moved);
     reorderMutation.mutate({ orderedIds: next.map((p) => p.id) });
+  };
+
+  // ===== Kanban: colunas por status =====
+  const STATUS_LIST = [
+    { key: "planejada", label: "Planejada", accent: "border-muted" },
+    { key: "gravando", label: "Gravando", accent: "border-amber-500/50" },
+    { key: "publicada", label: "Publicada", accent: "border-emerald-500/50" },
+  ] as const;
+
+  const kanbanDragIndex = useRef<number | null>(null);
+  const kanbanDragStatus = useRef<"planejada" | "gravando" | "publicada" | null>(null);
+
+  const handleKanbanDragStart = (status: "planejada" | "gravando" | "publicada", index: number) => {
+    kanbanDragIndex.current = index;
+    kanbanDragStatus.current = status;
+  };
+
+  const handleKanbanDrop = (status: string, targetIndex: number) => {
+    const from = kanbanDragIndex.current;
+    const fromStatus = kanbanDragStatus.current;
+    kanbanDragIndex.current = null;
+    kanbanDragStatus.current = null;
+    if (from === null) return;
+    if (fromStatus === status) {
+      if (from === targetIndex) return;
+      const column = pinned.filter((p) => p.status === status);
+      const next = [...column];
+      const [moved] = next.splice(from, 1);
+      next.splice(targetIndex, 0, moved);
+      reorderMutation.mutate({ orderedIds: next.map((p) => p.id) });
+      return;
+    }
+    // Mover para outra coluna: atribui o novo status ao card arrastado
+    const column = pinned.filter((p) => p.status === fromStatus);
+    const moved = column[from];
+    if (!moved) return;
+    if (statusMutation.isPending) return;
+    statusMutation.mutate({ pinnedId: moved.id, status: status as "planejada" | "gravando" | "publicada" });
   };
 
   // ===== Anotações pessoais =====
@@ -401,6 +563,8 @@ export default function IdeaHistory() {
                 analysisId: p.analysisId,
                 title: p.suggestionTitle,
                 viralityScore: p.viralityScore,
+                notes: p.notes ?? undefined,
+                status: (p.status === "planejada" || p.status === "gravando" || p.status === "publicada") ? (p.status as "planejada" | "gravando" | "publicada") : undefined,
               }));
               exportMutation.mutate({ pinned: pinnedRows, ideas: ideas.map(toPdfRow) });
             }}
@@ -438,100 +602,132 @@ export default function IdeaHistory() {
           </Button>
         </div>
 
-        {/* Ideias fixadas */}
+        {/* Ideias fixadas: quadro Kanban */}
         {pinned.length > 0 && (
           <div className="mb-8">
             <h2 className="mb-3 flex items-center gap-2 font-display text-lg font-semibold">
               <Pin className="h-4 w-4 text-primary" /> Fixadas no topo
             </h2>
-            <p className="mb-2 text-xs text-muted-foreground">
-              Arraste os cards para reordenar. As fixadas aparecem primeiro no PDF exportado.
+            <p className="mb-3 text-xs text-muted-foreground">
+              Arraste os cards para reordenar dentro da coluna ou movê-los entre as colunas de status. As fixadas aparecem primeiro no PDF exportado.
             </p>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {pinned.map((p, idx) => {
-                const draft = noteDrafts[p.id] ?? (p.notes ?? "");
+            <div className="grid gap-4 md:grid-cols-3">
+              {STATUS_LIST.map(({ key, label, accent }) => {
+                const column = pinned.filter((p) => p.status === key);
                 return (
-                <Card
-                  key={p.id}
-                  draggable
-                  className="flex flex-col cursor-grab border-primary/40 bg-primary/5 active:cursor-grabbing"
-                  onDragStart={() => handleDragStart(idx)}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={() => handleDrop(idx)}
-                >
-                  <CardContent className="flex flex-1 flex-col p-5">
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="rounded-full border border-primary/30 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary">
-                        Fixada
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        disabled={unpinMutation.isPending}
-                        onClick={() => handleUnpin(p.id)}
-                      >
-                        <PinOff className="h-3.5 w-3.5" />
-                      </Button>
+                  <div key={key} className="flex flex-col rounded-lg border border-border bg-card/50">
+                    <div className={`flex items-center justify-between border-b-2 px-3 py-2 ${accent}`}>
+                      <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
+                      <Badge variant="outline" className="text-[10px]">{column.length}</Badge>
                     </div>
-                    <h3 className="mt-2 font-display text-lg font-semibold leading-snug">{p.suggestionTitle}</h3>
-                    <div className="mt-auto flex flex-wrap items-center gap-2 pt-4">
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        className="h-7 gap-1 text-xs"
-                        disabled={outlineMutation.isPending}
-                        onClick={() =>
-                          outlineMutation.mutate({ analysisId: p.analysisId, suggestionTitle: p.suggestionTitle })
-                        }
-                      >
-                        <FileText className="h-3 w-3" /> Esboço
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-7 gap-1 text-xs"
-                        onClick={() =>
-                          navigator.clipboard.writeText(p.suggestionTitle).then(() => toast.success("Título copiado."))
-                        }
-                      >
-                        Copiar
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 gap-1 text-xs"
-                        onClick={() => navigate(`/resultado/${p.analysisId}`)}
-                      >
-                        <Radar className="h-3 w-3" /> Análise
-                      </Button>
+                    <div className="space-y-3 p-3">
+                      {column.map((p, idx) => {
+                        const draft = noteDrafts[p.id] ?? (p.notes ?? "");
+                        return (
+                          <Card
+                            key={p.id}
+                            draggable
+                            className="flex flex-col cursor-grab border-primary/30 bg-primary/5 active:cursor-grabbing"
+                            onDragStart={() => handleKanbanDragStart(key, idx)}
+                            onDragOver={(e) => e.preventDefault()}
+                            onDrop={() => handleKanbanDrop(key, idx)}
+                          >
+                            <CardContent className="flex flex-1 flex-col p-4">
+                              <div className="flex items-start justify-between gap-2">
+                                <span className="text-[10px] font-medium text-muted-foreground">{idx + 1}º na coluna</span>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7"
+                                  disabled={unpinMutation.isPending}
+                                  onClick={() => handleUnpin(p.id)}
+                                >
+                                  <PinOff className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
+                              <h3 className="mt-1 font-display text-base font-semibold leading-snug">{p.suggestionTitle}</h3>
+                              <div className="mt-auto flex flex-wrap items-center gap-1.5 pt-3">
+                                <Select
+                                  value={p.status}
+                                  onValueChange={(value) =>
+                                    statusMutation.mutate({ pinnedId: p.id, status: value as "planejada" | "gravando" | "publicada" })
+                                  }
+                                  disabled={statusMutation.isPending}
+                                >
+                                  <SelectTrigger className="h-7 w-[120px] gap-1 text-xs">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {STATUS_LIST.map((s) => (
+                                      <SelectItem key={s.key} value={s.key}>
+                                        {s.label}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  className="h-7 gap-1 text-xs"
+                                  disabled={outlineMutation.isPending}
+                                  onClick={() =>
+                                    outlineMutation.mutate({ analysisId: p.analysisId, suggestionTitle: p.suggestionTitle })
+                                  }
+                                >
+                                  <FileText className="h-3 w-3" /> Esboço
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 gap-1 text-xs"
+                                  disabled={duplicateMutation.isPending}
+                                  onClick={() => duplicateMutation.mutate({ pinnedId: p.id })}
+                                >
+                                  {duplicateMutation.isPending ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : (
+                                    <FileText className="h-3 w-3" />
+                                  )}
+                                  Duplicar
+                                </Button>
+                              </div>
+                              <p className="mt-3 text-[11px] text-muted-foreground">
+                                {formatDate(new Date(p.date + "T12:00:00").getTime())} · {p.niche}
+                                {p.viralityScore != null ? ` · score ${p.viralityScore}` : ""}
+                              </p>
+                              <div className="mt-3">
+                                <Label htmlFor={`note-${p.id}`} className="mb-1 flex items-center gap-1 text-[11px] font-medium">
+                                  <StickyNote className="h-3 w-3" /> Anotações
+                                </Label>
+                                <textarea
+                                  id={`note-${p.id}`}
+                                  rows={2}
+                                  maxLength={2000}
+                                  placeholder="Rascunhos ou observações sobre essa ideia…"
+                                  className="w-full resize-y rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                  value={draft}
+                                  onChange={(e) => handleNoteChange(p.id, e.target.value)}
+                                  onBlur={(e) => commitNote(p.id, e.target.value)}
+                                />
+                              </div>
+                            </CardContent>
+                          </Card>
+                        );
+                      })}
+                      {column.length === 0 && (
+                        <p className="rounded-md border border-dashed border-border py-6 text-center text-[11px] text-muted-foreground/60">
+                          Arraste ideias para cá
+                        </p>
+                      )}
                     </div>
-                    <p className="mt-3 text-[11px] text-muted-foreground">
-                      {formatDate(new Date(p.date + "T12:00:00").getTime())} · {p.niche}
-                      {p.viralityScore != null ? ` · score ${p.viralityScore}` : ""}
-                    </p>
-                    <div className="mt-3">
-                      <Label htmlFor={`note-${p.id}`} className="mb-1 flex items-center gap-1 text-[11px] font-medium">
-                        <StickyNote className="h-3 w-3" /> Anotações
-                      </Label>
-                      <textarea
-                        id={`note-${p.id}`}
-                        rows={2}
-                        maxLength={2000}
-                        placeholder="Rascunhos ou observações sobre essa ideia…"
-                        className="w-full resize-y rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                        value={draft}
-                        onChange={(e) => handleNoteChange(p.id, e.target.value)}
-                        onBlur={(e) => commitNote(p.id, e.target.value)}
-                      />
-                    </div>
-                  </CardContent>
-                </Card>
+                  </div>
                 );
               })}
             </div>
           </div>
         )}
+
+        <SuggestionDialog suggestion={suggestion} onOpenChange={setSuggestionDialogOpen} />
 
         {historyQuery.isLoading ? (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

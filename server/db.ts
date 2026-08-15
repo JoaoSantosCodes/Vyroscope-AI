@@ -418,6 +418,7 @@ export async function listPinnedIdeas(userId: number) {
       viralityScore: pinnedIdeaHistory.viralityScore,
       sortOrder: pinnedIdeaHistory.sortOrder,
       notes: pinnedIdeaHistory.notes,
+      status: pinnedIdeaHistory.status,
       createdAt: pinnedIdeaHistory.createdAt,
     })
     .from(pinnedIdeaHistory)
@@ -456,6 +457,7 @@ export async function pinIdea(
     niche: params.niche,
     viralityScore: params.viralityScore,
     sortOrder: null,
+    status: "planejada",
   });
 }
 
@@ -482,6 +484,19 @@ export async function updatePinnedNote(userId: number, pinnedId: number, notes: 
     .update(pinnedIdeaHistory)
     .set({ notes: notes === "" ? null : notes })
     .where(eq(pinnedIdeaHistory.id, pinnedId));
+}
+
+/** Atualiza o status de produção de uma ideia fixada. */
+export async function updateIdeaStatus(userId: number, pinnedId: number, status: "planejada" | "gravando" | "publicada") {
+  const db = await getDb();
+  if (!db) return;
+  const owns = await db
+    .select({ id: pinnedIdeaHistory.id })
+    .from(pinnedIdeaHistory)
+    .where(and(eq(pinnedIdeaHistory.id, pinnedId), eq(pinnedIdeaHistory.userId, userId)))
+    .limit(1);
+  if (owns.length === 0) throw new Error("Ideia fixada não encontrada");
+  await db.update(pinnedIdeaHistory).set({ status }).where(eq(pinnedIdeaHistory.id, pinnedId));
 }
 
 /** Reordena as ideias fixadas pelo sortOrder (a posição na lista é a ordem desejada).

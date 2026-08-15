@@ -538,3 +538,60 @@ export async function generateAlternativeTitles(
     suggestionTitle: suggestion.title,
   };
 }
+
+const PINNED_SUGGESTION_SCHEMA = {
+  type: "json_schema",
+  json_schema: {
+    name: "pinned_suggestion",
+    strict: true,
+    schema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Título aprimorado da sugestão, em português brasileiro" },
+        hook: { type: "string", description: "Hook de abertura, 1–2 frases" },
+        angle: { type: "string", description: "Ângulo único da abordagem" },
+        narrativeStructure: { type: "string", description: "Estrutura narrativa sugerida" },
+        targetLength: { type: "string", description: "Duração alvo, ex: '8–12 min'" },
+        viralityScore: { type: "number", description: "Score de viralidade de 0 a 100" },
+        reasoning: { type: "string", description: "Explicação em 1–2 frases do potencial de viralidade" },
+      },
+      required: ["title", "hook", "angle", "narrativeStructure", "targetLength", "viralityScore", "reasoning"],
+      additionalProperties: false,
+    },
+  },
+} as const;
+
+/**
+ * Transforma uma ideia fixada em uma sugestão pronta para gravação.
+ * Usa o título fixado e as anotações do usuário como insumo para o LLM
+ * gerar hook, ângulo, estrutura narrativa, duração alvo e score.
+ */
+export async function buildPinnedSuggestion(niche: string, title: string, notes: string | null): Promise<Suggestion> {
+  const notesText = notes?.trim() ? `Anotações do criador sobre essa ideia:\n${notes.trim()}\n` : "";
+  const messages: LlmMessage[] = [
+    {
+      role: "system",
+      content: `Você é um estrategista sênior de YouTube. Transforme ideias de vídeo em sugestões completas e prontas para gravação, em português brasileiro, aplicando os padrões de canais virais (hook forte nos primeiros 5 segundos, ângulo único, promessa clara). Responda apenas com o JSON solicitado.`,
+    },
+    {
+      role: "user",
+      content: `Nicho: "${niche}"\n\nIdeia fixada pelo criador (título): "${title}"\n\n${notesText}Instruções:\n1. Escreva um título aprimorado mantendo a essência da ideia (até 70 caracteres).\n2. Crie o hook de abertura (1–2 frases que prendem a atenção nos primeiros 5 segundos).\n3. Defina o ângulo único de abordagem.\n4. Descreva a estrutura narrativa (abertura, desenvolvimento, fechamento).\n5. Sugira a duração alvo (ex: "8–12 min").\n6. Atribua um viralityScore de 0 a 100 calibrado para o nicho.\n7. Explique em 1–2 frases o porquê do potencial de viralidade.`,
+    },
+  ];
+  const response = await invokeLLM({ messages, response_format: PINNED_SUGGESTION_SCHEMA });
+  const raw = response.choices[0]?.message?.content;
+  if (!raw || typeof raw !== "string") {
+    throw new Error("llm_empty_response");
+  }
+  let parsed: Suggestion;
+  try {
+    parsed = JSON.parse(raw) as Suggestion;
+  } catch {
+    throw new Error("llm_invalid_json");
+  }
+  if (!parsed.title || !parsed.hook || !parsed.angle) {
+    throw new Error("llm_invalid_structure");
+  }
+  parsed.viralityScore = Math.min(100, Math.max(0, Number(parsed.viralityScore) || 0));
+  return parsed;
+}

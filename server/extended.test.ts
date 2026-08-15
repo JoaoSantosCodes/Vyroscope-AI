@@ -283,6 +283,7 @@ vi.mock("./db", async (importOriginal) => {
     listPinnedIdeas: vi.fn(),
     updatePinnedNote: vi.fn(),
     reorderPinnedIdeas: vi.fn(),
+    updateIdeaStatus: vi.fn(),
   };
 });
 
@@ -301,6 +302,7 @@ const mockedUnpin = vi.mocked(db.unpinIdea);
 const mockedListPinned = vi.mocked(db.listPinnedIdeas);
 const mockedUpdateNote = vi.mocked(db.updatePinnedNote);
 const mockedReorderPinned = vi.mocked(db.reorderPinnedIdeas);
+const mockedUpdateStatus = vi.mocked(db.updateIdeaStatus);
 
 const folderUser = {
   id: 2,
@@ -682,6 +684,50 @@ describe("extended idea pinning (pin/unpin/listPinned)", () => {
     const result = await caller.extended.reorderPinnedIdeas({ orderedIds: [3, 5, 1] });
     expect(result.success).toBe(true);
     expect(mockedReorderPinned).toHaveBeenCalledWith(2, [3, 5, 1]);
+  });
+  it("updates the status of a pinned idea to gravando", async () => {
+    mockedUpdateStatus.mockResolvedValueOnce(undefined as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.updateIdeaStatus({ pinnedId: 3, status: "gravando" });
+    expect(result.success).toBe(true);
+    expect(mockedUpdateStatus).toHaveBeenCalledWith(2, 3, "gravando");
+  });
+  it("rejects an invalid status value", async () => {
+    const caller = appRouter.createCaller(createFolderCtx());
+    await expect(
+      caller.extended.updateIdeaStatus({ pinnedId: 3, status: "invalido" as "planejada" })
+    ).rejects.toThrow();
+  });
+  it("builds a ready-to-record suggestion from a pinned idea via LLM", async () => {
+    mockedInvokeLLM.mockResolvedValueOnce({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              title: "Treino HIIT de 10 minutos em casa",
+              hook: "Sem academia, sem desculpas",
+              angle: "Treino rápido acessível a todos",
+              narrativeStructure: "Demonstração do treino completa com progressão",
+              targetLength: "8-10 min",
+              viralityScore: 82,
+              reasoning: "Nicho em alta com demanda por treinos rápidos",
+            }),
+          },
+        },
+      ],
+    } as never);
+    mockedListPinned.mockResolvedValueOnce([
+      { id: 3, date: "2026-08-14", analysisId: "a1", suggestionTitle: "Treino de 10 min", niche: "fitness", viralityScore: 88, sortOrder: null, notes: "Fazer versão para iniciantes", status: "planejada", createdAt: new Date() },
+    ] as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.buildSuggestionFromPinned({ pinnedId: 3 });
+    expect(result.title).toBe("Treino HIIT de 10 minutos em casa");
+    expect(result.viralityScore).toBe(82);
+    expect(mockedListPinned).toHaveBeenCalledWith(2);
+    const llmCall = mockedInvokeLLM.mock.calls[0]![0] as { messages: { content: string }[] };
+    const text = llmCall.messages.map((m) => m.content).join(" ");
+    expect(text).toContain("Treino de 10 min");
+    expect(text).toContain("Fazer versão para iniciantes");
   });
 });
 

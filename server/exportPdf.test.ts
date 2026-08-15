@@ -296,4 +296,39 @@ describe("buildIdeaHistoryPdf", () => {
     expect(text).toContain("88/100");
     expect(text).toContain("70/100");
   });
+
+  it("inclui as anotações e o status de cada ideia fixada no texto do PDF", async () => {
+    const buffer = await buildIdeaHistoryPdf({
+      pinned: [
+        {
+          date: "2026-08-10",
+          niche: "fitness",
+          analysisDate: Date.parse("2026-08-05"),
+          title: "Treino de 10 min",
+          hook: "Acorde e treine",
+          angle: "Rotina rápida",
+          viralityScore: 88,
+          notes: "Rascunho sobre a rotina matinal",
+          status: "gravando",
+        },
+      ],
+      ideas: sampleHistoryIdeas,
+    });
+    const { spawnSync } = await import("node:child_process");
+    const { writeFileSync, mkdtempSync } = await import("node:fs");
+    const tmp = mkdtempSync("/tmp/pdf-test-");
+    const file = `${tmp}/history-notes.pdf`;
+    writeFileSync(file, buffer);
+    const run = spawnSync(
+      process.execPath,
+      ["/home/ubuntu/vyroscope-ai/node_modules/pdf-parse/bin/cli.mjs", "text", file],
+      { encoding: "utf-8", cwd: "/home/ubuntu/vyroscope-ai" }
+    );
+    const text = run.stdout + run.stderr;
+    if (run.status !== 0) throw new Error(`pdf-parse CLI falhou: ${text}`);
+    const compact = text.replace(/[\s ]/g, "").toUpperCase();
+    expect(compact).toContain("ANOTAÇÕES");
+    expect(compact).toContain("RASCUNHOSOBREAROTINAMATINAL");
+    expect(compact).toContain("STATUS:GRAVANDO");
+  });
 });

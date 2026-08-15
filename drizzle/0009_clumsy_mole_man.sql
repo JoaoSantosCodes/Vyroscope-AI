@@ -1,0 +1,1 @@
+ALTER TABLE `pinned_idea_history` ADD `status` varchar(10) DEFAULT 'planejada' NOT NULL;

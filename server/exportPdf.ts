@@ -314,6 +314,8 @@ export type IdeaHistoryPdfIdea = {
   hook?: string;
   angle?: string;
   viralityScore: number | null;
+  notes?: string | null;
+  status?: "planejada" | "gravando" | "publicada" | null;
 };
 
 /**
@@ -373,9 +375,23 @@ export async function buildIdeaHistoryPdf(input: IdeaHistoryPdfInput): Promise<B
         doc.y = 104;
       };
 
+      const STATUS_LABEL: Record<string, string> = {
+        planejada: "PLANEJADA",
+        gravando: "GRAVANDO",
+        publicada: "PUBLICADA",
+      };
+
+      const ideaCardHeight = (idea: IdeaHistoryPdfIdea) => {
+        let h = idea.hook ? 118 : 92;
+        if (idea.notes) h += 26;
+        if (idea.status) h += 22;
+        return h;
+      };
+
       const renderIdeaCard = (idea: IdeaHistoryPdfIdea) => {
+        const h = ideaCardHeight(idea);
         const y = doc.y + 10;
-        doc.fillColor(COLORS.cardBg).roundedRect(54, y, doc.page.width - 108, idea.hook ? 118 : 92, 6).fill();
+        doc.fillColor(COLORS.cardBg).roundedRect(54, y, doc.page.width - 108, h, 6).fill();
         const startX = y + 18;
         const score = idea.viralityScore ?? 0;
 
@@ -389,6 +405,10 @@ export async function buildIdeaHistoryPdf(input: IdeaHistoryPdfInput): Promise<B
         doc.fillColor(COLORS.light).fontSize(12).font("Helvetica-Bold").text(idea.title, 70, startX + 26, {
           width: doc.page.width - 140,
         });
+        if (idea.status) {
+          const label = STATUS_LABEL[idea.status] ?? idea.status.toUpperCase();
+          doc.fillColor(COLORS.amber).fontSize(8.5).font("Helvetica-Bold").text(`STATUS: ${label}`, 70, startX + 29, { characterSpacing: 2 });
+        }
         if (idea.hook) {
           doc.fillColor(COLORS.amber).fontSize(8.5).text("HOOK", 70, startX + 52, { characterSpacing: 2 });
           doc.fillColor(COLORS.light).fontSize(10).font("Helvetica-Oblique");
@@ -399,13 +419,18 @@ export async function buildIdeaHistoryPdf(input: IdeaHistoryPdfInput): Promise<B
           doc.fillColor(COLORS.light).fontSize(10).font("Helvetica");
           doc.text(idea.angle, 70, doc.y + 23, { width: doc.page.width - 160 });
         }
-        doc.y = Math.max(y + (idea.hook ? 118 : 92) + 20, doc.y + (idea.hook ? 118 : 92) + 12);
+        if (idea.notes) {
+          doc.fillColor(COLORS.amber).fontSize(8.5).text("ANOTAÇÕES", 70, doc.y + 10, { characterSpacing: 2 });
+          doc.fillColor(COLORS.light).fontSize(10).font("Helvetica-Oblique");
+          doc.text(idea.notes, 70, doc.y + 23, { width: doc.page.width - 160 });
+        }
+        doc.y = Math.max(y + h + 20, doc.y + h + 12);
       };
 
       let currentCount = 0;
       if (pinned.length > 0) {
         renderSectionHeader("FIXADAS NO TOPO", pinned.length);
-        pinned.forEach((idea, i) => {
+        pinned.forEach((idea) => {
           renderIdeaCard(idea);
           currentCount += 1;
           if (currentCount < total && doc.y > doc.page.height - 60) doc.addPage();

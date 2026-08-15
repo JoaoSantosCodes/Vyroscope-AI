@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import type { AnalysisResult } from "../analysis";
-import { analyzeNicheComparison, buildThumbnailPrompt, generateAlternativeTitles, generateContentAgenda, generateExtendedScript, generateOutline } from "../extended";
+import { analyzeNicheComparison, buildPinnedSuggestion, buildThumbnailPrompt, generateAlternativeTitles, generateContentAgenda, generateExtendedScript, generateOutline } from "../extended";
 import { fetchTrendingVideosForNiche } from "../youtube";
 import { protectedProcedure, router } from "../_core/trpc";
 
@@ -420,6 +420,29 @@ export const extendedRouter = router({
       const { reorderPinnedIdeas: reorder } = await import("../db");
       return reorder(ctx.user.id, input.orderedIds);
     }),
+  /** Transforma uma ideia fixada em uma sugestão completa pronta para gravação.
+   *  Usa o título e as anotações da ideia como insumo para o LLM gerar
+   *  hook, ângulo, estrutura narrativa, duração e score. */
+  buildSuggestionFromPinned: protectedProcedure
+    .input(z.object({ pinnedId: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const { listPinnedIdeas: listPinned } = await import("../db");
+      const pinned = await listPinned(ctx.user.id);
+      const item = pinned.find((p) => p.id === input.pinnedId);
+      if (!item) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Ideia fixada não encontrada." });
+      }
+      const suggestion = await buildPinnedSuggestion(item.niche, item.suggestionTitle, item.notes);
+      return suggestion;
+    }),
+  /** Atualiza o status de produção de uma ideia fixada (planejada/gravando/publicada). */
+  updateIdeaStatus: protectedProcedure
+    .input(z.object({ pinnedId: z.number().int().positive(), status: z.enum(["planejada", "gravando", "publicada"]) }))
+    .mutation(async ({ ctx, input }) => {
+      const { updateIdeaStatus: updateStatus } = await import("../db");
+      await updateStatus(ctx.user.id, input.pinnedId, input.status);
+      return { success: true } as const;
+    }),
   /** Exporta o histórico de ideias do dia (fixadas + rotacionadas) em PDF.
    *  O PDF reflete a visão atual do usuário, incluindo os filtros aplicados
    *  na página (o frontend envia as listas filtradas). */
@@ -435,6 +458,8 @@ export const extendedRouter = router({
             hook: z.string().optional(),
             angle: z.string().optional(),
             viralityScore: z.number().int().min(0).max(100).nullable(),
+            notes: z.string().optional(),
+            status: z.enum(["planejada", "gravando", "publicada"]).optional(),
           })
         ).max(200),
         ideas: z.array(
@@ -447,6 +472,7 @@ export const extendedRouter = router({
             hook: z.string().optional(),
             angle: z.string().optional(),
             viralityScore: z.number().int().min(0).max(100).nullable(),
+            notes: z.string().optional(),
           })
         ).max(500),
       })

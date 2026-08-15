@@ -170,6 +170,8 @@ export const pinnedIdeaHistory = mysqlTable("pinned_idea_history", {
   sortOrder: int("sortOrder"),
   /** Anotações pessoais do usuário sobre a ideia fixada */
   notes: text("notes"),
+  /** Status de produção da ideia: planejada, gravando, publicada */
+  status: varchar("status", { length: 10 }).default("planejada").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 

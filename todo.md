@@ -123,3 +123,12 @@
 - [x] Histórico: exportar o histórico filtrado (visão atual, fixadas primeiro) em CSV com colunas Seção/Data/Nicho/Score/Título/Hook/Ângulo/Anotações (buildIdeaHistoryCsv + Exportar CSV no /ideia-do-dia)
 - [x] Testes vitest das novas funcionalidades (86 testes: buildIdeaHistoryCsv x3, updatePinnedNote x1, reorderPinnedIdeas x1)
 - [x] Verificação visual e checkpoint
+
+## Melhorias solicitadas (rodada 14)
+- [x] Ideias: backend do status — coluna status aplicada em pinned_idea_history, helpers updateIdeaStatus/listPinnedIdeas (com status) no db.ts, procedure updateIdeaStatus no router
+- [x] Ideias: visão Kanban (3 colunas: Planejada/Gravando/Publicada) no /ideia-do-dia com drag-drop por coluna (mover entre colunas atualiza o status, reorder dentro da coluna usa reorderPinnedIdeas) e seletor de status por card (update otimista); badges de contagem por coluna e placeholder "Arraste ideias para cá"
+- [x] PDF do histórico: anotações (seção ANOTAÇÕES) e status das fixadas em buildIdeaHistoryPdf + input exportIdeaHistoryPdf com notes/status
+- [x] Ideias fixadas: backend "Duplicar como sugestão" — buildPinnedSuggestion via LLM (título + anotações) + procedure buildSuggestionFromPinned (retorna Suggestion completa)
+- [x] Ideias fixadas: frontend "Duplicar como sugestão" — botão Duplicar por card → buildSuggestionFromPinned via LLM (usa título + anotações da ideia fixada) → modal SuggestionDialog com título/hook/ângulo/estrutura/duração/score/reasoning, botões Copiar sugestão e Exportar TXT
+- [x] Testes vitest das novas funcionalidades (90 testes: updateIdeaStatus x2, buildSuggestionFromPinned x1, buildIdeaHistoryPdf com anotações/status x1)
+- [x] Verificação visual e checkpoint
