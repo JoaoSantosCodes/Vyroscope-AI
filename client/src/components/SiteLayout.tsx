@@ -74,6 +74,16 @@ export default function SiteLayout({ children }: { children: React.ReactNode }) 
             )}
             {isAuthenticated && (
               <Link
+                href="/ideia-do-dia"
+                className={`rounded-md px-3.5 py-2 text-sm font-medium transition-colors ${
+                  location === "/ideia-do-dia" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Ideia do dia
+              </Link>
+            )}
+            {isAuthenticated && (
+              <Link
                 href="/favoritos"
                 className={`rounded-md px-3.5 py-2 text-sm font-medium transition-colors ${
                   location === "/favoritos" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground"

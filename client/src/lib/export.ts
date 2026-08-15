@@ -122,3 +122,38 @@ export async function exportFavoritesPdf(rows: { folder: { id: number | null; na
   const blob = await response.blob();
   downloadBlob(blob, "vyroscope-favoritos.pdf");
 }
+
+/**
+ * Exporta a galeria de favoritos (organizada por pastas) como CSV, com
+ * download imediato no navegador. Colunas: pasta, ordem, título sugerido,
+ * nicho, data, URL da imagem.
+ */
+export function exportFavoritesCsv(
+  rows: { folder: { id: number | null; name: string | null }; thumbnails: { id: number; imageUrl: string; suggestionTitle: string; niche: string; sortOrder: number | null; createdAt: Date }[] }[]
+) {
+  const blob = new Blob(["\uFEFF" + buildFavoritesCsv(rows).join("\n")], { type: "text/csv;charset=utf-8;" });
+  downloadBlob(blob, "vyroscope-favoritos.csv");
+}
+
+/**
+ * Monta as linhas do CSV da galeria de favoritos (organizada por pastas).
+ * Função pura para permitir testes unitários no Vitest.
+ */
+export function buildFavoritesCsv(
+  rows: { folder: { id: number | null; name: string | null }; thumbnails: { id: number; imageUrl: string; suggestionTitle: string; niche: string; sortOrder: number | null; createdAt: Date }[] }[]
+): string[] {
+  const esc = (v: unknown) => {
+    const s = v === null || v === undefined ? "" : String(v);
+    return `"${s.replace(/"/g, '""')}"`;
+  };
+  const csvRows: string[] = ["Pasta,Ordem,Título sugerido,Nicho,Data adicionada,URL da imagem"];
+  for (const row of rows) {
+    const folderName = row.folder.name ?? "Galeria (sem pasta)";
+    for (const t of row.thumbnails) {
+      csvRows.push(
+        [esc(folderName), esc(t.sortOrder), esc(t.suggestionTitle), esc(t.niche), esc(new Date(t.createdAt).toLocaleDateString("pt-BR")), esc(t.imageUrl)].join(",")
+      );
+    }
+  }
+  return csvRows;
+}

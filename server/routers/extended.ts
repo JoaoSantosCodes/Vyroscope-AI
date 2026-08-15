@@ -274,35 +274,115 @@ export const extendedRouter = router({
     } as const;
   }),
 
-  /** Gera um esboço de roteiro automático a partir da sugestão da ideia do dia do usuário. */
-  generateIdeaOutline: protectedProcedure.mutation(async ({ ctx }) => {
-    const { listAnalysesByUser } = await import("../db");
-    const analyses = await listAnalysesByUser(ctx.user.id);
-    const completed = analyses.filter((a) => a.status === "completed" && a.result);
-    if (completed.length === 0) {
-      throw new TRPCError({ code: "BAD_REQUEST", message: "Você ainda não concluiu nenhuma análise para gerar um esboço." });
-    }
-    const byNiche = new Map<string, typeof completed>();
-    for (const a of completed) {
-      const list = byNiche.get(a.niche) ?? [];
-      list.push(a);
-      byNiche.set(a.niche, list);
-    }
-    const primaryNiche = Array.from(byNiche.entries()).sort(
-      (a, b) => b[1].length - a[1].length || new Date(b[1][0].createdAt).getTime() - new Date(a[1][0].createdAt).getTime()
-    )[0][0];
-    const nicheAnalyses = byNiche.get(primaryNiche)!.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    const dayIndex = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
-    const analysis = nicheAnalyses[dayIndex % nicheAnalyses.length];
-    const result = parseResult(analysis.result);
-    if (!result || !result.suggestions?.length) {
-      throw new TRPCError({ code: "BAD_REQUEST", message: "Não há sugestões disponíveis na análise escolhida." });
-    }
-    const topSuggestions = [...result.suggestions].sort((a, b) => (b.viralityScore ?? 0) - (a.viralityScore ?? 0));
-    const suggestion = topSuggestions[dayIndex % topSuggestions.length];
-    const outline = await generateOutline(primaryNiche, suggestion, result.patterns ?? []);
-    return { niche: primaryNiche, analysisId: analysis.id, suggestion, outline };
-  }),
+  /** Histórico do painel "Ideia do dia": lista as ideias já rotacionadas (uma por dia,
+   *  retrocedendo `limit` dias) com base no nicho principal do usuário. Cada ideia
+   *  traz a sugestão, score, hook e link para a análise de origem. */
+  ideaHistory: protectedProcedure
+    .input(
+      z.object({ limit: z.number().int().min(1).max(90).default(30) }).partial().default({})
+    )
+    .query(async ({ ctx, input }) => {
+      const { listAnalysesByUser } = await import("../db");
+      const analyses = await listAnalysesByUser(ctx.user.id);
+      const completed = analyses.filter((a) => a.status === "completed" && a.result);
+      if (completed.length === 0) return { ideas: [], reason: "no_completed_analyses" as const };
+      const byNiche = new Map<string, typeof completed>();
+      for (const a of completed) {
+        const list = byNiche.get(a.niche) ?? [];
+        list.push(a);
+        byNiche.set(a.niche, list);
+      }
+      const primaryNiche = Array.from(byNiche.entries()).sort(
+        (a, b) => b[1].length - a[1].length || new Date(b[1][0].createdAt).getTime() - new Date(a[1][0].createdAt).getTime()
+      )[0][0];
+      const nicheAnalyses = byNiche.get(primaryNiche)!.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+      const ideas: {
+        date: string;
+        niche: string;
+        analysisId: string;
+        analysisDate: number;
+        suggestion: { title: string; hook?: string; angle?: string; targetLength?: string; viralityScore: number | null; reasoning?: string };
+      }[] = [];
+      const now = new Date();
+      const limit = input.limit ?? 30;
+      for (let i = 0; i < limit; i += 1) {
+        const dayMs = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) - i * 24 * 60 * 60 * 1000;
+        const dayIndex = Math.floor(dayMs / (24 * 60 * 60 * 1000));
+        const dateStr = new Date(dayMs).toISOString().slice(0, 10);
+        const analysis = nicheAnalyses[dayIndex % nicheAnalyses.length];
+        const result = parseResult(analysis.result);
+        if (!result || !result.suggestions?.length) continue;
+        const topSuggestions = [...result.suggestions].sort((a, b) => (b.viralityScore ?? 0) - (a.viralityScore ?? 0));
+        const suggestion = topSuggestions[dayIndex % topSuggestions.length];
+        ideas.push({
+          date: dateStr,
+          niche: primaryNiche,
+          analysisId: analysis.id,
+          analysisDate: new Date(analysis.createdAt).getTime(),
+          suggestion,
+        });
+      }
+      return { ideas, reason: null } as const;
+    }),
+
+  /** Gera um esboço de roteiro automático a partir da sugestão da ideia do dia do usuário.
+   *  Quando analysisId + suggestionTitle são informados, gera o esboço para essa sugestão
+   *  específica (usado pelo histórico de ideias do dia); caso contrário, usa a ideia do dia. */
+  generateIdeaOutline: protectedProcedure
+    .input(
+      z
+        .object({
+          analysisId: z.string().min(1).optional(),
+          suggestionTitle: z.string().min(1).optional(),
+        })
+        .default({})
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { listAnalysesByUser, getAnalysisById } = await import("../db");
+      const analyses = await listAnalysesByUser(ctx.user.id);
+      const completed = analyses.filter((a) => a.status === "completed" && a.result);
+      if (completed.length === 0) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Você ainda não concluiu nenhuma análise para gerar um esboço." });
+      }
+      const byNiche = new Map<string, typeof completed>();
+      for (const a of completed) {
+        const list = byNiche.get(a.niche) ?? [];
+        list.push(a);
+        byNiche.set(a.niche, list);
+      }
+      const primaryNiche = Array.from(byNiche.entries()).sort(
+        (a, b) => b[1].length - a[1].length || new Date(b[1][0].createdAt).getTime() - new Date(a[1][0].createdAt).getTime()
+      )[0][0];
+
+      let analysis;
+      let suggestion;
+      if (input.analysisId && input.suggestionTitle) {
+        analysis = await getAnalysisById(input.analysisId);
+        if (!analysis || analysis.userId !== ctx.user.id) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Análise não encontrada." });
+        }
+        const result = parseResult(analysis.result);
+        const found = result?.suggestions?.find((s) => s.title === input.suggestionTitle);
+        if (!found) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Sugestão não encontrada na análise informada." });
+        }
+        suggestion = found;
+      } else {
+        const nicheAnalyses = byNiche.get(primaryNiche)!.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        const dayIndex = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
+        analysis = nicheAnalyses[dayIndex % nicheAnalyses.length];
+        const result = parseResult(analysis.result);
+        if (!result || !result.suggestions?.length) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Não há sugestões disponíveis na análise escolhida." });
+        }
+        const topSuggestions = [...result.suggestions].sort((a, b) => (b.viralityScore ?? 0) - (a.viralityScore ?? 0));
+        suggestion = topSuggestions[dayIndex % topSuggestions.length];
+      }
+      const result = parseResult(analysis.result)!;
+      const outline = await generateOutline(analysis.niche, suggestion, result.patterns ?? []);
+      return { niche: analysis.niche, analysisId: analysis.id, suggestion, outline };
+    }),
 
   /** Gera agenda de conteúdo de 4 semanas a partir das sugestões de uma análise. */
   generateAgenda: protectedProcedure.input(agendaInput).mutation(async ({ ctx, input }) => {

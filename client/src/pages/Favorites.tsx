@@ -30,7 +30,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { exportFavoritesPdf } from "@/lib/export";
+import { exportFavoritesCsv, exportFavoritesPdf } from "@/lib/export";
 import { formatDate } from "@/lib/score";
 import { trpc } from "@/lib/trpc";
 import {
@@ -49,7 +49,7 @@ import {
   Square,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 
@@ -370,6 +370,28 @@ export default function Favorites() {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [filtered, hasSelection]);
+
+  // Atalhos Delete (remover seleção dos favoritos) e Escape (limpar seleção)
+  // Mantém as funções atuais sempre acessíveis via ref para evitar closure stale.
+  const actionsRef = useRef({ batchUnfavorite: handleBatchUnfavorite, clear: clearSelection });
+  useEffect(() => {
+    actionsRef.current = { batchUnfavorite: handleBatchUnfavorite, clear: clearSelection };
+  });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (e.key === "Delete" && hasSelection) {
+        e.preventDefault();
+        actionsRef.current.batchUnfavorite();
+      } else if (e.key === "Escape" && hasSelection) {
+        e.preventDefault();
+        actionsRef.current.clear();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [hasSelection]);
   const folderName = (id: number | null) => folders.find((f) => f.id === id)?.name ?? null;
   const folderColor = (id: number | null) => folders.find((f) => f.id === id)?.color ?? null;
   const countInFolder = (id: number | null) => items.filter((r) => r.suggestion_thumbnails.folderId === id).length;
@@ -401,6 +423,19 @@ export default function Favorites() {
               <FileDown className="h-3.5 w-3.5" />
             )}
             Exportar PDF
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={() => {
+              exportFavoritesCsv(buildExportRows());
+              toast.success("Arquivo CSV baixado.");
+            }}
+            disabled={items.length === 0}
+          >
+            <FileDown className="h-3.5 w-3.5" />
+            Exportar CSV
           </Button>
           <Button
             variant={hasSelection ? "default" : "outline"}

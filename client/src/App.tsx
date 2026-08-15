@@ -9,6 +9,7 @@ import Compare from "./pages/Compare";
 import Favorites from "./pages/Favorites";
 import History from "./pages/History";
 import Home from "./pages/Home";
+import IdeaHistory from "./pages/IdeaHistory";
 import Monitoring from "./pages/Monitoring";
 import Profile from "./pages/Profile";
 import Result from "./pages/Result";
@@ -20,7 +21,8 @@ function Router() {
       <Route path={"/"} component={Home} />
       <Route path={"/analise"} component={Analysis} />
       <Route path={"/resultado/:id"} component={Result} />
-      <Route path={"/historico"} component={History} />
+      <Route path="/historico" component={History} />
+      <Route path="/ideia-do-dia" component={IdeaHistory} />
       <Route path={"/comparador"} component={Compare} />
       <Route path={"/monitorar"} component={Monitoring} />
       <Route path={"/perfil"} component={Profile} />

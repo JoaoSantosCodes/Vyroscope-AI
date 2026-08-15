@@ -277,6 +277,7 @@ vi.mock("./db", async (importOriginal) => {
     moveThumbnailToFolder: vi.fn(),
     reorderThumbnails: vi.fn(),
     listAnalysesByUser: vi.fn(),
+    getAnalysisById: vi.fn(),
   };
 });
 
@@ -289,6 +290,7 @@ const mockedDeleteFolder = vi.mocked(db.deleteThumbnailFolder);
 const mockedMoveThumbnail = vi.mocked(db.moveThumbnailToFolder);
 const mockedReorder = vi.mocked(db.reorderThumbnails);
 const mockedListAnalyses = vi.mocked(db.listAnalysesByUser);
+const mockedGetAnalysis = vi.mocked(db.getAnalysisById);
 
 const folderUser = {
   id: 2,
@@ -414,6 +416,54 @@ describe("extended.ideaOfTheDay", () => {
   });
 });
 
+describe("extended.ideaHistory", () => {
+  function analysisRow(id: string, niche: string, createdAt: Date, suggestions: unknown[] = []) {
+    return {
+      id,
+      userId: 2,
+      niche,
+      status: "completed",
+      result: JSON.stringify({ suggestions, videos: [], patterns: [] }),
+      createdAt,
+      updatedAt: createdAt,
+    } as never;
+  }
+
+  it("returns no_completed_analyses when the user has no completed analyses", async () => {
+    mockedListAnalyses.mockResolvedValueOnce([] as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.ideaHistory({});
+    expect(result).toEqual({ ideas: [], reason: "no_completed_analyses" });
+  });
+
+  it("lists one idea per day, rotated deterministically from the primary niche", async () => {
+    const a1 = analysisRow("h1", "fitness", new Date("2026-08-01"), [
+      { title: "Treino de 10 min", hook: "Acorde e treine", angle: "Rotina rápida", viralityScore: 88 },
+      { title: "Dieta flexível", hook: "Coma o que gosta", angle: "Liberdade", viralityScore: 70 },
+    ]);
+    const a2 = analysisRow("h2", "games", new Date("2026-08-10"), [
+      { title: "Setup barato", hook: "Jogue sem gastar", angle: "Custo", viralityScore: 90 },
+    ]);
+    mockedListAnalyses.mockResolvedValueOnce([a1, a2] as never);
+
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.ideaHistory({ limit: 5 });
+
+    expect(result.reason).toBeNull();
+    expect(result.ideas).toHaveLength(5);
+    // Dia mais recente primeiro (índice 0 = hoje)
+    expect(result.ideas[0].niche).toBe("games");
+    expect(typeof result.ideas[0].date).toBe("string");
+    expect(result.ideas.every((i) => i.suggestion.title)).toBe(true);
+    // As datas são consecutivas retrocedendo a partir de hoje
+    for (let i = 1; i < result.ideas.length; i += 1) {
+      const prev = new Date(result.ideas[i - 1].date + "T12:00:00Z");
+      const cur = new Date(result.ideas[i].date + "T12:00:00Z");
+      expect(prev.getTime() - cur.getTime()).toBe(24 * 60 * 60 * 1000);
+    }
+  });
+});
+
 describe("extended.generateIdeaOutline", () => {
   function outlineRow(id: string, niche: string, createdAt: Date, suggestions: unknown[] = []) {
     return {
@@ -431,6 +481,45 @@ describe("extended.generateIdeaOutline", () => {
     mockedListAnalyses.mockResolvedValueOnce([] as never);
     const caller = appRouter.createCaller(createFolderCtx());
     await expect(caller.extended.generateIdeaOutline()).rejects.toThrow("análise");
+  });
+
+  it("generates an outline for a specific suggestion via analysisId + suggestionTitle", async () => {
+    const outlinePayload = {
+      title: "Esboço específico",
+      totalLength: "5-8 min",
+      acts: [
+        { act: "open", label: "Abertura", duration: "1 min", points: ["gancho"], keyLine: "linha" },
+        { act: "body", label: "Desenvolvimento", duration: "3 min", points: ["conteúdo"], keyLine: "linha 2" },
+        { act: "close", label: "Fechamento", duration: "1 min", points: ["CTA"], keyLine: "linha 3" },
+      ],
+      notes: [],
+    };
+    mockedInvokeLLM.mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify(outlinePayload) } }] } as never);
+
+    const a = outlineRow("a9", "fitness", new Date("2026-07-01"), [
+      { title: "Treino de 10 min", hook: "Acorde e treine", angle: "Rotina rápida", viralityScore: 88 },
+      { title: "Dieta flexível", hook: "Coma o que gosta", angle: "Liberdade", viralityScore: 70 },
+    ]);
+    mockedGetAnalysis.mockResolvedValueOnce(a as never);
+    mockedListAnalyses.mockResolvedValueOnce([a] as never);
+
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.generateIdeaOutline({ analysisId: "a9", suggestionTitle: "Dieta flexível" });
+
+    expect(result.niche).toBe("fitness");
+    expect(result.analysisId).toBe("a9");
+    expect(result.suggestion.title).toBe("Dieta flexível");
+    expect(result.outline.title).toBe("Dieta flexível");
+  });
+
+  it("throws when the specific suggestion is not in the given analysis", async () => {
+    mockedGetAnalysis.mockResolvedValueOnce(
+      outlineRow("a8", "games", new Date(), [{ title: "Setup barato", hook: "h", angle: "a", viralityScore: 5 }]) as never
+    );
+    mockedListAnalyses.mockResolvedValueOnce([outlineRow("a8", "games", new Date(), []) as never]);
+
+    const caller = appRouter.createCaller(createFolderCtx());
+    await expect(caller.extended.generateIdeaOutline({ analysisId: "a8", suggestionTitle: "Inexistente" })).rejects.toThrow("Sugestão não encontrada");
   });
 
   it("generates an outline from the primary niche suggestion of the day", async () => {

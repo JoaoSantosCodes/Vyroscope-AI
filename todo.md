@@ -101,3 +101,11 @@
 ## Revisão pós-rodada 10
 - [x] Correção de otimização: toggleFavorite com favorite=false agora remove o item imediatamente da galeria (desfavoritar em lote com contadores atualizados em tempo real)
 - [x] Teste vitest novo: buildFavoritesPdf valida no texto extraído do PDF os títulos das sugestões associadas e nomes de pastas (60 testes passando)
+
+## Melhorias solicitadas (rodada 11)
+- [x] Favoritos: exportar a galeria organizada por pastas em CSV (colunas: pasta, ordem, título sugerido, nicho, data, URL da imagem) — exportFavoritesCsv + botão Exportar CSV
+- [x] Ideia do dia: histórico de sugestões anteriores do nicho (rota /ideia-do-dia, link no header) — procedure ideaHistory (rotaciona retrocedendo N dias) + generateIdeaOutline aceita sugestão específica; cards com esboço/copiar/análise + modal OutlineDialog
+- [x] Favoritos: atalho Delete para remover a seleção atual dos favoritos (handleBatchUnfavorite)
+- [x] Favoritos: atalho Escape para limpar a seleção atual (clearSelection)
+- [x] Testes vitest das novas funcionalidades (64 testes passando: ideaHistory x2, generateIdeaOutline com input x2)
+- [x] Verificação visual e checkpoint (screenshots /favoritos, /ideia-do-dia e / OK; 69 testes vitest passando)
