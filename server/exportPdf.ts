@@ -282,11 +282,13 @@ export async function buildFavoritesPdf(rows: FavoritesExportRow[]): Promise<Buf
               doc.fillColor(COLORS.gray).fontSize(9).text("(imagem indisponível)", x + w / 2 - 55, y + h / 2 - 6);
             }
 
-            // Título abaixo da imagem
+            // Título sugerido associado abaixo da imagem
+            doc.fillColor(COLORS.amber).fontSize(6.5).font("Helvetica-Bold");
+            doc.text("SUGESTÃO ASSOCIADA", x, y + h + 6, { width: w, characterSpacing: 1 });
             doc.fillColor(COLORS.light).fontSize(8.5).font("Helvetica");
-            doc.text(t.suggestionTitle, x, y + h + 4, { width: w, lineBreak: true });
+            doc.text(t.suggestionTitle, x, y + h + 13, { width: w, lineBreak: true, height: 16 });
             doc.fillColor(COLORS.gray).fontSize(7.5);
-            doc.text(`${t.niche} · ${new Date(t.createdAt).toLocaleDateString("pt-BR")}`, x, y + h + 17, { width: w, lineBreak: true });
+            doc.text(`${t.niche} · ${new Date(t.createdAt).toLocaleDateString("pt-BR")}`, x, y + h + 30, { width: w, lineBreak: true });
           }
 
           doc.y += 36;

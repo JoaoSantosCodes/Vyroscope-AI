@@ -49,7 +49,7 @@ import {
   Square,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 
@@ -353,6 +353,23 @@ export default function Favorites() {
   const folders = foldersQuery.data ?? [];
 
   const filtered = folderFilter === null ? items : items.filter((row) => row.suggestion_thumbnails.folderId === folderFilter);
+
+
+  // Atalho Ctrl+A: seleciona todas as thumbnails visíveis na galeria
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+        if (!hasSelection && filtered.length === 0) return;
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA") return;
+        e.preventDefault();
+        const ids = new Set(filtered.map((r) => r.suggestion_thumbnails.id));
+        setSelectedIds((prev) => (prev.size === ids.size ? new Set() : ids));
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [filtered, hasSelection]);
   const folderName = (id: number | null) => folders.find((f) => f.id === id)?.name ?? null;
   const folderColor = (id: number | null) => folders.find((f) => f.id === id)?.color ?? null;
   const countInFolder = (id: number | null) => items.filter((r) => r.suggestion_thumbnails.folderId === id).length;
@@ -395,6 +412,11 @@ export default function Favorites() {
             {hasSelection ? <X className="h-3.5 w-3.5" /> : <CheckSquare className="h-3.5 w-3.5" />}
             {hasSelection ? "Limpar seleção" : "Selecionar"}
             {hasSelection && <span className="ml-1 rounded-full bg-white/20 px-1.5 py-0.5 text-[10px] font-semibold">{selectedIds.size}</span>}
+            {hasSelection && (
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                Ctrl+A para tudo
+              </span>
+            )}
           </Button>
         </div>
 

@@ -89,3 +89,11 @@
 - [x] Backend + Frontend: exportar galeria de Favoritos organizada por pastas em PDF (buildFavoritesPdf + rota /api/export-favorites-pdf + botão Exportar PDF)
 - [x] Testes vitest das novas funcionalidades (59 testes passando)
 - [x] Verificação visual e checkpoint
+
+## Melhorias solicitadas (rodada 10)
+- [ ] Atualizar habilidade vyroscope-video-analyst (skill-creator) com todo o processo usado até aqui (skill já existe em /home/ubuntu/skills/vyroscope-video-analyst)
+- [ ] PDF de favoritos: incluir título sugerido associado a cada thumbnail na exportação (buildFavoritesPdf)
+- [ ] Favoritos: contador de thumbnails por pasta atualizado em tempo real durante ações em lote
+- [ ] Favoritos: atalho de teclado Ctrl+A para selecionar todas as thumbnails na galeria
+- [ ] Testes vitest das novas funcionalidades
+- [ ] Verificação visual e checkpoint
