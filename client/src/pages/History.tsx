@@ -1,0 +1,138 @@
+import SiteLayout from "@/components/SiteLayout";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { startLogin } from "@/const";
+import { formatDate } from "@/lib/score";
+import { trpc } from "@/lib/trpc";
+import { Clock, Radar, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import { useLocation } from "wouter";
+
+export default function History() {
+  const [, navigate] = useLocation();
+  const { isAuthenticated } = useAuth();
+  const utils = trpc.useUtils();
+
+  const listQuery = trpc.analysis.list.useQuery(undefined, { enabled: isAuthenticated });
+  const removeMutation = trpc.analysis.remove.useMutation({
+    onSuccess: () => {
+      toast.success("Análise removida.");
+      utils.analysis.list.invalidate();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  if (!isAuthenticated) {
+    return (
+      <SiteLayout>
+        <div className="container flex min-h-[50vh] max-w-3xl flex-col items-center justify-center gap-4 text-center py-16">
+          <Radar className="h-10 w-10 text-muted-foreground/40" />
+          <h2 className="font-display text-2xl font-semibold">Seu histórico é pessoal</h2>
+          <p className="max-w-md text-sm text-muted-foreground">
+            Entre com sua conta para ver suas análises anteriores — ninguém mais tem acesso a elas.
+          </p>
+          <Button onClick={() => startLogin()}>Entrar</Button>
+        </div>
+      </SiteLayout>
+    );
+  }
+
+  return (
+    <SiteLayout>
+      <div className="container max-w-3xl py-10">
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h1 className="font-display text-3xl font-semibold">Histórico de análises</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Todas as suas análises ficam salvas na sua conta.
+            </p>
+          </div>
+        </div>
+
+        {listQuery.isLoading && (
+          <div className="space-y-3">
+            {[1, 2, 3].map((i) => (
+              <Skeleton key={i} className="h-20 w-full" />
+            ))}
+          </div>
+        )}
+
+        {!listQuery.isLoading && listQuery.data?.length === 0 && (
+          <div className="flex flex-col items-center gap-4 py-16 text-center">
+            <Radar className="h-10 w-10 text-muted-foreground/40" />
+            <h2 className="font-display text-xl font-semibold">Nenhuma análise ainda</h2>
+            <p className="max-w-md text-sm text-muted-foreground">
+              Comece escolhendo um nicho na página inicial e receba sugestões prontas para gravar.
+            </p>
+            <Button onClick={() => navigate("/")}>Iniciar primeira análise</Button>
+          </div>
+        )}
+
+        {!listQuery.isLoading && !!listQuery.data?.length && (
+          <div className="space-y-3">
+            {listQuery.data.map((row) => (
+              <Card
+                key={row.id}
+                className="cursor-pointer border-border/60 transition-colors hover:border-primary/40"
+                onClick={() => navigate(`/resultado/${row.id}`)}
+              >
+                <CardContent className="flex items-center justify-between gap-3 p-4">
+                  <div className="flex items-center gap-3.5">
+                    <span
+                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+                        row.status === "completed"
+                          ? "bg-primary/15 text-primary"
+                          : row.status === "failed"
+                            ? "bg-destructive/15 text-destructive"
+                            : "bg-muted text-muted-foreground"
+                      }`}
+                    >
+                      <Radar className="h-4.5 w-4.5" />
+                    </span>
+                    <div>
+                      <h3 className="font-medium capitalize">{row.niche}</h3>
+                      <p className="text-xs text-muted-foreground">
+                        {formatDate(row.createdAt)}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Badge
+                      variant="outline"
+                      className={
+                        row.status === "completed"
+                          ? "border-primary/40 text-primary"
+                          : row.status === "failed"
+                            ? "border-destructive/40 text-destructive"
+                            : "border-muted-foreground/30 text-muted-foreground"
+                      }
+                    >
+                      {row.status === "completed"
+                        ? "Concluída"
+                        : row.status === "failed"
+                          ? "Falhou"
+                          : "Em execução"}
+                    </Badge>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeMutation.mutate({ id: row.id });
+                      }}
+                      className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                      aria-label="Remover análise"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+    </SiteLayout>
+  );
+}

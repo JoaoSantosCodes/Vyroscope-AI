@@ -4,13 +4,19 @@ import NotFound from "@/pages/NotFound";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
+import Analysis from "./pages/Analysis";
+import History from "./pages/History";
 import Home from "./pages/Home";
+import Result from "./pages/Result";
 
 function Router() {
   // make sure to consider if you need authentication for certain routes
   return (
-    <Switch>
+      <Switch>
       <Route path={"/"} component={Home} />
+      <Route path={"/analise"} component={Analysis} />
+      <Route path={"/resultado/:id"} component={Result} />
+      <Route path={"/historico"} component={History} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />
@@ -26,10 +32,7 @@ function Router() {
 function App() {
   return (
     <ErrorBoundary>
-      <ThemeProvider
-        defaultTheme="light"
-        // switchable
-      >
+      <ThemeProvider defaultTheme="dark" switchable>
         <TooltipProvider>
           <Toaster />
           <Router />

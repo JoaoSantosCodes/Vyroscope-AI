@@ -1,6 +1,13 @@
-import { eq } from "drizzle-orm";
+import { asc, desc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users } from "../drizzle/schema";
+import {
+  analysisVideos,
+  analyses,
+  InsertAnalysis,
+  InsertAnalysisVideo,
+  InsertUser,
+  users,
+} from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -89,4 +96,81 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
-// TODO: add feature queries here as your schema grows.
+export async function createAnalysis(analysis: InsertAnalysis) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.insert(analyses).values(analysis);
+}
+
+export async function updateAnalysis(
+  id: string,
+  patch: Partial<InsertAnalysis>
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(analyses).set(patch).where(eq(analyses.id, id));
+}
+
+export async function getAnalysisById(id: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const rows = await db.select().from(analyses).where(eq(analyses.id, id)).limit(1);
+  return rows[0];
+}
+
+export async function listAnalysesByUser(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select({
+      id: analyses.id,
+      niche: analyses.niche,
+      status: analyses.status,
+      createdAt: analyses.createdAt,
+    })
+    .from(analyses)
+    .where(eq(analyses.userId, userId))
+    .orderBy(desc(analyses.createdAt))
+    .limit(50);
+}
+
+export async function saveVideos(
+  analysisId: string,
+  videos: InsertAnalysisVideo[]
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  if (videos.length === 0) return;
+  await db.insert(analysisVideos).values(videos);
+}
+
+export async function getVideosByAnalysis(analysisId: string) {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select()
+    .from(analysisVideos)
+    .where(eq(analysisVideos.analysisId, analysisId))
+    .orderBy(desc(analysisVideos.viewCount));
+}
+
+export async function deleteAnalysisVideos(analysisId: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.delete(analysisVideos).where(eq(analysisVideos.analysisId, analysisId));
+}
+
+export async function deleteAnalysis(id: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await deleteAnalysisVideos(id);
+  await db.delete(analyses).where(eq(analyses.id, id));
+}
+
+export async function deleteAnalysesByIds(ids: string[]) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  if (ids.length === 0) return;
+  await db.delete(analysisVideos).where(inArray(analysisVideos.analysisId, ids));
+  await db.delete(analyses).where(inArray(analyses.id, ids));
+}
