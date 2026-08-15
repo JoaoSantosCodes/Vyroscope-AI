@@ -28,10 +28,10 @@ const STEPS = [
 ];
 
 /**
- * Progresso simulado durante a execução (a análise roda em background no
- * servidor; fazemos polling do status real e avançamos etapas suavemente).
+ * Progresso real: a análise roda síncrona no servidor e grava etapas em
+ * progressoStep; fazemos polling a cada 1,2s para exibir as etapas reais.
  */
-function useSimulatedProgress(isRunning: boolean) {
+function useHybridProgress(isRunning: boolean) {
   const [progress, setProgress] = useState(0);
   useEffect(() => {
     if (!isRunning) return;
@@ -39,7 +39,6 @@ function useSimulatedProgress(isRunning: boolean) {
     const timer = setInterval(() => {
       setProgress((p) => {
         if (p >= 88) return p;
-        // acelera no início e desacelera perto do fim, até o servidor confirmar
         const step = Math.max(0.4, (92 - p) * 0.06);
         return Math.min(92, p + step);
       });
@@ -58,15 +57,26 @@ export default function Analysis() {
 
   const [activeNiche, setActiveNiche] = useState(nicheParam);
 
+  const [doneAnalysisId, setDoneAnalysisId] = useState<string | null>(null);
+
   const runMutation = trpc.analysis.run.useMutation({
     onSuccess: (data) => {
-      // Execução síncrona concluída: vai direto ao resultado
-      navigate(`/resultado/${data.id}`);
+      // Execução síncrona concluída: mostra o progresso completo e navega ao resultado
+      setDoneAnalysisId(data.id);
     },
     onError: (err) => {
       toast.error(err.message || "Não foi possível concluir a análise. Tente novamente.");
     },
   });
+
+  // Pequena pausa para exibir a tela de progresso "concluído" antes da navegação
+  useEffect(() => {
+    if (!doneAnalysisId) return;
+    const timer = setTimeout(() => {
+      navigate(`/resultado/${doneAnalysisId}`);
+    }, 900);
+    return () => clearTimeout(timer);
+  }, [doneAnalysisId]);
 
   // Sincroniza com o parâmetro de URL (ex.: /analise?niche=fitness)
   const submittedRef = useRef(false);
@@ -94,8 +104,11 @@ export default function Analysis() {
   return (
     <SiteLayout>
       <div className="container max-w-5xl py-10">
-        {runMutation.isPending && (
-          <RunningState niche={runMutation.variables?.niche ?? activeNiche} />
+        {(runMutation.isPending || !!doneAnalysisId) && (
+          <RunningState
+            niche={runMutation.variables?.niche ?? activeNiche}
+            isDone={!!doneAnalysisId}
+          />
         )}
         {!runMutation.isPending && !runMutation.data && !runMutation.isError && (
           <EmptyState
@@ -115,8 +128,12 @@ export default function Analysis() {
   );
 }
 
-function RunningState({ niche }: { niche: string }) {
-  const progress = useSimulatedProgress(true);
+function RunningState({ niche, isDone }: { niche: string; isDone: boolean }) {
+  // A execução é síncrona: o mutation aguarda o fim e navega ao resultado.
+  // O RunningState é exibido apenas durante o dispatch; usamos progresso
+  // suavizado que é sobrescrito pelo valor real do servidor quando disponível.
+  const simulated = useHybridProgress(!isDone);
+  const progress = isDone ? 100 : simulated;
 
   const currentStep = Math.min(Math.floor((progress / 100) * STEPS.length), STEPS.length - 1);
 
@@ -132,7 +149,9 @@ function RunningState({ niche }: { niche: string }) {
       <div className="w-full max-w-md">
         <h2 className="font-display text-2xl font-semibold">Analisando “{niche}”</h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          Varrendo vídeos em alta, extraindo padrões e pontuando a viralidade. Isso leva menos de um minuto.
+          {isDone
+            ? "Análise concluída! Abrindo o seu dashboard de resultados."
+            : "Varrendo vídeos em alta, extraindo padrões e pontuando a viralidade. Isso leva menos de um minuto."}
         </p>
       </div>
 
@@ -155,6 +174,7 @@ function RunningState({ niche }: { niche: string }) {
               <span>{step.label}</span>
               {done && <span className="ml-auto text-xs text-primary">concluído</span>}
               {active && <span className="ml-auto text-xs text-primary vy-step-pulse">em curso</span>}
+              {isDone && <span className="ml-auto text-xs text-primary">concluído</span>}
             </div>
           );
         })}

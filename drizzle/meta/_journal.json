@@ -15,6 +15,13 @@
       "when": 1786757903507,
       "tag": "0001_panoramic_daimon_hellstrom",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1786761777832,
+      "tag": "0002_flat_aaron_stack",
+      "breakpoints": true
     }
   ]
 }

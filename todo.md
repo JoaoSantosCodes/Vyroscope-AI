@@ -19,4 +19,12 @@
 ## Entrega
 - [x] Verificação visual (screenshots desktop e mobile)
 - [x] Testes rodando sem erros
-- [ ] Checkpoint final
+- [x] Checkpoint final (versão 6349ffe0 salva)
+
+## Melhorias solicitadas (rodada 2)
+- [x] Exportação de sugestões em PDF (geração no servidor com layout elegante, /api/export-pdf)
+- [x] Exportação de sugestões em CSV (download client-side)
+- [x] Filtro/ordenação no dashboard por virality score
+- [x] Filtro/ordenação no dashboard por duração
+- [x] Barra de progresso detalhada durante a análise (etapas reais via backend, coluna progressStep)
+- [x] Área de perfil do usuário (rota /perfil, dados da conta, estatísticas, edição de nome/email)

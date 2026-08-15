@@ -2,6 +2,12 @@ import SiteLayout from "@/components/SiteLayout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatCompact, formatDate, formatDuration, scoreColor, scoreLabel } from "@/lib/score";
@@ -12,6 +18,7 @@ import {
   ArrowUpRight,
   Clock,
   Copy,
+  Download,
   ExternalLink,
   Flame,
   MessageCircle,
@@ -22,7 +29,8 @@ import {
   ThumbsUp,
   TrendingUp,
 } from "lucide-react";
-import { useState } from "react";
+import { exportAnalysisCsv, exportAnalysisPdf } from "@/lib/export";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useLocation, useParams } from "wouter";
 
@@ -125,6 +133,83 @@ export default function Result() {
   );
 }
 
+function useMemoSortedSuggestions(suggestions: AnalysisResult["suggestions"], sortBy: "score" | "duration") {
+  return useMemo(() => {
+    const sorted = [...suggestions];
+    if (sortBy === "score") {
+      sorted.sort((a, b) => b.viralityScore - a.viralityScore);
+    } else {
+      const mins = (targetLength: string) => {
+        const m = targetLength.match(/(\d+)/g);
+        return m ? Math.min(...m.map(Number)) : 0;
+      };
+      sorted.sort((a, b) => mins(b.targetLength) - mins(a.targetLength));
+    }
+    return sorted;
+  }, [suggestions, sortBy]);
+}
+
+function SortMenu({
+  value,
+  onChange,
+}: {
+  value: "score" | "duration";
+  onChange: (v: "score" | "duration") => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm">
+          <TrendingUp className="mr-1.5 h-4 w-4" />
+          {value === "score" ? "Ordenar por score" : "Ordenar por duração"}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={() => onChange("score")}>
+          <TrendingUp className="mr-2 h-4 w-4" /> Virality score (maior primeiro)
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onChange("duration")}>
+          <Clock className="mr-2 h-4 w-4" /> Duração (maior primeiro)
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function ExportMenu({ result, niche }: { result: AnalysisResult; niche: string }) {
+  const handleExport = async (format: "pdf" | "csv") => {
+    try {
+      if (format === "csv") {
+        exportAnalysisCsv(result, niche);
+        toast.success("Arquivo CSV baixado.");
+      } else {
+        await exportAnalysisPdf(result, niche);
+        toast.success("Arquivo PDF baixado.");
+      }
+    } catch {
+      toast.error("Não foi possível gerar o arquivo. Tente novamente.");
+    }
+  };
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm">
+          <Download className="mr-1.5 h-4 w-4" /> Exportar
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={() => handleExport("pdf")}>
+          <Download className="mr-2 h-4 w-4" /> Baixar PDF
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => handleExport("csv")}>
+          <Download className="mr-2 h-4 w-4" /> Baixar CSV
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function StillRunning() {
   return (
     <div className="flex min-h-[40vh] flex-col items-center justify-center gap-4 text-center">
@@ -175,7 +260,8 @@ function Dashboard({
   videos: VideoWithScore[];
 }) {
   const patterns = [...(result.patterns ?? [])].sort((a, b) => b.score - a.score);
-  const suggestions = result.suggestions ?? [];
+  const [sortBy, setSortBy] = useState<"score" | "duration">("score");
+  const suggestions = useMemoSortedSuggestions(result.suggestions ?? [], sortBy);
   const videoMap = new Map(videos.map((v) => [v.youtubeId, v]));
   const scoredVideos = (result.videoScores ?? [])
     .map((s) => ({ ...s, video: videoMap.get(s.videoId) }))
@@ -191,10 +277,16 @@ function Dashboard({
       </TabsList>
 
       <TabsContent value="suggestions" className="space-y-5">
-        <p className="text-sm text-muted-foreground">
-          Cinco sugestões prontas para gravar, combinando os padrões dominantes do nicho com
-          ângulos ainda não explorados.
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted-foreground">
+            Cinco sugestões prontas para gravar, combinando os padrões dominantes do nicho com
+            ângulos ainda não explorados.
+          </p>
+          <div className="flex items-center gap-2">
+            <SortMenu value={sortBy} onChange={setSortBy} />
+            <ExportMenu result={result} niche={result.niche} />
+          </div>
+        </div>
         {suggestions.map((s, i) => (
           <SuggestionCard key={i} suggestion={s} index={i} />
         ))}

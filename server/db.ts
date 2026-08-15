@@ -174,3 +174,35 @@ export async function deleteAnalysesByIds(ids: string[]) {
   await db.delete(analysisVideos).where(inArray(analysisVideos.analysisId, ids));
   await db.delete(analyses).where(inArray(analyses.id, ids));
 }
+
+export async function updateAnalysisProgress(id: string, step: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(analyses).set({ progressStep: Math.min(100, Math.max(0, step)) }).where(eq(analyses.id, id));
+}
+
+export async function getUserStats(userId: number) {
+  const db = await getDb();
+  if (!db) return { total: 0, completed: 0 };
+  const rows = await db
+    .select({
+      status: analyses.status,
+    })
+    .from(analyses)
+    .where(eq(analyses.userId, userId));
+  const total = rows.length;
+  const completed = rows.filter((r) => r.status === "completed").length;
+  return { total, completed };
+}
+
+export async function updateUserProfile(userId: number, patch: { name?: string | null; email?: string | null }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const updateSet: Record<string, unknown> = {};
+  if ("name" in patch) updateSet.name = patch.name ?? null;
+  if ("email" in patch) updateSet.email = patch.email ?? null;
+  if (Object.keys(updateSet).length > 0) {
+    await db.update(users).set(updateSet).where(eq(users.id, userId));
+  }
+  return db.select().from(users).where(eq(users.id, userId)).limit(1).then((r) => r[0]);
+}

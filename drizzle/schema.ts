@@ -37,6 +37,8 @@ export const analyses = mysqlTable("analyses", {
   /** Resultado estruturado da análise (JSON): vídeos, padrões, sugestões */
   result: text("result"),
   errorMessage: text("errorMessage"),
+  /** Etapa atual de progresso da análise (0-100) */
+  progressStep: int("progressStep").default(0).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

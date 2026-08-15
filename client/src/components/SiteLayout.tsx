@@ -1,9 +1,18 @@
 import { startLogin } from "@/const";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTheme } from "@/contexts/ThemeContext";
-import { LogIn, LogOut, Moon, Radar, Sun } from "lucide-react";
+import { LogIn, LogOut, Moon, Radar, Sun, User } from "lucide-react";
 import { Link, useLocation } from "wouter";
 
 export default function SiteLayout({ children }: { children: React.ReactNode }) {
@@ -53,14 +62,35 @@ export default function SiteLayout({ children }: { children: React.ReactNode }) 
             {loading ? (
               <Skeleton className="h-9 w-24 rounded-md" />
             ) : isAuthenticated ? (
-              <div className="flex items-center gap-2">
-                <span className="hidden max-w-32 truncate text-sm text-muted-foreground sm:block">
-                  {user?.name ?? user?.email}
-                </span>
-                <Button variant="outline" size="sm" onClick={() => logout()}>
-                  <LogOut className="h-4 w-4 sm:mr-1.5" /> <span className="hidden sm:inline">Sair</span>
-                </Button>
-              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="flex items-center gap-2 rounded-md px-1 py-1 outline-none transition-colors hover:bg-accent">
+                    <span className="hidden max-w-32 truncate text-sm text-muted-foreground sm:block">
+                      {user?.name ?? user?.email}
+                    </span>
+                    <Avatar className="h-8 w-8">
+                      <AvatarFallback className="bg-gradient-to-br from-amber-400 to-orange-500 text-[oklch(0.2_0.05_60)] text-xs font-semibold">
+                        {(user?.name ?? user?.email ?? "U").slice(0, 2).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuLabel className="flex flex-col gap-0.5">
+                    <span className="text-xs text-muted-foreground">Conectado como</span>
+                    <span className="text-sm font-medium">{user?.name ?? user?.email}</span>
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem asChild>
+                    <Link href="/perfil" className="cursor-pointer">
+                      <User className="mr-2 h-4 w-4" /> Meu perfil
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => logout()}>
+                    <LogOut className="mr-2 h-4 w-4" /> Sair
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             ) : (
               <Button size="sm" onClick={() => startLogin()}>
                 <LogIn className="mr-1.5 h-4 w-4" /> Entrar

@@ -7,6 +7,7 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import Analysis from "./pages/Analysis";
 import History from "./pages/History";
 import Home from "./pages/Home";
+import Profile from "./pages/Profile";
 import Result from "./pages/Result";
 
 function Router() {
@@ -17,6 +18,7 @@ function Router() {
       <Route path={"/analise"} component={Analysis} />
       <Route path={"/resultado/:id"} component={Result} />
       <Route path={"/historico"} component={History} />
+      <Route path={"/perfil"} component={Profile} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />

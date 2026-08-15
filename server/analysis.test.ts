@@ -11,6 +11,21 @@ const db = vi.hoisted(() => ({
   getAnalysisById: vi.fn().mockResolvedValue(undefined),
   getVideosByAnalysis: vi.fn().mockResolvedValue([]),
   deleteAnalysis: vi.fn().mockResolvedValue(undefined),
+  updateAnalysisProgress: vi.fn().mockResolvedValue(undefined),
+  getUserStats: vi.fn().mockResolvedValue({ total: 3, completed: 2 }),
+  updateUserProfile: vi.fn().mockImplementation(async (_id: number, patch: { name?: string | null; email?: string | null }) =>
+    Promise.resolve({
+      id: 1,
+      openId: "user-1",
+      name: patch?.name ?? "User 1",
+      email: patch?.email ?? "user1@example.com",
+      loginMethod: "manus",
+      role: "user",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastSignedIn: new Date(),
+    })
+  ),
 }));
 
 vi.mock("./db", () => db);
@@ -286,6 +301,59 @@ describe("analysis.get", () => {
     expect(detail.status).toBe("completed");
     expect(detail.videos[0]?.score).toBe(78);
     expect(detail.result?.niche).toBe("fitness");
+  });
+});
+
+describe("analysis.progress", () => {
+  it("rejeita usuários não autenticados", async () => {
+    const caller = appRouter.createCaller(createContext(null));
+    await expect(caller.analysis.progress({ id: "a1" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("retorna o progresso real gravado pelo backend", async () => {
+    db.getAnalysisById.mockResolvedValueOnce({
+      id: "a1",
+      userId: 1,
+      niche: "fitness",
+      status: "running",
+      progressStep: 45,
+      result: null,
+      errorMessage: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const caller = appRouter.createCaller(createContext(sampleUser()));
+    const progress = await caller.analysis.progress({ id: "a1" });
+    expect(progress.progressStep).toBe(45);
+    expect(progress.status).toBe("running");
+  });
+});
+
+describe("profile", () => {
+  it("rejeita usuários não autenticados", async () => {
+    const caller = appRouter.createCaller(createContext(null));
+    await expect(caller.profile.me()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("retorna dados do perfil com estatísticas", async () => {
+    const caller = appRouter.createCaller(createContext(sampleUser()));
+    const profile = await caller.profile.me();
+    expect(profile.id).toBe(1);
+    expect(profile.stats.total).toBe(3);
+    expect(profile.stats.completed).toBe(2);
+  });
+
+  it("rejeita atualização com e-mail inválido", async () => {
+    const caller = appRouter.createCaller(createContext(sampleUser()));
+    await expect(caller.profile.update({ email: "invalido" })).rejects.toThrow();
+  });
+
+  it("atualiza nome e e-mail do perfil", async () => {
+    const caller = appRouter.createCaller(createContext(sampleUser()));
+    const updated = await caller.profile.update({ name: "João Santos", email: "joao@example.com" });
+    expect(updated.name).toBe("João Santos");
+    expect(updated.email).toBe("joao@example.com");
+    expect(db.updateUserProfile).toHaveBeenCalledWith(1, { name: "João Santos", email: "joao@example.com" });
   });
 });
 

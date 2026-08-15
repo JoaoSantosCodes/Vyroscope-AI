@@ -5,10 +5,12 @@ import {
   createAnalysis,
   deleteAnalysis as dbDeleteAnalysis,
   getAnalysisById,
+  getUserStats,
   getVideosByAnalysis,
   listAnalysesByUser,
   saveVideos,
   updateAnalysis,
+  updateAnalysisProgress,
 } from "../db";
 import { protectedProcedure, router } from "../_core/trpc";
 import { analyzeNiche, type AnalysisResult } from "../analysis";
@@ -95,11 +97,30 @@ export const analysisRouter = router({
     await dbDeleteAnalysis(input.id);
     return { success: true } as const;
   }),
+
+  /** Progresso detalhado de uma análise em execução (etapas reais do backend). */
+  progress: protectedProcedure.input(z.object({ id: z.string().min(1) })).query(async ({ ctx, input }) => {
+    const row = await getAnalysisById(input.id);
+    if (!row) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "Análise não encontrada" });
+    }
+    if (row.userId !== ctx.user.id) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Você não tem acesso a esta análise" });
+    }
+    return {
+      id: row.id,
+      status: row.status,
+      progressStep: row.progressStep,
+      errorMessage: row.errorMessage,
+    };
+  }),
 });
 
 async function runAnalysisAsync(analysisId: string, niche: string) {
   try {
+    await updateAnalysisProgress(analysisId, 15);
     const videos = await fetchTrendingVideosForNiche(niche, 12);
+    await updateAnalysisProgress(analysisId, 45);
     await saveVideos(
       analysisId,
       videos.map((v) => ({
@@ -117,11 +138,15 @@ async function runAnalysisAsync(analysisId: string, niche: string) {
       }))
     );
 
+    await updateAnalysisProgress(analysisId, 60);
     const result = await analyzeNiche(niche, videos);
+    await updateAnalysisProgress(analysisId, 90);
     await updateAnalysis(analysisId, { status: "completed", result: JSON.stringify(result) });
+    await updateAnalysisProgress(analysisId, 100);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const isRateLimit = /429|rate.?limit|quota/i.test(message);
+    await updateAnalysisProgress(analysisId, 0).catch(() => undefined);
     await updateAnalysis(analysisId, {
       status: "failed",
       errorMessage:
