@@ -116,3 +116,10 @@
 - [x] Histórico: exportar o histórico de ideias em PDF (buildIdeaHistoryPdf + exportIdeaHistoryPdf + botão Exportar PDF; PDF reflete a visão filtrada)
 - [x] Testes vitest das novas funcionalidades (81 testes passando: filtros x3, pin/unpin/listPinned x4, exportIdeaHistoryPdf x2, buildIdeaHistoryPdf x3)
 - [x] Verificação visual e checkpoint
+
+## Melhorias solicitadas (rodada 13)
+- [x] Fixadas: reordenar ideias fixadas com arrastar e soltar (drag-and-drop nativo nos cards da seção "Fixadas no topo", procedure reorderPinnedIdeas + update otimista com rollback)
+- [x] Fixadas: campo de anotações pessoais por ideia fixada (coluna notes em pinned_idea_history, procedure updatePinnedNote, textarea por card com commit onBlur e update otimista)
+- [x] Histórico: exportar o histórico filtrado (visão atual, fixadas primeiro) em CSV com colunas Seção/Data/Nicho/Score/Título/Hook/Ângulo/Anotações (buildIdeaHistoryCsv + Exportar CSV no /ideia-do-dia)
+- [x] Testes vitest das novas funcionalidades (86 testes: buildIdeaHistoryCsv x3, updatePinnedNote x1, reorderPinnedIdeas x1)
+- [x] Verificação visual e checkpoint

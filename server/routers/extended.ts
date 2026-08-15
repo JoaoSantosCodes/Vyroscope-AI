@@ -400,6 +400,26 @@ export const extendedRouter = router({
     const pinned = await listPinned(ctx.user.id);
     return { ideas: pinned } as const;
   }),
+  /** Atualiza as anotações pessoais de uma ideia fixada. */
+  updatePinnedNote: protectedProcedure
+    .input(
+      z.object({
+        pinnedId: z.number().int().positive(),
+        notes: z.string().max(2000),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { updatePinnedNote: updateNote } = await import("../db");
+      await updateNote(ctx.user.id, input.pinnedId, input.notes.trim());
+      return { success: true } as const;
+    }),
+  /** Reordena as ideias fixadas (arrastar e soltar). */
+  reorderPinnedIdeas: protectedProcedure
+    .input(z.object({ orderedIds: z.array(z.number().int().positive()).max(200) }))
+    .mutation(async ({ ctx, input }) => {
+      const { reorderPinnedIdeas: reorder } = await import("../db");
+      return reorder(ctx.user.id, input.orderedIds);
+    }),
   /** Exporta o histórico de ideias do dia (fixadas + rotacionadas) em PDF.
    *  O PDF reflete a visão atual do usuário, incluindo os filtros aplicados
    *  na página (o frontend envia as listas filtradas). */

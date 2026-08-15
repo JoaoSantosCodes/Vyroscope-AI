@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, not, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   analysisVideos,
@@ -417,10 +417,15 @@ export async function listPinnedIdeas(userId: number) {
       niche: pinnedIdeaHistory.niche,
       viralityScore: pinnedIdeaHistory.viralityScore,
       sortOrder: pinnedIdeaHistory.sortOrder,
+      notes: pinnedIdeaHistory.notes,
       createdAt: pinnedIdeaHistory.createdAt,
     })
     .from(pinnedIdeaHistory)
-    .where(eq(pinnedIdeaHistory.userId, userId));
+    .where(eq(pinnedIdeaHistory.userId, userId))
+    .orderBy(
+      asc(pinnedIdeaHistory.sortOrder),
+      desc(pinnedIdeaHistory.createdAt)
+    );
 }
 
 /** Fixa uma ideia do histórico no topo do painel (ignorada se já fixada). */
@@ -461,4 +466,48 @@ export async function unpinIdea(userId: number, pinnedId: number) {
   await db
     .delete(pinnedIdeaHistory)
     .where(and(eq(pinnedIdeaHistory.id, pinnedId), eq(pinnedIdeaHistory.userId, userId)));
+}
+
+/** Atualiza as anotações pessoais de uma ideia fixada. */
+export async function updatePinnedNote(userId: number, pinnedId: number, notes: string) {
+  const db = await getDb();
+  if (!db) return;
+  const owns = await db
+    .select({ id: pinnedIdeaHistory.id })
+    .from(pinnedIdeaHistory)
+    .where(and(eq(pinnedIdeaHistory.id, pinnedId), eq(pinnedIdeaHistory.userId, userId)))
+    .limit(1);
+  if (owns.length === 0) throw new Error("Ideia fixada não encontrada");
+  await db
+    .update(pinnedIdeaHistory)
+    .set({ notes: notes === "" ? null : notes })
+    .where(eq(pinnedIdeaHistory.id, pinnedId));
+}
+
+/** Reordena as ideias fixadas pelo sortOrder (a posição na lista é a ordem desejada).
+ *  Ideias fora da lista recebem sortOrder = null e aparecem depois das reordenadas. */
+export async function reorderPinnedIdeas(userId: number, orderedIds: number[]) {
+  const db = await getDb();
+  if (!db) return { success: false } as const;
+  if (!Array.isArray(orderedIds)) throw new Error("IDs inválidos");
+  const seen = new Set<number>();
+  orderedIds.forEach((id, idx) => {
+    if (typeof id !== "number" || !Number.isInteger(id)) throw new Error("ID inválido");
+    if (seen.has(id)) throw new Error("IDs duplicados");
+    seen.add(id);
+  });
+  for (let idx = 0; idx < orderedIds.length; idx += 1) {
+    const id = orderedIds[idx];
+    await db
+      .update(pinnedIdeaHistory)
+      .set({ sortOrder: idx + 1 })
+      .where(and(eq(pinnedIdeaHistory.id, id as number), eq(pinnedIdeaHistory.userId, userId)));
+  }
+  if (seen.size > 0) {
+    await db
+      .update(pinnedIdeaHistory)
+      .set({ sortOrder: null })
+      .where(and(eq(pinnedIdeaHistory.userId, userId), not(inArray(pinnedIdeaHistory.id, orderedIds))));
+  }
+  return { success: true } as const;
 }

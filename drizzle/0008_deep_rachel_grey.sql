@@ -1,0 +1,1 @@
+ALTER TABLE `pinned_idea_history` ADD `notes` text;

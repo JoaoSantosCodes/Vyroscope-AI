@@ -168,6 +168,8 @@ export const pinnedIdeaHistory = mysqlTable("pinned_idea_history", {
   viralityScore: int("viralityScore"),
   /** Ordem manual (menor valor aparece primeiro) */
   sortOrder: int("sortOrder"),
+  /** Anotações pessoais do usuário sobre a ideia fixada */
+  notes: text("notes"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 

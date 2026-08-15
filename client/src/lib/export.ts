@@ -157,3 +157,51 @@ export function buildFavoritesCsv(
   }
   return csvRows;
 }
+
+/**
+ * Exporta o histórico de ideias do dia (visão atual, incluindo filtros e
+ * fixadas primeiro) como CSV, com download imediato. Colunas: seção (Fixada/
+ * Histórico), data, nicho, score, título, hook, ângulo, anotações.
+ */
+export function exportIdeaHistoryCsv(
+  pinned: { date: string; niche: string; suggestionTitle: string; viralityScore: number | null; notes: string | null }[],
+  ideas: { date: string; niche: string; suggestion: { title: string; hook?: string; angle?: string; viralityScore: number | null }; notes?: string | null }[]
+) {
+  const blob = new Blob(["\uFEFF" + buildIdeaHistoryCsv(pinned, ideas).join("\n")], { type: "text/csv;charset=utf-8;" });
+  downloadBlob(blob, "vyroscope-ideias.csv");
+}
+
+/**
+ * Monta as linhas do CSV do histórico de ideias. Função pura para permitir
+ * testes unitários no Vitest.
+ */
+export function buildIdeaHistoryCsv(
+  pinned: { date: string; niche: string; suggestionTitle: string; viralityScore: number | null; notes: string | null }[],
+  ideas: { date: string; niche: string; suggestion: { title: string; hook?: string; angle?: string; viralityScore: number | null }; notes?: string | null }[]
+): string[] {
+  const esc = (v: unknown) => {
+    const s = v === null || v === undefined ? "" : String(v);
+    return `"${s.replace(/"/g, '""')}"`;
+  };
+  const csvRows: string[] = [
+    ["Seção,Data,Nicho,Score,Título,Hook,Ângulo,Anotações"].join(","),
+  ];
+  for (const p of pinned) {
+    csvRows.push([esc("Fixada"), esc(p.date), esc(p.niche), esc(p.viralityScore), esc(p.suggestionTitle), esc(""), esc(""), esc(p.notes)].join(","));
+  }
+  for (const idea of ideas) {
+    csvRows.push(
+      [
+        esc("Histórico"),
+        esc(idea.date),
+        esc(idea.niche),
+        esc(idea.suggestion.viralityScore),
+        esc(idea.suggestion.title),
+        esc(idea.suggestion.hook ?? ""),
+        esc(idea.suggestion.angle ?? ""),
+        esc(idea.notes ?? ""),
+      ].join(",")
+    );
+  }
+  return csvRows;
+}

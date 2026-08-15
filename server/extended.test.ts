@@ -281,6 +281,8 @@ vi.mock("./db", async (importOriginal) => {
     pinIdea: vi.fn(),
     unpinIdea: vi.fn(),
     listPinnedIdeas: vi.fn(),
+    updatePinnedNote: vi.fn(),
+    reorderPinnedIdeas: vi.fn(),
   };
 });
 
@@ -297,6 +299,8 @@ const mockedGetAnalysis = vi.mocked(db.getAnalysisById);
 const mockedPin = vi.mocked(db.pinIdea);
 const mockedUnpin = vi.mocked(db.unpinIdea);
 const mockedListPinned = vi.mocked(db.listPinnedIdeas);
+const mockedUpdateNote = vi.mocked(db.updatePinnedNote);
+const mockedReorderPinned = vi.mocked(db.reorderPinnedIdeas);
 
 const folderUser = {
   id: 2,
@@ -664,6 +668,20 @@ describe("extended idea pinning (pin/unpin/listPinned)", () => {
     expect(result.ideas).toHaveLength(1);
     expect(result.ideas[0]?.suggestionTitle).toBe("Treino de 10 min");
     expect(mockedListPinned).toHaveBeenCalledWith(2);
+  });
+  it("updates the personal notes of a pinned idea (trimmed)", async () => {
+    mockedUpdateNote.mockResolvedValueOnce(undefined as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.updatePinnedNote({ pinnedId: 3, notes: "  Rascunho com espaços  " });
+    expect(result.success).toBe(true);
+    expect(mockedUpdateNote).toHaveBeenCalledWith(2, 3, "Rascunho com espaços");
+  });
+  it("reorders pinned ideas by sending the desired id order", async () => {
+    mockedReorderPinned.mockResolvedValueOnce({ success: true } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.reorderPinnedIdeas({ orderedIds: [3, 5, 1] });
+    expect(result.success).toBe(true);
+    expect(mockedReorderPinned).toHaveBeenCalledWith(2, [3, 5, 1]);
   });
 });
 

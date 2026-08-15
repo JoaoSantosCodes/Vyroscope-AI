@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildFavoritesCsv } from "./export";
+import { buildFavoritesCsv, buildIdeaHistoryCsv } from "./export";
 
 function thumb(
   title: string,
@@ -51,5 +51,44 @@ describe("buildFavoritesCsv", () => {
 
   it("works with empty folders list", () => {
     expect(buildFavoritesCsv([])).toEqual(["Pasta,Ordem,Título sugerido,Nicho,Data adicionada,URL da imagem"]);
+  });
+});
+
+describe("buildIdeaHistoryCsv", () => {
+  it("emits pinned rows first, then history rows, with the notes column", () => {
+    const pinned = [{ date: "2026-08-14", niche: "fitness", suggestionTitle: "Ideia fixada", viralityScore: 85, notes: "Rascunho: começar com hook" }];
+    const ideas = [
+      {
+        date: "2026-08-13",
+        niche: "fitness",
+        suggestion: { title: "Ideia rotacionada", hook: "Hook 1", angle: "Ângulo 1", viralityScore: 70 },
+      },
+    ];
+
+    const csv = buildIdeaHistoryCsv(pinned, ideas);
+
+    expect(csv[0]).toContain("Seção,Data,Nicho,Score,Título,Hook,Ângulo,Anotações");
+    expect(csv).toHaveLength(3);
+    expect(csv[1]).toContain("\"Fixada\"");
+    expect(csv[1]).toContain("\"Ideia fixada\"");
+    expect(csv[1]).toContain("\"Rascunho: começar com hook\"");
+    expect(csv[2]).toContain("\"Histórico\"");
+    expect(csv[2]).toContain("\"Ideia rotacionada\"");
+    expect(csv[2]).toContain("\"Hook 1\"");
+  });
+
+  it("escapes quotes and keeps null notes empty", () => {
+    const csv = buildIdeaHistoryCsv(
+      [{ date: "2026-08-14", niche: "financeiro", suggestionTitle: 'Ideia com "aspas"', viralityScore: 60, notes: null }],
+      []
+    );
+    expect(csv[1]).toContain('"Ideia com ""aspas"""');
+    expect(csv[1]).toContain("60");
+    // notes null vira vazio: termina com aspas duplas vazias
+    expect(csv[1]).toMatch(/,\"\"$/);
+  });
+
+  it("works with empty inputs, returning only the header", () => {
+    expect(buildIdeaHistoryCsv([], [])).toEqual(["Seção,Data,Nicho,Score,Título,Hook,Ângulo,Anotações"]);
   });
 });

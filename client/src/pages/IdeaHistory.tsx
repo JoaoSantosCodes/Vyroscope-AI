@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import SiteLayout from "@/components/SiteLayout";
 import {
   Accordion,
@@ -20,9 +20,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { buildIdeaHistoryCsv, exportIdeaHistoryCsv } from "@/lib/export";
 import { formatDate, scoreColor, scoreLabel } from "@/lib/score";
 import { trpc } from "@/lib/trpc";
-import { FileText, Lightbulb, Loader2, Pin, PinOff, Radar, Search, Trash2 } from "lucide-react";
+import { FileText, Lightbulb, Loader2, Pin, PinOff, Radar, Search, StickyNote } from "lucide-react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 
@@ -49,6 +50,7 @@ type PinnedIdea = {
   niche: string;
   viralityScore: number | null;
   sortOrder: number | null;
+  notes: string | null;
   createdAt: Date;
 };
 
@@ -164,7 +166,7 @@ export default function IdeaHistory() {
     onMutate: async ({ date, analysisId, suggestionTitle, niche, viralityScore }) => {
       await utils.extended.listPinnedIdeas.cancel();
       const prev = utils.extended.listPinnedIdeas.getData();
-      utils.extended.listPinnedIdeas.setData(undefined, { ideas: [{ id: 0, date, analysisId, suggestionTitle, niche, viralityScore, sortOrder: null, createdAt: new Date() }, ...(prev?.ideas ?? [])] });
+      utils.extended.listPinnedIdeas.setData(undefined, { ideas: [{ id: 0, date, analysisId, suggestionTitle, niche, viralityScore, sortOrder: null, notes: null, createdAt: new Date() }, ...(prev?.ideas ?? [])] });
       return { prev };
     },
     onError: (_, __, ctx) => {
@@ -249,6 +251,77 @@ export default function IdeaHistory() {
   const handleUnpin = (pinnedId: number) => {
     unpinMutation.mutate({ pinnedId });
   };
+
+  // ===== Reordenação das ideias fixadas (arrastar e soltar) =====
+  const dragIndex = useRef<number | null>(null);
+  const reorderMutation = trpc.extended.reorderPinnedIdeas.useMutation({
+    onMutate: async ({ orderedIds }) => {
+      await utils.extended.listPinnedIdeas.cancel();
+      const prev = utils.extended.listPinnedIdeas.getData();
+      const reordered = orderedIds
+        .map((id) => (prev?.ideas ?? []).find((i) => i.id === id))
+        .filter((p): p is PinnedIdea => Boolean(p))
+        .map((p, idx) => ({ ...p, sortOrder: idx + 1 }));
+      const rest = (prev?.ideas ?? []).filter((p) => !orderedIds.includes(p.id));
+      utils.extended.listPinnedIdeas.setData(undefined, { ideas: [...reordered, ...rest] });
+      return { prev };
+    },
+    onError: (_, __, ctx) => {
+      utils.extended.listPinnedIdeas.setData(undefined, ctx?.prev ?? { ideas: [] });
+    },
+    onSettled: () => utils.extended.listPinnedIdeas.invalidate(),
+    onSuccess: () => toast.success("Ordem das fixadas atualizada."),
+  });
+
+  const handleDragStart = (index: number) => {
+    dragIndex.current = index;
+  };
+
+  const handleDrop = (targetIndex: number) => {
+    const from = dragIndex.current;
+    dragIndex.current = null;
+    if (from === null || from === targetIndex) return;
+    const next = [...pinned];
+    const [moved] = next.splice(from, 1);
+    next.splice(targetIndex, 0, moved);
+    reorderMutation.mutate({ orderedIds: next.map((p) => p.id) });
+  };
+
+  // ===== Anotações pessoais =====
+  const [noteDrafts, setNoteDrafts] = useState<Record<number, string>>({});
+  const noteMutation = trpc.extended.updatePinnedNote.useMutation({
+    onMutate: async ({ pinnedId, notes }) => {
+      await utils.extended.listPinnedIdeas.cancel();
+      const prev = utils.extended.listPinnedIdeas.getData();
+      utils.extended.listPinnedIdeas.setData(undefined, {
+        ideas: (prev?.ideas ?? []).map((i) => (i.id === pinnedId ? { ...i, notes } : i)),
+      });
+      return { prev };
+    },
+    onError: (_, __, ctx) => utils.extended.listPinnedIdeas.setData(undefined, ctx?.prev ?? { ideas: [] }),
+    onSettled: () => utils.extended.listPinnedIdeas.invalidate(),
+  });
+
+  const handleNoteChange = useCallback((pinnedId: number, value: string) => {
+    setNoteDrafts((d) => ({ ...d, [pinnedId]: value }));
+  }, []);
+
+  const commitNote = useCallback(
+    (pinnedId: number, value: string) => {
+      const trimmed = value.trim();
+      setNoteDrafts((d) => {
+        const draft = d[pinnedId] ?? "";
+        if (draft.trim() === trimmed && (draft || "") === pinned.find((p) => p.id === pinnedId)?.notes) {
+          return d; // sem alteração real, evita mutação
+        }
+        return d;
+      });
+      const persisted = pinned.find((p) => p.id === pinnedId)?.notes ?? null;
+      if (trimmed === (persisted ?? "")) return;
+      noteMutation.mutate({ pinnedId, notes: trimmed });
+    },
+    [pinned, noteMutation]
+  );
 
   return (
     <SiteLayout>
@@ -339,6 +412,30 @@ export default function IdeaHistory() {
             )}
             Exportar PDF
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9"
+            disabled={historyQuery.isLoading}
+            onClick={() => {
+              const csvPinned = pinned.map((p) => ({
+                date: p.date,
+                niche: p.niche,
+                suggestionTitle: p.suggestionTitle,
+                viralityScore: p.viralityScore,
+                notes: p.notes,
+              }));
+              const csvIdeas = ideas.map((idea) => ({
+                date: idea.date,
+                niche: idea.niche,
+                suggestion: idea.suggestion,
+              }));
+              exportIdeaHistoryCsv(csvPinned, csvIdeas);
+              toast.success("CSV do histórico gerado.");
+            }}
+          >
+            Exportar CSV
+          </Button>
         </div>
 
         {/* Ideias fixadas */}
@@ -347,9 +444,21 @@ export default function IdeaHistory() {
             <h2 className="mb-3 flex items-center gap-2 font-display text-lg font-semibold">
               <Pin className="h-4 w-4 text-primary" /> Fixadas no topo
             </h2>
+            <p className="mb-2 text-xs text-muted-foreground">
+              Arraste os cards para reordenar. As fixadas aparecem primeiro no PDF exportado.
+            </p>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {pinned.map((p) => (
-                <Card key={p.id} className="flex flex-col border-primary/40 bg-primary/5">
+              {pinned.map((p, idx) => {
+                const draft = noteDrafts[p.id] ?? (p.notes ?? "");
+                return (
+                <Card
+                  key={p.id}
+                  draggable
+                  className="flex flex-col cursor-grab border-primary/40 bg-primary/5 active:cursor-grabbing"
+                  onDragStart={() => handleDragStart(idx)}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={() => handleDrop(idx)}
+                >
                   <CardContent className="flex flex-1 flex-col p-5">
                     <div className="flex items-start justify-between gap-2">
                       <span className="rounded-full border border-primary/30 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary">
@@ -401,9 +510,25 @@ export default function IdeaHistory() {
                       {formatDate(new Date(p.date + "T12:00:00").getTime())} · {p.niche}
                       {p.viralityScore != null ? ` · score ${p.viralityScore}` : ""}
                     </p>
+                    <div className="mt-3">
+                      <Label htmlFor={`note-${p.id}`} className="mb-1 flex items-center gap-1 text-[11px] font-medium">
+                        <StickyNote className="h-3 w-3" /> Anotações
+                      </Label>
+                      <textarea
+                        id={`note-${p.id}`}
+                        rows={2}
+                        maxLength={2000}
+                        placeholder="Rascunhos ou observações sobre essa ideia…"
+                        className="w-full resize-y rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        value={draft}
+                        onChange={(e) => handleNoteChange(p.id, e.target.value)}
+                        onBlur={(e) => commitNote(p.id, e.target.value)}
+                      />
+                    </div>
                   </CardContent>
                 </Card>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
