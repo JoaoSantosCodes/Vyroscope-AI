@@ -102,3 +102,23 @@ export async function exportAgendaPdf(agenda: ContentAgenda) {
   const blob = await response.blob();
   downloadBlob(blob, `vyroscope-agenda-${slugify(agenda.niche)}.pdf`);
 }
+
+/**
+ * Exporta a galeria de favoritos (organizada por pastas) como PDF.
+ * Delega a geração ao servidor (rota /api/export-favorites-pdf); o download
+ * é disparado no navegador.
+ */
+export async function exportFavoritesPdf(rows: { folder: { id: number | null; name: string | null }; thumbnails: { id: number; imageUrl: string; suggestionTitle: string; niche: string; sortOrder: number | null; createdAt: Date }[] }[]) {
+  const response = await fetch("/api/export-favorites-pdf", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ rows }),
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: "unknown" }));
+    throw new Error(typeof err?.error === "string" ? err.error : `PDF generation failed: ${response.status}`);
+  }
+  const blob = await response.blob();
+  downloadBlob(blob, "vyroscope-favoritos.pdf");
+}

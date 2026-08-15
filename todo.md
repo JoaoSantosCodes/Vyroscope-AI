@@ -82,3 +82,10 @@
 - [x] Verificação visual (screenshots) e checkpoint
 
 ## Melhorias solicitadas (rodada 8) — concluída: esboço editável no modal, toast ao mover via DnD, reordenação dentro da pasta (coluna sortOrder, procedure reorderThumbnails). Testes 56/56. Checkpoint salvo.
+
+## Melhorias solicitadas (rodada 9)
+- [x] Frontend: badge numérico na thumbnail mostrando a posição manual (1, 2, 3...) quando houver reordenação
+- [x] Frontend: modo de seleção múltipla nos favoritos (checkbox nos cards, ações em lote: mover para pasta / remover dos favoritos)
+- [x] Backend + Frontend: exportar galeria de Favoritos organizada por pastas em PDF (buildFavoritesPdf + rota /api/export-favorites-pdf + botão Exportar PDF)
+- [x] Testes vitest das novas funcionalidades (59 testes passando)
+- [x] Verificação visual e checkpoint

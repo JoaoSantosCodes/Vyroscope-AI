@@ -1,7 +1,8 @@
 import type { Express, Request, Response } from "express";
 import { z } from "zod";
 import { sdk } from "./_core/sdk";
-import { buildAgendaPdf, buildAnalysisPdf } from "./exportPdf";
+import { buildAgendaPdf, buildAnalysisPdf, buildFavoritesPdf } from "./exportPdf";
+import type { FavoritesExportRow } from "./exportPdf";
 import type { AnalysisResult } from "./analysis";
 import type { ContentAgenda } from "./extended";
 
@@ -77,6 +78,40 @@ export function registerExportPdfRoute(app: Express) {
       res.send(buffer);
     } catch {
       res.status(500).json({ error: "Falha ao gerar o PDF da agenda." });
+    }
+  });
+
+  app.post("/api/export-favorites-pdf", async (req: Request, res: Response) => {
+    let user;
+    try {
+      user = await sdk.authenticateRequest(req);
+    } catch {
+      user = null;
+    }
+    if (!user) {
+      res.status(401).json({ error: "Faça login para exportar os favoritos." });
+      return;
+    }
+
+    const parse = z.object({ rows: z.array(z.any()).max(500) }).safeParse(req.body);
+    if (!parse.success) {
+      res.status(400).json({ error: "Dados inválidos para exportação." });
+      return;
+    }
+
+    try {
+      const rows = parse.data.rows as FavoritesExportRow[];
+      if (rows.length === 0) {
+        res.status(400).json({ error: "Não há favoritos para exportar." });
+        return;
+      }
+      const buffer = await buildFavoritesPdf(rows);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", "attachment; filename=\"favoritos-vyroscope.pdf\"");
+      res.setHeader("Content-Length", buffer.length);
+      res.send(buffer);
+    } catch {
+      res.status(500).json({ error: "Falha ao gerar o PDF dos favoritos." });
     }
   });
 }

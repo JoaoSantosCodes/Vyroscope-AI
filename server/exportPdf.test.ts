@@ -1,7 +1,37 @@
-import { describe, expect, it } from "vitest";
+import { createServer } from "http";
+import { beforeAll, afterAll, describe, expect, it } from "vitest";
 import type { AnalysisResult } from "./analysis";
 import type { ContentAgenda } from "./extended";
 import { buildAgendaPdf, buildAnalysisPdf } from "./exportPdf";
+
+const TINY_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+  "base64"
+);
+
+let baseUrl = "";
+let server: ReturnType<typeof createServer>;
+
+beforeAll(
+  () =>
+    new Promise<void>((resolve) => {
+      server = createServer((req, res) => {
+        if (req.url === "/broken.png") {
+          res.writeHead(404, { "Content-Type": "text/plain" });
+          res.end("not found");
+          return;
+        }
+        res.writeHead(200, { "Content-Type": "image/png" });
+        res.end(TINY_PNG);
+      });
+      server.listen(0, () => {
+        baseUrl = `http://127.0.0.1:${server.address()!.port}`;
+        resolve();
+      });
+    })
+);
+
+afterAll(() => new Promise<void>((resolve) => server?.close(() => resolve())));
 
 const sampleResult: AnalysisResult = {
   niche: "fitness",
@@ -75,6 +105,78 @@ describe("buildAgendaPdf", () => {
     const buffer = await buildAgendaPdf(sampleAgenda);
     expect(buffer).toBeInstanceOf(Buffer);
     expect(buffer.length).toBeGreaterThan(0);
+    expect(buffer.slice(0, 5).toString("utf-8")).toContain("%PDF");
+  });
+});
+
+import { buildFavoritesPdf, type FavoritesExportRow } from "./exportPdf";
+
+const sampleFavoritesRows: FavoritesExportRow[] = [
+  {
+    folder: { id: null, name: null, color: null },
+    thumbnails: [
+      {
+        id: 1,
+        imageUrl: `${baseUrl}/img.png`,
+        suggestionTitle: "Thumbnail raiz",
+        niche: "fitness",
+        sortOrder: null,
+        createdAt: new Date("2026-08-14T00:00:00Z"),
+      },
+    ],
+  },
+  {
+    folder: { id: 7, name: "Canal principal", color: "#f59e0b" },
+    thumbnails: [
+      {
+        id: 2,
+        imageUrl: `${baseUrl}/img.png`,
+        suggestionTitle: "Vídeo reordenado número um",
+        niche: "fitness",
+        sortOrder: 1,
+        createdAt: new Date("2026-08-14T00:00:00Z"),
+      },
+      {
+        id: 3,
+        imageUrl: `${baseUrl}/img.png`,
+        suggestionTitle: "Vídeo reordenado número dois",
+        niche: "fitness",
+        sortOrder: 2,
+        createdAt: new Date("2026-08-14T00:00:00Z"),
+      },
+    ],
+  },
+];
+
+describe("buildFavoritesPdf", () => {
+  it("gera um buffer PDF válido com capa e seções por pasta", async () => {
+    const buffer = await buildFavoritesPdf(sampleFavoritesRows);
+    expect(buffer).toBeInstanceOf(Buffer);
+    expect(buffer.length).toBeGreaterThan(0);
+    expect(buffer.slice(0, 5).toString("utf-8")).toContain("%PDF");
+  });
+
+  it("recusa lista vazia com erro claro", async () => {
+    await expect(buildFavoritesPdf([])).rejects.toThrow();
+  });
+
+  it("tenta baixar as imagens e ainda gera o PDF mesmo com imagem falha", async () => {
+    const broken = [
+      {
+        folder: { id: null, name: null, color: null },
+        thumbnails: [
+          {
+            id: 9,
+            imageUrl: `${baseUrl}/broken.png`,
+            suggestionTitle: "Imagem quebrada",
+            niche: "fitness",
+            sortOrder: 1,
+            createdAt: new Date(),
+          },
+        ],
+      },
+    ];
+    const buffer = await buildFavoritesPdf(broken);
     expect(buffer.slice(0, 5).toString("utf-8")).toContain("%PDF");
   });
 });

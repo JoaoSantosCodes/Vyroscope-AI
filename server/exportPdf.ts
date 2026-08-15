@@ -1,6 +1,18 @@
 import PDFDocument from "pdfkit";
 import type { AnalysisResult } from "./analysis";
 
+export type FavoritesExportRow = {
+  folder: { id: number | null; name: string | null; color: string | null };
+  thumbnails: {
+    id: number;
+    imageUrl: string;
+    suggestionTitle: string;
+    niche: string;
+    sortOrder: number | null;
+    createdAt: Date;
+  }[];
+};
+
 const COLORS = {
   dark: "#0C0C10",
   amber: "#E8A33D",
@@ -184,6 +196,105 @@ export async function buildAgendaPdf(agenda: ContentAgenda): Promise<Buffer> {
       });
 
       doc.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+/**
+ * Gera um PDF elegante com a galeria de favoritos organizada por pastas.
+ * Cada pasta (ou a raiz "Galeria") vira uma seção; as thumbnails aparecem
+ * em grade com o indicador numérico da ordem manual, título e análise.
+ */
+export async function buildFavoritesPdf(rows: FavoritesExportRow[]): Promise<Buffer> {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    throw new Error("Nada para exportar: a galeria está vazia.");
+  }
+  return new Promise<Buffer>((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ size: "A4", margin: 54 });
+      const chunks: Buffer[] = [];
+      doc.on("data", (c) => chunks.push(c));
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("error", reject);
+
+      const total = rows.reduce((acc, r) => acc + r.thumbnails.length, 0);
+
+      // ===== Capa =====
+      doc.rect(0, 0, doc.page.width, doc.page.height).fill(COLORS.dark);
+      doc.fillColor(COLORS.amber).fontSize(11).text("VYROSCOPE AI", 54, 72, { characterSpacing: 4 });
+      doc.moveTo(54, 96).lineTo(150, 96).strokeColor(COLORS.amber).lineWidth(1.5).stroke();
+
+      doc.fillColor(COLORS.light).fontSize(26).font("Helvetica-Bold").text("Galeria de Favoritos", 54, 150);
+      doc.fillColor(COLORS.gray).fontSize(16).text("Thumbnails geradas pela IA", 54, 200);
+      doc.fillColor(COLORS.gray).fontSize(11).text(`Total de ${total} thumbnail${total === 1 ? "" : "s"} em ${rows.length} ${rows.length === 1 ? "seção" : "seções"}`, 54, 240);
+      doc.fillColor(COLORS.gray).fontSize(10).text("Gerado em " + new Date().toLocaleString("pt-BR"), 54, 265);
+
+      doc.addPage();
+
+      // ===== Uma seção por pasta =====
+      (async () => {
+        for (let si = 0; si < rows.length; si++) {
+          const section = rows[si];
+          if (section.thumbnails.length === 0) continue;
+          const folderLabel = section.folder.name ?? "Galeria (sem pasta)";
+
+          doc.fillColor(COLORS.amber).fontSize(12).text(folderLabel.toUpperCase(), 54, 54, { characterSpacing: 3 });
+          doc.y += 14;
+          doc.moveTo(54, doc.y).lineTo(doc.page.width - 54, doc.y).strokeColor(COLORS.amber).lineWidth(0.75).stroke();
+          doc.y += 16;
+
+          const hasOrder = section.thumbnails.some((t) => t.sortOrder !== null);
+
+          for (let i = 0; i < section.thumbnails.length; i++) {
+            const t = section.thumbnails[i];
+            const col = i % 2;
+            if (col === 0 && i > 0) doc.y += 152;
+            if (doc.y > doc.page.height - 190) {
+              doc.addPage();
+              if (col === 1) doc.y = 54;
+            }
+            const w = 235;
+            const h = 132;
+            const x = col === 0 ? 54 : doc.page.width - 54 - w;
+            const y = doc.y;
+
+            doc.fillColor(COLORS.cardBg).roundedRect(x, y, w, h, 5).fill();
+
+            // Indicador de ordem manual
+            if (hasOrder) {
+              doc.fillColor(COLORS.amber).roundedRect(x + 8, y + 8, 30, 18, 9).fill();
+              doc.fillColor(COLORS.dark).fontSize(9).font("Helvetica-Bold").text(String(t.sortOrder ?? ""), x + 12, y + 13);
+            }
+
+            // Imagem (download síncrono da URL pública)
+            try {
+              const controller = new AbortController();
+              const timeout = setTimeout(() => controller.abort(), 6000);
+              const imgResp = await fetch(t.imageUrl, { signal: controller.signal });
+              clearTimeout(timeout);
+              if (imgResp.ok) {
+                const buf = Buffer.from(await imgResp.arrayBuffer());
+                doc.image(buf, x + 6, y + 4, { width: w - 12, height: h - 8, fit: [w - 12, h - 8], align: "center", valign: "center" });
+              }
+            } catch {
+              doc.fillColor(COLORS.gray).fontSize(9).text("(imagem indisponível)", x + w / 2 - 55, y + h / 2 - 6);
+            }
+
+            // Título abaixo da imagem
+            doc.fillColor(COLORS.light).fontSize(8.5).font("Helvetica");
+            doc.text(t.suggestionTitle, x, y + h + 4, { width: w, lineBreak: true });
+            doc.fillColor(COLORS.gray).fontSize(7.5);
+            doc.text(`${t.niche} · ${new Date(t.createdAt).toLocaleDateString("pt-BR")}`, x, y + h + 17, { width: w, lineBreak: true });
+          }
+
+          doc.y += 36;
+          if (si < rows.length - 1 && doc.y > doc.page.height - 60) doc.addPage();
+        }
+
+        doc.end();
+      })().catch(reject);
     } catch (err) {
       reject(err);
     }

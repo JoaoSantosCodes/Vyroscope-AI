@@ -30,9 +30,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { exportFavoritesPdf } from "@/lib/export";
 import { formatDate } from "@/lib/score";
 import { trpc } from "@/lib/trpc";
 import {
+  CheckSquare,
   EllipsisVertical,
   FolderOpen,
   FolderPlus,
@@ -43,6 +45,9 @@ import {
   Radar,
   Trash2,
   Download,
+  FileDown,
+  Square,
+  X,
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -60,6 +65,7 @@ type FavoriteRow = {
     prompt: string;
     favorite: number;
     folderId: number | null;
+    sortOrder: number | null;
     createdAt: Date;
   };
 };
@@ -82,6 +88,88 @@ export default function Favorites() {
   const [dropOverFolder, setDropOverFolder] = useState<number | null>(null);
   const [dropOverThumbnail, setDropOverThumbnail] = useState<number | null>(null);
   const [dragMode, setDragMode] = useState<"move" | "reorder">("move");
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [exportingPdf, setExportingPdf] = useState(false);
+
+  const hasSelection = selectedIds.size > 0;
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAllFiltered = () => {
+    const ids = new Set(filtered.map((r) => r.suggestion_thumbnails.id));
+    setSelectedIds((prev) => (prev.size === ids.size ? new Set() : ids));
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const handleBatchMove = (folderId: number | null) => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setSelectedIds(new Set());
+    let done = 0;
+    ids.forEach((id) => {
+      moveMutation.mutate({ thumbnailId: id, folderId });
+      done += 1;
+    });
+    toast.success(`(${ids.length}) ${folderId === null ? "movidas para a galeria." : `movidas para "${folderName(folderId)}".`}`);
+  };
+
+  const handleBatchUnfavorite = () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setSelectedIds(new Set());
+    ids.forEach((id) => toggleMutation.mutate({ thumbnailId: id, favorite: false }));
+    toast.success(`(${ids.length}) removidas dos favoritos.`);
+  };
+
+  const handleExportPdf = async () => {
+    if (items.length === 0) return;
+    setExportingPdf(true);
+    try {
+      const rows = buildExportRows();
+      await exportFavoritesPdf(rows);
+      toast.success("PDF dos favoritos exportado.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Falha ao gerar o PDF.");
+    } finally {
+      setExportingPdf(false);
+    }
+  };
+
+  const buildExportRows = () => {
+    // Uma seção por pasta (inclui raiz), thumbnails na ordem do sortOrder
+    const rootThumbs = items.filter((r) => r.suggestion_thumbnails.folderId === null);
+    const rows: { folder: { id: number | null; name: string | null; color: string | null }; thumbnails: { id: number; imageUrl: string; suggestionTitle: string; niche: string; sortOrder: number | null; createdAt: Date }[] }[] = [];
+    if (rootThumbs.length > 0) {
+      rows.push({ folder: { id: null, name: null, color: null }, thumbnails: rootThumbs.map(mapThumb) });
+    }
+    folders.forEach((f) => {
+      const thumbs = items.filter((r) => r.suggestion_thumbnails.folderId === f.id);
+      if (thumbs.length > 0) {
+        rows.push({ folder: { id: f.id, name: f.name, color: f.color }, thumbnails: thumbs.map(mapThumb) });
+      }
+    });
+    return rows;
+  };
+
+  const mapThumb = (row: FavoriteRow) => {
+    const t = row.suggestion_thumbnails;
+    return {
+      id: t.id,
+      imageUrl: t.imageUrl,
+      suggestionTitle: t.suggestionTitle,
+      niche: row.analyses.niche,
+      sortOrder: t.sortOrder ?? null,
+      createdAt: t.createdAt,
+    };
+  };
 
   const handleDragStart = (e: React.DragEvent, thumbnailId: number) => {
     setDraggedId(thumbnailId);
@@ -281,6 +369,76 @@ export default function Favorites() {
           </p>
         </div>
 
+        {/* Ações da galeria */}
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={handleExportPdf}
+            disabled={items.length === 0 || exportingPdf}
+          >
+            {exportingPdf ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <FileDown className="h-3.5 w-3.5" />
+            )}
+            Exportar PDF
+          </Button>
+          <Button
+            variant={hasSelection ? "default" : "outline"}
+            size="sm"
+            className="gap-1.5"
+            onClick={selectAllFiltered}
+            disabled={items.length === 0}
+          >
+            {hasSelection ? <X className="h-3.5 w-3.5" /> : <CheckSquare className="h-3.5 w-3.5" />}
+            {hasSelection ? "Limpar seleção" : "Selecionar"}
+            {hasSelection && <span className="ml-1 rounded-full bg-white/20 px-1.5 py-0.5 text-[10px] font-semibold">{selectedIds.size}</span>}
+          </Button>
+        </div>
+
+        {/* Barra de ações em lote */}
+        {hasSelection && (
+          <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-primary/40 bg-primary/5 p-3">
+            <span className="text-xs font-medium text-primary">{selectedIds.size} selecionada{selectedIds.size === 1 ? "" : "s"}</span>
+            <div className="h-4 w-px bg-border" />
+            <Button variant="outline" size="sm" className="h-7 gap-1 text-xs" onClick={() => handleBatchMove(null)}>
+              <ImageIcon className="h-3.5 w-3.5" /> Mover para galeria
+            </Button>
+            {folders.length > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-7 gap-1 text-xs">
+                    <FolderOpen className="h-3.5 w-3.5" /> Mover para pasta
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  {folders.map((f) => (
+                    <DropdownMenuItem
+                      key={f.id}
+                      onClick={() => handleBatchMove(f.id)}
+                      className="text-xs"
+                    >
+                      <span className="mr-2 h-2 w-2 rounded-full" style={{ background: f.color ?? "#f59e0b" }} />
+                      {f.name}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            <div className="h-4 w-px bg-border" />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1 text-xs text-destructive hover:text-destructive"
+              onClick={handleBatchUnfavorite}
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Remover dos favoritos
+            </Button>
+          </div>
+        )}
+
         {/* Barra de pastas */}
         <div className="mb-6 flex flex-wrap items-center gap-2">
           <button
@@ -440,6 +598,25 @@ export default function Favorites() {
                         className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
                         loading="lazy"
                       />
+                      {/* Checkbox de seleção em lote */}
+                      <button
+                        type="button"
+                        aria-label={selectedIds.has(t.id) ? "Desmarcar seleção" : "Selecionar thumbnail"}
+                        className="absolute left-3 top-3 z-10 rounded-full bg-black/60 p-1 text-white backdrop-blur-sm transition-transform active:scale-90 hover:text-primary"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          toggleSelect(t.id);
+                        }}
+                      >
+                        {selectedIds.has(t.id) ? <CheckSquare className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
+                      </button>
+                      {/* Indicador numérico da ordem manual */}
+                      {t.sortOrder !== null && (
+                        <span className="absolute right-3 top-3 z-10 rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold text-primary-foreground shadow-sm">
+                          {t.sortOrder}
+                        </span>
+                      )}
                       <span className="absolute inset-x-3 top-3 flex items-center justify-between">
                         <span className="flex items-center gap-1.5">
                           <span className="rounded-full bg-black/60 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white backdrop-blur-sm">
