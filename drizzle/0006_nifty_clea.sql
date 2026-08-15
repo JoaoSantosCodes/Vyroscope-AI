@@ -1,0 +1,1 @@
+ALTER TABLE `suggestion_thumbnails` ADD `sortOrder` int;

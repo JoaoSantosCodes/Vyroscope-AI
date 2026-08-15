@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   analysisVideos,
@@ -276,7 +276,8 @@ export async function listFavoriteThumbnails(userId: number) {
     .from(stCols)
     .innerJoin(analysesTable, eq(stCols.analysisId, analysesTable.id))
     .where(and(eq(stCols.favorite, 1), eq(analysesTable.userId, userId)))
-    .orderBy(stCols.createdAt);
+    // Sort manualmente posicionado vem antes (sortOrder NULL = posição padrão)
+    .orderBy(sql`(CASE WHEN ${stCols.sortOrder} IS NULL THEN 1 ELSE 0 END)`, stCols.sortOrder, stCols.createdAt);
 }
 
 export async function recordWatchedMetrics(row: InsertWatchedMetricsHistory) {
@@ -340,6 +341,39 @@ export async function deleteThumbnailFolder(userId: number, folderId: number) {
   return { success: true } as const;
 }
 
+/**
+ * Reordena thumbnails por ID em ordem de exibição, definindo sortOrder como
+ * sequência crescente (1, 2, 3, ...) dentro da mesma pasta (folderId igual para
+ * todas). IDs ausentes em orderedIds perdem a posição manual (voltam ao padrão).
+ */
+export async function reorderThumbnails(userId: number, folderId: number | null, orderedIds: number[]) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const unique = Array.from(new Set(orderedIds.filter((id) => Number.isFinite(id) && id > 0)));
+  if (unique.length === 0) return { success: true } as const;
+  // Verifica que todas pertencem ao usuário e à mesma pasta
+  const rows = await db
+    .select({ id: stCols.id, analysisId: stCols.analysisId, folderId: stCols.folderId })
+    .from(stCols)
+    .where(and(inArray(stCols.id, unique), eq(stCols.favorite, 1)));
+  if (rows.length !== unique.length) throw new Error("Uma ou mais thumbnails não foram encontradas");
+  for (const row of rows) {
+    if (row.folderId !== folderId) {
+      throw new Error("Todas as thumbnails precisam estar na mesma pasta para reordenar");
+    }
+    const owned = await db
+      .select({ id: analysesTable.id })
+      .from(analysesTable)
+      .where(and(eq(analysesTable.id, row.analysisId), eq(analysesTable.userId, userId)))
+      .limit(1);
+    if (owned.length === 0) throw new Error("Uma ou mais thumbnails não pertencem a este usuário");
+  }
+  for (let i = 0; i < unique.length; i++) {
+    await db.update(stCols).set({ sortOrder: i + 1 }).where(eq(stCols.id, unique[i]));
+  }
+  return { success: true } as const;
+}
+
 export async function moveThumbnailToFolder(userId: number, thumbnailId: number, folderId: number | null) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -357,6 +391,8 @@ export async function moveThumbnailToFolder(userId: number, thumbnailId: number,
     .where(eq(stCols.id, thumbnailId))
     .limit(1);
   if (rows.length === 0) throw new Error("Thumbnail não encontrada");
+  // Ao mudar de pasta, volta para a ordem padrão para o novo contexto
+  await db.update(stCols).set({ folderId, sortOrder: null }).where(eq(stCols.id, thumbnailId));
   const owns = await db
     .select()
     .from(analysesTable)

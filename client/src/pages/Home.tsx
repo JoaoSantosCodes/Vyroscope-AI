@@ -18,7 +18,7 @@ import {
   TrendingUp,
   Video,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { FileText } from "lucide-react";
@@ -221,23 +221,34 @@ export default function Home() {
   );
 }
 
+function buildPlainText(outline: NonNullable<Parameters<typeof OutlineDialog>[0]["outline"]>): string {
+  return [
+    `# ${outline.outline.title}`,
+    ``,
+    `Duração alvo: ${outline.outline.totalLength}`,
+    ``,
+    ...outline.outline.acts.map(
+      (a) =>
+        `## ${a.label} (${a.duration})\n\n` +
+        a.points.map((p) => `- ${p}`).join("\n") +
+        `\n\nFala-chave: "${a.keyLine}"`
+    ),
+    ``,
+    `Notas de produção:\n${outline.outline.notes.map((n) => `- ${n}`).join("\n")}`,
+  ].join("\n");
+}
+
 function OutlineDialog({ outline, onOpenChange }: { outline: { niche: string; analysisId: string; suggestion: { title: string; viralityScore: number | null } | null; outline: { title: string; totalLength: string; acts: { act: string; label: string; duration: string; points: string[]; keyLine: string }[]; notes: string[] } } | null; onOpenChange: (open: boolean) => void }) {
+  const [editableText, setEditableText] = useState<string | null>(null);
+
+  useEffect(() => {
+    setEditableText(outline ? buildPlainText(outline) : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [outline?.analysisId]);
+
   const handleCopy = async () => {
-    if (!outline) return;
-    const text = [
-      `# ${outline.outline.title}`,
-      ``,
-      `Duração alvo: ${outline.outline.totalLength}`,
-      ``,
-      ...outline.outline.acts.map(
-        (a) =>
-          `## ${a.label} (${a.duration})\n\n` +
-          a.points.map((p) => `- ${p}`).join("\n") +
-          `\n\nFala-chave: "${a.keyLine}"`
-      ),
-      ``,
-      `Notas de produção:\n${outline.outline.notes.map((n) => `- ${n}`).join("\n")}`,
-    ].join("\n");
+    const text = editableText ?? (outline ? buildPlainText(outline) : "");
+    if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
       toast.success("Esboço copiado.");
@@ -247,20 +258,8 @@ function OutlineDialog({ outline, onOpenChange }: { outline: { niche: string; an
   };
 
   const handleExportTxt = () => {
-    if (!outline) return;
-    const text = [
-      `ESBOÇO DE ROTEIRO — ${outline.outline.title.toUpperCase()}`,
-      `Duração alvo: ${outline.outline.totalLength}`,
-      ``,
-      ...outline.outline.acts.map(
-        (a) =>
-          `== ${a.label} (${a.duration}) ==\n` +
-          a.points.map((p) => `• ${p}`).join("\n") +
-          `\nFala-chave: "${a.keyLine}"\n`
-      ),
-      `Notas de produção:`,
-      ...outline.outline.notes.map((n) => `- ${n}`),
-    ].join("\n");
+    const text = editableText ?? (outline ? buildPlainText(outline) : "");
+    if (!text || !outline) return;
     const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -269,6 +268,10 @@ function OutlineDialog({ outline, onOpenChange }: { outline: { niche: string; an
     a.click();
     URL.revokeObjectURL(url);
     toast.success("Esboço exportado em TXT.");
+  };
+
+  const handleReset = () => {
+    if (outline) setEditableText(buildPlainText(outline));
   };
 
   return (
@@ -308,6 +311,27 @@ function OutlineDialog({ outline, onOpenChange }: { outline: { niche: string; an
               </ul>
             </div>
           )}
+          <div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Texto do esboço (editável)
+              </p>
+              {editableText !== null && outline ? (
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  className="text-[11px] text-muted-foreground transition-colors hover:text-primary"
+                >
+                  Restaurar original
+                </button>
+              ) : null}
+            </div>
+            <textarea
+              value={editableText ?? ""}
+              onChange={(e) => setEditableText(e.target.value)}
+              className="h-64 w-full rounded-lg border border-border/60 bg-background/60 p-3 font-mono text-[13px] leading-relaxed text-foreground/85 outline-none transition-colors focus:border-primary/60"
+            />
+          </div>
           <div className="flex flex-wrap gap-2">
             <Button size="sm" onClick={handleCopy}>Copiar esboço</Button>
             <Button size="sm" variant="outline" onClick={handleExportTxt}>Exportar TXT</Button>

@@ -275,6 +275,7 @@ vi.mock("./db", async (importOriginal) => {
     updateThumbnailFolder: vi.fn(),
     deleteThumbnailFolder: vi.fn(),
     moveThumbnailToFolder: vi.fn(),
+    reorderThumbnails: vi.fn(),
     listAnalysesByUser: vi.fn(),
   };
 });
@@ -286,6 +287,7 @@ const mockedCreateFolder = vi.mocked(db.createThumbnailFolder);
 const mockedUpdateFolder = vi.mocked(db.updateThumbnailFolder);
 const mockedDeleteFolder = vi.mocked(db.deleteThumbnailFolder);
 const mockedMoveThumbnail = vi.mocked(db.moveThumbnailToFolder);
+const mockedReorder = vi.mocked(db.reorderThumbnails);
 const mockedListAnalyses = vi.mocked(db.listAnalysesByUser);
 
 const folderUser = {
@@ -465,5 +467,34 @@ describe("extended.generateIdeaOutline", () => {
     mockedListAnalyses.mockResolvedValueOnce([outlineRow("a2", "games", new Date())] as never);
     const caller = appRouter.createCaller(createFolderCtx());
     await expect(caller.extended.generateIdeaOutline()).rejects.toThrow("sugestões");
+  });
+});
+
+describe("reorderThumbnails", () => {
+  it("forwards the ordered ids to the db helper", async () => {
+    mockedReorder.mockResolvedValueOnce({ success: true } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.reorderThumbnails({ folderId: 3, orderedIds: [7, 2, 9] });
+    expect(result.success).toBe(true);
+    expect(mockedReorder).toHaveBeenCalledWith(2, 3, [7, 2, 9]);
+  });
+
+  it("accepts null folderId (root reorder)", async () => {
+    mockedReorder.mockResolvedValueOnce({ success: true } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.reorderThumbnails({ folderId: null, orderedIds: [1, 2] });
+    expect(result.success).toBe(true);
+    expect(mockedReorder).toHaveBeenCalledWith(2, null, [1, 2]);
+  });
+
+  it("rejects arrays longer than 200", async () => {
+    const caller = appRouter.createCaller(createFolderCtx());
+    await expect(caller.extended.reorderThumbnails({ folderId: 1, orderedIds: Array(201).fill(1) })).rejects.toThrow();
+  });
+
+  it("propagates db errors as BAD_REQUEST", async () => {
+    mockedReorder.mockRejectedValueOnce(new Error("Uma ou mais thumbnails não foram encontradas"));
+    const caller = appRouter.createCaller(createFolderCtx());
+    await expect(caller.extended.reorderThumbnails({ folderId: 3, orderedIds: [999] })).rejects.toThrow("Uma ou mais thumbnails não foram encontradas");
   });
 });

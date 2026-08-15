@@ -80,3 +80,5 @@
 - [x] Frontend: tooltip nos growth cards do /monitorar com os números exatos (médias da semana atual e anterior usadas no cálculo %)
 - [x] Testes vitest das novas funcionalidades (52 testes passando)
 - [x] Verificação visual (screenshots) e checkpoint
+
+## Melhorias solicitadas (rodada 8) — concluída: esboço editável no modal, toast ao mover via DnD, reordenação dentro da pasta (coluna sortOrder, procedure reorderThumbnails). Testes 56/56. Checkpoint salvo.

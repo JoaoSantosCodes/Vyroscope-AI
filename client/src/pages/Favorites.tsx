@@ -80,6 +80,8 @@ export default function Favorites() {
   const [moveTarget, setMoveTarget] = useState<{ thumbnailId: number; currentName: string; currentFolderId: number | null } | null>(null);
   const [draggedId, setDraggedId] = useState<number | null>(null);
   const [dropOverFolder, setDropOverFolder] = useState<number | null>(null);
+  const [dropOverThumbnail, setDropOverThumbnail] = useState<number | null>(null);
+  const [dragMode, setDragMode] = useState<"move" | "reorder">("move");
 
   const handleDragStart = (e: React.DragEvent, thumbnailId: number) => {
     setDraggedId(thumbnailId);
@@ -95,13 +97,67 @@ export default function Favorites() {
   const handleDrop = (e: React.DragEvent, targetFolderId: number | null) => {
     e.preventDefault();
     setDropOverFolder(null);
+    setDropOverThumbnail(null);
     const raw = e.dataTransfer.getData("text/plain");
     const id = Number(raw);
     if (!Number.isFinite(id)) return;
+    if (dragMode === "reorder") return; // reordenação é tratada no drop do card
     moveMutation.mutate({ thumbnailId: id, folderId: targetFolderId });
     const destName = folderName(targetFolderId);
     toast.success(destName ? `Movida para "${destName}".` : "Movida para a galeria.");
   };
+
+  const handleReorderDrop = (e: React.DragEvent, targetThumbnailId: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDropOverThumbnail(null);
+    const raw = e.dataTransfer.getData("text/plain");
+    const dragged = Number(raw);
+    if (!Number.isFinite(dragged) || dragged === targetThumbnailId) return;
+    const current = targetRow(targetThumbnailId)?.suggestion_thumbnails.folderId ?? null;
+    if (targetRow(dragged)?.suggestion_thumbnails.folderId !== current) return; // só reordena na mesma pasta
+    // Reordena: dragging vai para a posição do target dentro da lista filtrada
+    const ids = filtered.map((row) => row.suggestion_thumbnails.id);
+    const fromIdx = ids.indexOf(dragged);
+    const toIdx = ids.indexOf(targetThumbnailId);
+    if (fromIdx === -1 || toIdx === -1) return;
+    const moved = ids.splice(fromIdx, 1)[0];
+    ids.splice(toIdx, 0, moved);
+    reorderMutation.mutate({ folderId: current, orderedIds: ids });
+    toast.success("Ordem atualizada.");
+  };
+
+  const targetRow = (thumbnailId: number) => items.find((r) => r.suggestion_thumbnails.id === thumbnailId) ?? null;
+
+  const reorderMutation = trpc.extended.reorderThumbnails.useMutation({
+    onMutate: async ({ orderedIds }) => {
+      await utils.extended.listFavorites.cancel();
+      const previous = utils.extended.listFavorites.getData();
+      // Reaplica a ordem manualmente no cache (itens com sortOrder menor primeiro)
+      utils.extended.listFavorites.setData(undefined, (old) => {
+        if (!old) return old;
+        const rank = new Map<number, number>();
+        orderedIds.forEach((id, i) => rank.set(id, i + 1));
+        const sorted = [...old].sort((a, b) => {
+          const ra = rank.get(a.suggestion_thumbnails.id);
+          const rb = rank.get(b.suggestion_thumbnails.id);
+          if (ra !== undefined && rb !== undefined) return ra - rb;
+          if (ra !== undefined) return -1;
+          if (rb !== undefined) return 1;
+          return 0;
+        });
+        return sorted;
+      });
+      return { previous };
+    },
+    onError: (err, _vars, context) => {
+      if (context?.previous !== undefined) {
+        utils.extended.listFavorites.setData(undefined, context.previous);
+      }
+      toast.error(err.message);
+    },
+    onSettled: () => utils.extended.listFavorites.invalidate(),
+  });
 
   const toggleMutation = trpc.extended.toggleFavorite.useMutation({
     onMutate: async ({ thumbnailId, favorite }) => {
@@ -353,8 +409,28 @@ export default function Favorites() {
                   draggable
                   onDragStart={(e) => handleDragStart(e, t.id)}
                   onDragEnd={handleDragEnd}
-                  className={`group cursor-grab overflow-hidden border-border/60 transition-all hover:border-primary/30 active:cursor-grabbing ${draggedId === t.id ? "scale-[0.97] opacity-50" : ""}`}
-                  title="Arraste e solte em uma pasta acima para movê-la"
+                  onDragOver={(e) => {
+                    if (draggedId !== null && draggedId !== t.id && row.suggestion_thumbnails.folderId === (targetRow(draggedId)?.suggestion_thumbnails.folderId ?? undefined)) {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "move";
+                      setDropOverThumbnail(t.id);
+                    }
+                  }}
+                  onDragLeave={(e) => {
+                    // Só limpa se realmente saiu do card
+                    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                      setDropOverThumbnail((prev) => (prev === t.id ? null : prev));
+                    }
+                  }}
+                  onDrop={(e) => handleReorderDrop(e, t.id)}
+                  className={`group cursor-grab overflow-hidden border-border/60 transition-all hover:border-primary/30 active:cursor-grabbing ${
+                    draggedId === t.id
+                      ? "scale-[0.97] opacity-50"
+                      : dropOverThumbnail === t.id
+                        ? "border-primary ring-2 ring-primary/40 scale-[0.98]"
+                        : ""
+                  }`}
+                  title="Arraste e solte em uma pasta acima para movê-la, ou sobre outra thumbnail da mesma pasta para reordenar"
                 >
                   <CardContent className="p-0">
                     <div className="relative aspect-video overflow-hidden bg-background/60">

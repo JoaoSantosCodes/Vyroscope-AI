@@ -221,6 +221,19 @@ export const extendedRouter = router({
       }
     }),
 
+  /** Reordena manualmente as thumbnails favoritas dentro da mesma pasta (ou da raiz quando folderId é null).
+   *  orderedIds define a sequência de exibição (1, 2, 3, ...); IDs omitidos voltam à posição padrão. */
+  reorderThumbnails: protectedProcedure
+    .input(z.object({ folderId: z.number().int().positive().nullable(), orderedIds: z.array(z.number().int().positive()).max(200) }))
+    .mutation(async ({ ctx, input }) => {
+      const { reorderThumbnails } = await import("../db");
+      try {
+        return await reorderThumbnails(ctx.user.id, input.folderId, input.orderedIds);
+      } catch (err) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "Erro ao reordenar thumbnails" });
+      }
+    }),
+
   /** Painel "Ideia do dia": escolhe automaticamente uma sugestão do dia com base no nicho principal do usuário.
    *  Nicho principal = o nicho mais analisado; se empatado, o mais recente. A sugestão do dia
    *  é selecionada de forma determinística pela data atual, rotacionando entre as análises concluídas. */

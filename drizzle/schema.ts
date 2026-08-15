@@ -81,6 +81,8 @@ export const suggestionThumbnails = mysqlTable("suggestion_thumbnails", {
   favorite: int("favorite").default(0).notNull(),
   /** Pasta de organização da thumbnail (NULL = fora de pasta) */
   folderId: int("folderId"),
+  /** Ordem manual de exibição (menor valor aparece primeiro; NULL = posição padrão) */
+  sortOrder: int("sortOrder"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
