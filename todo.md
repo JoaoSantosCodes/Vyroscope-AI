@@ -109,3 +109,10 @@
 - [x] Favoritos: atalho Escape para limpar a seleção atual (clearSelection)
 - [x] Testes vitest das novas funcionalidades (64 testes passando: ideaHistory x2, generateIdeaOutline com input x2)
 - [x] Verificação visual e checkpoint (screenshots /favoritos, /ideia-do-dia e / OK; 69 testes vitest passando)
+
+## Melhorias solicitadas (rodada 12)
+- [x] Histórico: fixar ideia (pinned_idea_history criada e migração aplicada) — procedures pinIdeaHistory/unpinIdeaHistory/listPinnedIdeaHistory e UI no /ideia-do-dia (seção "Fixadas no topo" com cards roxos e unpin)
+- [x] Histórico: filtros por nicho e por faixa de score de viralidade (ideaHistory: nicheFilter regenera rotação com o nicho escolhido + scoreMin/scoreMax)
+- [x] Histórico: exportar o histórico de ideias em PDF (buildIdeaHistoryPdf + exportIdeaHistoryPdf + botão Exportar PDF; PDF reflete a visão filtrada)
+- [x] Testes vitest das novas funcionalidades (81 testes passando: filtros x3, pin/unpin/listPinned x4, exportIdeaHistoryPdf x2, buildIdeaHistoryPdf x3)
+- [x] Verificação visual e checkpoint

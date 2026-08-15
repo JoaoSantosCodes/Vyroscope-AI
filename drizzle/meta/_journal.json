@@ -50,6 +50,13 @@
       "when": 1786769602223,
       "tag": "0006_nifty_clea",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1786771125418,
+      "tag": "0007_small_red_ghost",
+      "breakpoints": true
     }
   ]
 }

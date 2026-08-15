@@ -228,3 +228,72 @@ describe("buildFavoritesPdf", () => {
     expect(buffer.slice(0, 5).toString("utf-8")).toContain("%PDF");
   });
 });
+
+import { buildIdeaHistoryPdf, type IdeaHistoryPdfIdea } from "./exportPdf";
+
+const samplePinned: IdeaHistoryPdfIdea[] = [
+  {
+    date: "2026-08-10",
+    niche: "fitness",
+    analysisDate: Date.parse("2026-08-05"),
+    title: "Treino de 10 min",
+    hook: "Acorde e treine",
+    angle: "Rotina rápida",
+    viralityScore: 88,
+  },
+];
+
+const sampleHistoryIdeas: IdeaHistoryPdfIdea[] = [
+  {
+    date: "2026-08-14",
+    niche: "fitness",
+    analysisDate: Date.parse("2026-08-01"),
+    title: "Dieta flexível",
+    hook: "Coma o que gosta",
+    viralityScore: 70,
+  },
+  {
+    date: "2026-08-13",
+    niche: "fitness",
+    analysisDate: Date.parse("2026-08-01"),
+    title: "Mobilidade antes de dormir",
+    viralityScore: 45,
+  },
+];
+
+describe("buildIdeaHistoryPdf", () => {
+  it("gera um buffer PDF válido com capa e contagem de ideias", async () => {
+    const buffer = await buildIdeaHistoryPdf({ pinned: samplePinned, ideas: sampleHistoryIdeas });
+    expect(buffer).toBeInstanceOf(Buffer);
+    expect(buffer.length).toBeGreaterThan(0);
+    expect(buffer.slice(0, 5).toString("utf-8")).toContain("%PDF");
+  });
+
+  it("recusa dados vazios ou inválidos", async () => {
+    await expect(buildIdeaHistoryPdf({ pinned: [], ideas: [] })).rejects.toThrow();
+    await expect(buildIdeaHistoryPdf(null as never)).rejects.toThrow();
+  });
+
+  it("inclui as seções de fixadas e de rotacionadas com títulos, scores e datas no texto do PDF", async () => {
+    const buffer = await buildIdeaHistoryPdf({ pinned: samplePinned, ideas: sampleHistoryIdeas });
+    const { spawnSync } = await import("node:child_process");
+    const { writeFileSync, mkdtempSync } = await import("node:fs");
+    const tmp = mkdtempSync("/tmp/pdf-test-");
+    const file = `${tmp}/history.pdf`;
+    writeFileSync(file, buffer);
+    const run = spawnSync(
+      process.execPath,
+      ["/home/ubuntu/vyroscope-ai/node_modules/pdf-parse/bin/cli.mjs", "text", file],
+      { encoding: "utf-8", cwd: "/home/ubuntu/vyroscope-ai" }
+    );
+    const text = run.stdout + run.stderr;
+    if (run.status !== 0) throw new Error(`pdf-parse CLI falhou: ${text}`);
+    expect(text.replace(/[\s ]/g, "").toUpperCase()).toContain("FIXADASNOTOPO");
+    expect(text.replace(/[\s ]/g, "").toUpperCase()).toContain("IDEIASROTACIONADAS");
+    expect(text).toContain("Treino de 10 min");
+    expect(text).toContain("Dieta flexível");
+    expect(text).toContain("Mobilidade antes de dormir");
+    expect(text).toContain("88/100");
+    expect(text).toContain("70/100");
+  });
+});

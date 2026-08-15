@@ -148,3 +148,28 @@ export const thumbnailFolders = mysqlTable("thumbnail_folders", {
 
 export type ThumbnailFolder = typeof thumbnailFolders.$inferSelect;
 export type InsertThumbnailFolder = typeof thumbnailFolders.$inferInsert;
+
+/**
+ * Ideias fixadas do painel "Ideia do dia". Uma ideia fica sempre visível
+ * no topo do histórico enquanto estiver fixada pelo usuário.
+ */
+export const pinnedIdeaHistory = mysqlTable("pinned_idea_history", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  /** Data da ideia rotacionada (YYYY-MM-DD) */
+  date: varchar("date", { length: 10 }).notNull(),
+  /** ID da análise de origem */
+  analysisId: varchar("analysisId", { length: 24 }).notNull(),
+  /** Título da sugestão fixada */
+  suggestionTitle: varchar("suggestionTitle", { length: 255 }).notNull(),
+  /** Nicho da análise no momento da fixação */
+  niche: varchar("niche", { length: 120 }).notNull(),
+  /** Score de viralidade no momento da fixação */
+  viralityScore: int("viralityScore"),
+  /** Ordem manual (menor valor aparece primeiro) */
+  sortOrder: int("sortOrder"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type PinnedIdeaHistory = typeof pinnedIdeaHistory.$inferSelect;
+export type InsertPinnedIdeaHistory = typeof pinnedIdeaHistory.$inferInsert;

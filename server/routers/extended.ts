@@ -279,7 +279,17 @@ export const extendedRouter = router({
    *  traz a sugestão, score, hook e link para a análise de origem. */
   ideaHistory: protectedProcedure
     .input(
-      z.object({ limit: z.number().int().min(1).max(90).default(30) }).partial().default({})
+      z
+        .object({
+          limit: z.number().int().min(1).max(90).default(30),
+          /** Filtro por nicho (aceita qualquer nicho do usuário, não só o principal) */
+          nicheFilter: z.string().min(1).optional(),
+          /** Faixa de score de viralidade */
+          scoreMin: z.number().int().min(0).max(100).optional(),
+          scoreMax: z.number().int().min(0).max(100).optional(),
+        })
+        .partial()
+        .default({})
     )
     .query(async ({ ctx, input }) => {
       const { listAnalysesByUser } = await import("../db");
@@ -323,9 +333,122 @@ export const extendedRouter = router({
           suggestion,
         });
       }
-      return { ideas, reason: null } as const;
+      let filtered = ideas;
+      if (input.nicheFilter) {
+        const targetNiche = input.nicheFilter;
+        const targetAnalyses = byNiche.get(targetNiche);
+        if (targetAnalyses && targetAnalyses.length > 0) {
+          // Quando o nicho filtrado existe nas análises do usuário, regenerar a
+          // rotação usando esse nicho como principal em vez de apenas descartar
+          const ta = [...targetAnalyses].sort(
+            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          );
+          const mapped: typeof ideas = [];
+          for (let i = 0; i < limit; i += 1) {
+            const dayMs = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) - i * 24 * 60 * 60 * 1000;
+            const dayIndex = Math.floor(dayMs / (24 * 60 * 60 * 1000));
+            const dateStr = new Date(dayMs).toISOString().slice(0, 10);
+            const analysis = ta[dayIndex % ta.length];
+            const result = parseResult(analysis.result);
+            if (!result || !result.suggestions?.length) continue;
+            const topSuggestions = [...result.suggestions].sort((a, b) => (b.viralityScore ?? 0) - (a.viralityScore ?? 0));
+            const suggestion = topSuggestions[dayIndex % topSuggestions.length];
+            mapped.push({ date: dateStr, niche: targetNiche, analysisId: analysis.id, analysisDate: new Date(analysis.createdAt).getTime(), suggestion });
+          }
+          filtered = mapped;
+        } else {
+          filtered = [];
+        }
+      }
+      if (typeof input.scoreMin === "number" || typeof input.scoreMax === "number") {
+        const lo = input.scoreMin ?? 0;
+        const hi = input.scoreMax ?? 100;
+        filtered = filtered.filter((idea) => {
+          const s = idea.suggestion.viralityScore ?? 0;
+          return s >= lo && s <= hi;
+        });
+      }
+      return { ideas: filtered, reason: null, filters: { niches: Array.from(byNiche.keys()) } } as const;
     }),
-
+  /** Fixa uma ideia do histórico no topo do painel. */
+  pinIdeaHistory: protectedProcedure
+    .input(
+      z.object({
+        date: z.string().min(10).max(10),
+        analysisId: z.string().min(1),
+        suggestionTitle: z.string().min(1),
+        niche: z.string().min(1),
+        viralityScore: z.number().int().min(0).max(100).nullable(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { pinIdea } = await import("../db");
+      await pinIdea(ctx.user.id, input);
+      return { success: true } as const;
+    }),
+  /** Remove a fixação de uma ideia. */
+  unpinIdeaHistory: protectedProcedure
+    .input(z.object({ pinnedId: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const { unpinIdea } = await import("../db");
+      await unpinIdea(ctx.user.id, input.pinnedId);
+      return { success: true } as const;
+    }),
+  /** Lista as ideias fixadas pelo usuário, ordenadas por ordem manual. */
+  listPinnedIdeas: protectedProcedure.query(async ({ ctx }) => {
+    const { listPinnedIdeas: listPinned } = await import("../db");
+    const pinned = await listPinned(ctx.user.id);
+    return { ideas: pinned } as const;
+  }),
+  /** Exporta o histórico de ideias do dia (fixadas + rotacionadas) em PDF.
+   *  O PDF reflete a visão atual do usuário, incluindo os filtros aplicados
+   *  na página (o frontend envia as listas filtradas). */
+  exportIdeaHistoryPdf: protectedProcedure
+    .input(
+      z.object({
+        pinned: z.array(
+          z.object({
+            date: z.string().min(1).max(10),
+            niche: z.string().min(1),
+            analysisId: z.string().min(1),
+            title: z.string().min(1),
+            hook: z.string().optional(),
+            angle: z.string().optional(),
+            viralityScore: z.number().int().min(0).max(100).nullable(),
+          })
+        ).max(200),
+        ideas: z.array(
+          z.object({
+            date: z.string().min(1).max(10),
+            niche: z.string().min(1),
+            analysisId: z.string().min(1),
+            analysisDate: z.number().optional(),
+            title: z.string().min(1),
+            hook: z.string().optional(),
+            angle: z.string().optional(),
+            viralityScore: z.number().int().min(0).max(100).nullable(),
+          })
+        ).max(500),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { buildIdeaHistoryPdf } = await import("../exportPdf");
+      if (input.pinned.length === 0 && input.ideas.length === 0) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Não há ideias para exportar." });
+      }
+      const buffer = await buildIdeaHistoryPdf({
+        pinned: input.pinned,
+        ideas: input.ideas,
+        userName: ctx.user.name,
+      });
+      const key = `exports/ideia-do-dia-${Date.now()}-${ctx.user.id}.pdf`;
+      const { storagePut } = await import("../storage");
+      const { url } = await storagePut(key, buffer, "application/pdf");
+      return {
+        downloadUrl: url,
+        fileName: "historico-ideias-vyroscope.pdf",
+      } as const;
+    }),
   /** Gera um esboço de roteiro automático a partir da sugestão da ideia do dia do usuário.
    *  Quando analysisId + suggestionTitle são informados, gera o esboço para essa sugestão
    *  específica (usado pelo histórico de ideias do dia); caso contrário, usa a ideia do dia. */

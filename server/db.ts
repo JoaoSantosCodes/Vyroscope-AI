@@ -216,6 +216,7 @@ import {
   watchedMetricsHistory,
   InsertWatchedMetricsHistory,
   thumbnailFolders,
+  pinnedIdeaHistory,
 } from "../drizzle/schema";
 
 export async function saveSuggestionThumbnail(row: InsertSuggestionThumbnail) {
@@ -401,4 +402,63 @@ export async function moveThumbnailToFolder(userId: number, thumbnailId: number,
   if (owns.length === 0) throw new Error("Thumbnail não pertence a este usuário");
   await db.update(stCols).set({ folderId }).where(eq(stCols.id, thumbnailId));
   return { success: true } as const;
+}
+
+/** Lista as ideias fixadas do histórico "Ideia do dia" do usuário. */
+export async function listPinnedIdeas(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select({
+      id: pinnedIdeaHistory.id,
+      date: pinnedIdeaHistory.date,
+      analysisId: pinnedIdeaHistory.analysisId,
+      suggestionTitle: pinnedIdeaHistory.suggestionTitle,
+      niche: pinnedIdeaHistory.niche,
+      viralityScore: pinnedIdeaHistory.viralityScore,
+      sortOrder: pinnedIdeaHistory.sortOrder,
+      createdAt: pinnedIdeaHistory.createdAt,
+    })
+    .from(pinnedIdeaHistory)
+    .where(eq(pinnedIdeaHistory.userId, userId));
+}
+
+/** Fixa uma ideia do histórico no topo do painel (ignorada se já fixada). */
+export async function pinIdea(
+  userId: number,
+  params: { date: string; analysisId: string; suggestionTitle: string; niche: string; viralityScore: number | null }
+) {
+  const db = await getDb();
+  if (!db) return;
+  const exists = await db
+    .select({ id: pinnedIdeaHistory.id })
+    .from(pinnedIdeaHistory)
+    .where(
+      and(
+        eq(pinnedIdeaHistory.userId, userId),
+        eq(pinnedIdeaHistory.date, params.date),
+        eq(pinnedIdeaHistory.analysisId, params.analysisId),
+        eq(pinnedIdeaHistory.suggestionTitle, params.suggestionTitle)
+      )
+    )
+    .limit(1);
+  if (exists.length > 0) return;
+  await db.insert(pinnedIdeaHistory).values({
+    userId,
+    date: params.date,
+    analysisId: params.analysisId,
+    suggestionTitle: params.suggestionTitle,
+    niche: params.niche,
+    viralityScore: params.viralityScore,
+    sortOrder: null,
+  });
+}
+
+/** Remove a fixação de uma ideia. */
+export async function unpinIdea(userId: number, pinnedId: number) {
+  const db = await getDb();
+  if (!db) return;
+  await db
+    .delete(pinnedIdeaHistory)
+    .where(and(eq(pinnedIdeaHistory.id, pinnedId), eq(pinnedIdeaHistory.userId, userId)));
 }

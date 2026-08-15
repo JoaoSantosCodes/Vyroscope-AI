@@ -278,6 +278,9 @@ vi.mock("./db", async (importOriginal) => {
     reorderThumbnails: vi.fn(),
     listAnalysesByUser: vi.fn(),
     getAnalysisById: vi.fn(),
+    pinIdea: vi.fn(),
+    unpinIdea: vi.fn(),
+    listPinnedIdeas: vi.fn(),
   };
 });
 
@@ -291,6 +294,9 @@ const mockedMoveThumbnail = vi.mocked(db.moveThumbnailToFolder);
 const mockedReorder = vi.mocked(db.reorderThumbnails);
 const mockedListAnalyses = vi.mocked(db.listAnalysesByUser);
 const mockedGetAnalysis = vi.mocked(db.getAnalysisById);
+const mockedPin = vi.mocked(db.pinIdea);
+const mockedUnpin = vi.mocked(db.unpinIdea);
+const mockedListPinned = vi.mocked(db.listPinnedIdeas);
 
 const folderUser = {
   id: 2,
@@ -436,6 +442,53 @@ describe("extended.ideaHistory", () => {
     expect(result).toEqual({ ideas: [], reason: "no_completed_analyses" });
   });
 
+  it("applies nicheFilter, returning only ideas from the selected niche", async () => {
+    const a1 = analysisRow("f1", "fitness", new Date("2026-08-01"), [
+      { title: "Treino de 10 min", hook: "Acorde e treine", angle: "r", viralityScore: 88 },
+    ]);
+    const a2 = analysisRow("f2", "games", new Date("2026-08-10"), [
+      { title: "Setup barato", hook: "Jogue sem gastar", angle: "r", viralityScore: 90 },
+    ]);
+    mockedListAnalyses.mockResolvedValueOnce([a1, a2] as never);
+
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.ideaHistory({ limit: 3, nicheFilter: "games" });
+
+    expect(result.reason).toBeNull();
+    expect(result.ideas.every((i) => i.niche === "games")).toBe(true);
+  });
+
+  it("applies scoreMin/scoreMax filters to the suggestion score", async () => {
+    const a = analysisRow("s1", "fitness", new Date("2026-08-01"), [
+      { title: "Treino de 10 min", hook: "h", angle: "r", viralityScore: 88 },
+      { title: "Dieta flexível", hook: "h2", angle: "r2", viralityScore: 40 },
+    ]);
+    mockedListAnalyses.mockResolvedValueOnce([a] as never);
+
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.ideaHistory({ limit: 3, scoreMin: 50, scoreMax: 95 });
+
+    expect(result.reason).toBeNull();
+    expect(result.ideas.every((i) => (i.suggestion.viralityScore ?? 0) >= 50 && (i.suggestion.viralityScore ?? 0) <= 95)).toBe(true);
+    expect(result.ideas[0].suggestion.title).toBe("Treino de 10 min");
+  });
+
+  it("reports all user niches in filters.niches", async () => {
+    const a1 = analysisRow("n1", "fitness", new Date("2026-08-01"), [
+      { title: "Treino", hook: "h", angle: "r", viralityScore: 70 },
+    ]);
+    const a2 = analysisRow("n2", "games", new Date("2026-08-10"), [
+      { title: "Setup", hook: "h", angle: "r", viralityScore: 80 },
+    ]);
+    mockedListAnalyses.mockResolvedValueOnce([a1, a2] as never);
+
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.ideaHistory({ limit: 2 });
+
+    expect(result.filters?.niches).toContain("fitness");
+    expect(result.filters?.niches).toContain("games");
+  });
+
   it("lists one idea per day, rotated deterministically from the primary niche", async () => {
     const a1 = analysisRow("h1", "fitness", new Date("2026-08-01"), [
       { title: "Treino de 10 min", hook: "Acorde e treine", angle: "Rotina rápida", viralityScore: 88 },
@@ -556,6 +609,89 @@ describe("extended.generateIdeaOutline", () => {
     mockedListAnalyses.mockResolvedValueOnce([outlineRow("a2", "games", new Date())] as never);
     const caller = appRouter.createCaller(createFolderCtx());
     await expect(caller.extended.generateIdeaOutline()).rejects.toThrow("sugestões");
+  });
+});
+
+describe("extended idea pinning (pin/unpin/listPinned)", () => {
+  it("pins an idea and forwards the full payload to the db helper", async () => {
+    mockedPin.mockResolvedValueOnce(undefined as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.pinIdeaHistory({
+      date: "2026-08-15",
+      analysisId: "a1",
+      suggestionTitle: "Treino de 10 min",
+      niche: "fitness",
+      viralityScore: 88,
+    });
+    expect(result.success).toBe(true);
+    expect(mockedPin).toHaveBeenCalledWith(2, {
+      date: "2026-08-15",
+      analysisId: "a1",
+      suggestionTitle: "Treino de 10 min",
+      niche: "fitness",
+      viralityScore: 88,
+    });
+  });
+
+  it("accepts a null viralityScore when pinning", async () => {
+    mockedPin.mockResolvedValueOnce(undefined as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.pinIdeaHistory({
+      date: "2026-08-15",
+      analysisId: "a1",
+      suggestionTitle: "Treino",
+      niche: "fitness",
+      viralityScore: null,
+    });
+    expect(result.success).toBe(true);
+    expect(mockedPin).toHaveBeenCalledWith(2, expect.objectContaining({ viralityScore: null }));
+  });
+
+  it("unpins an idea by its pinned id", async () => {
+    mockedUnpin.mockResolvedValueOnce(undefined as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.unpinIdeaHistory({ pinnedId: 7 });
+    expect(result.success).toBe(true);
+    expect(mockedUnpin).toHaveBeenCalledWith(2, 7);
+  });
+
+  it("lists pinned ideas for the user", async () => {
+    mockedListPinned.mockResolvedValueOnce([
+      { id: 3, date: "2026-08-14", analysisId: "a1", suggestionTitle: "Treino de 10 min", niche: "fitness", viralityScore: 88, sortOrder: null, createdAt: new Date() },
+    ] as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.listPinnedIdeas();
+    expect(result.ideas).toHaveLength(1);
+    expect(result.ideas[0]?.suggestionTitle).toBe("Treino de 10 min");
+    expect(mockedListPinned).toHaveBeenCalledWith(2);
+  });
+});
+
+vi.mock("./storage", () => ({
+  storagePut: vi.fn().mockResolvedValue({ key: "k", url: "https://s3.example/p.pdf" }),
+}));
+
+import { storagePut } from "./storage";
+
+describe("extended.exportIdeaHistoryPdf", () => {
+  it("exports pinned ideas plus rotated ideas as a PDF download URL", async () => {
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.exportIdeaHistoryPdf({
+      pinned: [{ date: "2026-08-14", niche: "fitness", analysisId: "a1", title: "Treino de 10 min", viralityScore: 88 }],
+      ideas: [{ date: "2026-08-15", niche: "fitness", analysisId: "a2", title: "Dieta flexível", viralityScore: 70 }],
+    });
+    expect(result.downloadUrl).toBe("https://s3.example/p.pdf");
+    expect(result.fileName).toBe("historico-ideias-vyroscope.pdf");
+    expect(storagePut).toHaveBeenCalledWith(
+      expect.stringContaining("ideia-do-dia"),
+      expect.any(Buffer),
+      "application/pdf"
+    );
+  });
+
+  it("throws when both lists are empty", async () => {
+    const caller = appRouter.createCaller(createFolderCtx());
+    await expect(caller.extended.exportIdeaHistoryPdf({ pinned: [], ideas: [] })).rejects.toThrow("Não há ideias para exportar");
   });
 });
 

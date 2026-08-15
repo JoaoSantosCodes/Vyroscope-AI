@@ -219,7 +219,7 @@ export async function buildFavoritesPdf(rows: FavoritesExportRow[]): Promise<Buf
       doc.on("end", () => resolve(Buffer.concat(chunks)));
       doc.on("error", reject);
 
-      const total = rows.reduce((acc, r) => acc + r.thumbnails.length, 0);
+      const total = rows.reduce((acc, r) => acc + r.thumbnails.length, 0); // await usado somente na IIFE async abaixo
 
       // ===== Capa =====
       doc.rect(0, 0, doc.page.width, doc.page.height).fill(COLORS.dark);
@@ -297,6 +297,132 @@ export async function buildFavoritesPdf(rows: FavoritesExportRow[]): Promise<Buf
 
         doc.end();
       })().catch(reject);
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+/**
+ * Um item de ideia do histórico de "Ideia do dia" (com ou sem ideia fixada).
+ */
+export type IdeaHistoryPdfIdea = {
+  date: string;
+  niche: string;
+  analysisDate?: number;
+  title: string;
+  hook?: string;
+  angle?: string;
+  viralityScore: number | null;
+};
+
+/**
+ * Entrada do PDF do histórico de ideias: ideias fixadas sempre no topo,
+ * seguidas das ideias rotacionadas do período.
+ */
+export type IdeaHistoryPdfInput = {
+  pinned: IdeaHistoryPdfIdea[];
+  ideas: IdeaHistoryPdfIdea[];
+  /** Nome do usuário para a capa (opcional) */
+  userName?: string | null;
+};
+
+/**
+ * Gera um PDF do calendário editorial com o histórico de ideias do dia:
+ * as ideias fixadas aparecem em seção dedicada no topo, seguidas das ideias
+ * rotacionadas com data, nicho, score e hook.
+ */
+export async function buildIdeaHistoryPdf(input: IdeaHistoryPdfInput): Promise<Buffer> {
+  if (!input || (!Array.isArray(input.pinned) && !Array.isArray(input.ideas))) {
+    throw new Error("Dados inválidos para exportação do histórico.");
+  }
+  const pinned = Array.isArray(input.pinned) ? input.pinned : [];
+  const ideas = Array.isArray(input.ideas) ? input.ideas : [];
+  if (pinned.length === 0 && ideas.length === 0) {
+    throw new Error("Nada para exportar: o histórico está vazio.");
+  }
+  return new Promise<Buffer>((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ size: "A4", margin: 54 });
+      const chunks: Buffer[] = [];
+      doc.on("data", (c) => chunks.push(c));
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("error", reject);
+
+      const total = pinned.length + ideas.length;
+
+      // ===== Capa =====
+      doc.rect(0, 0, doc.page.width, doc.page.height).fill(COLORS.dark);
+      doc.fillColor(COLORS.amber).fontSize(11).text("VYROSCOPE AI", 54, 72, { characterSpacing: 4 });
+      doc.moveTo(54, 96).lineTo(150, 96).strokeColor(COLORS.amber).lineWidth(1.5).stroke();
+
+      doc.fillColor(COLORS.light).fontSize(26).font("Helvetica-Bold").text("Histórico de ideias", 54, 150);
+      doc.fillColor(COLORS.gray).fontSize(16).text("Calendário editorial · Ideia do dia", 54, 200);
+      doc
+        .fillColor(COLORS.gray)
+        .fontSize(10)
+        .text("Gerado em " + new Date().toLocaleString("pt-BR"), 54, 240);
+      doc.fillColor(COLORS.light).fontSize(12).text(`${total} ideia${total === 1 ? "" : "s"} · ${pinned.length} fixada${pinned.length === 1 ? "" : "s"}`, 54, 265);
+
+      doc.addPage();
+
+      const renderSectionHeader = (label: string, count: number) => {
+        doc.fillColor(COLORS.dark).rect(0, 0, doc.page.width, doc.page.height).fill();
+        doc.fillColor(COLORS.amber).fontSize(12).text(label, 54, 54, { characterSpacing: 3 });
+        doc.fillColor(COLORS.gray).fontSize(9).text(`${count} ideia${count === 1 ? "" : "s"}`, 54, 74);
+        doc.y = 104;
+      };
+
+      const renderIdeaCard = (idea: IdeaHistoryPdfIdea) => {
+        const y = doc.y + 10;
+        doc.fillColor(COLORS.cardBg).roundedRect(54, y, doc.page.width - 108, idea.hook ? 118 : 92, 6).fill();
+        const startX = y + 18;
+        const score = idea.viralityScore ?? 0;
+
+        doc
+          .fillColor(scoreColor(score))
+          .roundedRect(70, startX - 4, 52, 22, 11)
+          .fill();
+        doc.fillColor(COLORS.dark).fontSize(9).font("Helvetica-Bold").text(`${score}/100`, 78, startX + 1);
+
+        doc.fillColor(COLORS.light).fontSize(8).font("Helvetica").text(`${idea.niche} · ${new Date(idea.date + "T12:00:00").toLocaleDateString("pt-BR")}`, 134, startX);
+        doc.fillColor(COLORS.light).fontSize(12).font("Helvetica-Bold").text(idea.title, 70, startX + 26, {
+          width: doc.page.width - 140,
+        });
+        if (idea.hook) {
+          doc.fillColor(COLORS.amber).fontSize(8.5).text("HOOK", 70, startX + 52, { characterSpacing: 2 });
+          doc.fillColor(COLORS.light).fontSize(10).font("Helvetica-Oblique");
+          doc.text(idea.hook, 70, startX + 65, { width: doc.page.width - 160 });
+        }
+        if (idea.angle) {
+          doc.fillColor(COLORS.amber).fontSize(8.5).text("ÂNGULO", 70, doc.y + 10, { characterSpacing: 2 });
+          doc.fillColor(COLORS.light).fontSize(10).font("Helvetica");
+          doc.text(idea.angle, 70, doc.y + 23, { width: doc.page.width - 160 });
+        }
+        doc.y = Math.max(y + (idea.hook ? 118 : 92) + 20, doc.y + (idea.hook ? 118 : 92) + 12);
+      };
+
+      let currentCount = 0;
+      if (pinned.length > 0) {
+        renderSectionHeader("FIXADAS NO TOPO", pinned.length);
+        pinned.forEach((idea, i) => {
+          renderIdeaCard(idea);
+          currentCount += 1;
+          if (currentCount < total && doc.y > doc.page.height - 60) doc.addPage();
+        });
+      }
+
+      if (ideas.length > 0) {
+        if (currentCount > 0) doc.addPage();
+        renderSectionHeader("IDEIAS ROTACIONADAS", ideas.length);
+        ideas.forEach((idea, i) => {
+          renderIdeaCard(idea);
+          currentCount += 1;
+          if (i < ideas.length - 1 && doc.y > doc.page.height - 60) doc.addPage();
+        });
+      }
+
+      doc.end();
     } catch (err) {
       reject(err);
     }
