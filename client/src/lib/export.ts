@@ -161,10 +161,10 @@ export function buildFavoritesCsv(
 /**
  * Exporta o histórico de ideias do dia (visão atual, incluindo filtros e
  * fixadas primeiro) como CSV, com download imediato. Colunas: seção (Fixada/
- * Histórico), data, nicho, score, título, hook, ângulo, anotações.
+ * Histórico), data, nicho, score, título, hook, ângulo, anotações, status.
  */
 export function exportIdeaHistoryCsv(
-  pinned: { date: string; niche: string; suggestionTitle: string; viralityScore: number | null; notes: string | null }[],
+  pinned: { date: string; niche: string; suggestionTitle: string; viralityScore: number | null; notes: string | null; status?: string }[],
   ideas: { date: string; niche: string; suggestion: { title: string; hook?: string; angle?: string; viralityScore: number | null }; notes?: string | null }[]
 ) {
   const blob = new Blob(["\uFEFF" + buildIdeaHistoryCsv(pinned, ideas).join("\n")], { type: "text/csv;charset=utf-8;" });
@@ -173,21 +173,39 @@ export function exportIdeaHistoryCsv(
 
 /**
  * Monta as linhas do CSV do histórico de ideias. Função pura para permitir
- * testes unitários no Vitest.
+ * testes unitários no Vitest. Inclui a coluna Status (planejada/gravando/
+ * publicada) para manter o quadro Kanban sincronizado offline.
  */
 export function buildIdeaHistoryCsv(
-  pinned: { date: string; niche: string; suggestionTitle: string; viralityScore: number | null; notes: string | null }[],
+  pinned: { date: string; niche: string; suggestionTitle: string; viralityScore: number | null; notes: string | null; status?: string }[],
   ideas: { date: string; niche: string; suggestion: { title: string; hook?: string; angle?: string; viralityScore: number | null }; notes?: string | null }[]
 ): string[] {
   const esc = (v: unknown) => {
     const s = v === null || v === undefined ? "" : String(v);
     return `"${s.replace(/"/g, '""')}"`;
   };
+  const STATUS_LABEL: Record<string, string> = {
+    planejada: "Planejada",
+    gravando: "Gravando",
+    publicada: "Publicada",
+  };
   const csvRows: string[] = [
-    ["Seção,Data,Nicho,Score,Título,Hook,Ângulo,Anotações"].join(","),
+    ["Seção,Data,Nicho,Score,Título,Hook,Ângulo,Anotações,Status"].join(","),
   ];
   for (const p of pinned) {
-    csvRows.push([esc("Fixada"), esc(p.date), esc(p.niche), esc(p.viralityScore), esc(p.suggestionTitle), esc(""), esc(""), esc(p.notes)].join(","));
+    csvRows.push(
+      [
+        esc("Fixada"),
+        esc(p.date),
+        esc(p.niche),
+        esc(p.viralityScore),
+        esc(p.suggestionTitle),
+        esc(""),
+        esc(""),
+        esc(p.notes),
+        esc(STATUS_LABEL[p.status ?? ""] ?? "Planejada"),
+      ].join(",")
+    );
   }
   for (const idea of ideas) {
     csvRows.push(

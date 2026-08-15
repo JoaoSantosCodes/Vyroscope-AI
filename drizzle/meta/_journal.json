@@ -71,6 +71,13 @@
       "when": 1786771929871,
       "tag": "0009_clumsy_mole_man",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1786772632171,
+      "tag": "0010_fluffy_stephen_strange",
+      "breakpoints": true
     }
   ]
 }

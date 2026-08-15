@@ -172,6 +172,8 @@ export const pinnedIdeaHistory = mysqlTable("pinned_idea_history", {
   notes: text("notes"),
   /** Status de produção da ideia: planejada, gravando, publicada */
   status: varchar("status", { length: 10 }).default("planejada").notNull(),
+  /** Momento em que a ideia entrou no status atual (usado para detectar estagnação) */
+  statusChangedAt: timestamp("statusChangedAt").defaultNow().notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 

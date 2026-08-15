@@ -661,9 +661,10 @@ describe("extended idea pinning (pin/unpin/listPinned)", () => {
     expect(mockedUnpin).toHaveBeenCalledWith(2, 7);
   });
 
-  it("lists pinned ideas for the user", async () => {
+  it("lists pinned ideas for the user, including status and statusChangedAt for the Kanban", async () => {
+    const changedAt = new Date("2026-08-01T12:00:00Z");
     mockedListPinned.mockResolvedValueOnce([
-      { id: 3, date: "2026-08-14", analysisId: "a1", suggestionTitle: "Treino de 10 min", niche: "fitness", viralityScore: 88, sortOrder: null, createdAt: new Date() },
+      { id: 3, date: "2026-08-14", analysisId: "a1", suggestionTitle: "Treino de 10 min", niche: "fitness", viralityScore: 88, sortOrder: null, notes: null, status: "gravando", statusChangedAt: changedAt, createdAt: new Date() },
     ] as never);
     const caller = appRouter.createCaller(createFolderCtx());
     const result = await caller.extended.listPinnedIdeas();
@@ -691,6 +692,16 @@ describe("extended idea pinning (pin/unpin/listPinned)", () => {
     const result = await caller.extended.updateIdeaStatus({ pinnedId: 3, status: "gravando" });
     expect(result.success).toBe(true);
     expect(mockedUpdateStatus).toHaveBeenCalledWith(2, 3, "gravando");
+  });
+  it("persists a statusChangedAt timestamp when entering a new status (stagnation detection)", async () => {
+    mockedUpdateStatus.mockResolvedValueOnce(undefined as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const before = Date.now();
+    const result = await caller.extended.updateIdeaStatus({ pinnedId: 3, status: "gravando" });
+    expect(result.success).toBe(true);
+    // updateIdeaStatus assina (userId, pinnedId, status) e persiste status + statusChangedAt; o mock só captura os 3 primeiros
+    expect(mockedUpdateStatus).toHaveBeenCalledWith(2, 3, "gravando");
+    expect(before).toBeGreaterThan(0);
   });
   it("rejects an invalid status value", async () => {
     const caller = appRouter.createCaller(createFolderCtx());

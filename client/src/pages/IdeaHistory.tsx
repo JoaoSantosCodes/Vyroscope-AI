@@ -52,6 +52,8 @@ type PinnedIdea = {
   sortOrder: number | null;
   notes: string | null;
   status: string;
+  /** Momento em que a ideia entrou no status atual */
+  statusChangedAt: Date;
   createdAt: Date;
 };
 
@@ -264,7 +266,7 @@ export default function IdeaHistory() {
     onMutate: async ({ date, analysisId, suggestionTitle, niche, viralityScore }) => {
       await utils.extended.listPinnedIdeas.cancel();
       const prev = utils.extended.listPinnedIdeas.getData();
-      utils.extended.listPinnedIdeas.setData(undefined, { ideas: [{ id: 0, date, analysisId, suggestionTitle, niche, viralityScore, sortOrder: null, notes: null, status: "planejada", createdAt: new Date() }, ...(prev?.ideas ?? [])] });
+      utils.extended.listPinnedIdeas.setData(undefined, { ideas: [{ id: 0, date, analysisId, suggestionTitle, niche, viralityScore, sortOrder: null, notes: null, status: "planejada", statusChangedAt: new Date(), createdAt: new Date() }, ...(prev?.ideas ?? [])] });
       return { prev };
     },
     onError: (_, __, ctx) => {
@@ -417,6 +419,31 @@ export default function IdeaHistory() {
     { key: "gravando", label: "Gravando", accent: "border-amber-500/50" },
     { key: "publicada", label: "Publicada", accent: "border-emerald-500/50" },
   ] as const;
+
+  // ===== Filtro: ocultar publicadas (persistido na sessão via sessionStorage) =====
+  const [hidePublished, setHidePublished] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem("vyroscope-kanban-hide-published") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleHidePublished = (value: boolean) => {
+    setHidePublished(value);
+    try {
+      sessionStorage.setItem("vyroscope-kanban-hide-published", value ? "1" : "0");
+    } catch {
+      // sessionStorage indisponível (privado/incógnito): segue só em memória
+    }
+  };
+
+  // ===== Estagnação: ideias em "Gravando" por mais de 7 dias =====
+  const STAGNATION_DAYS = 7;
+  const now = useMemo(() => Date.now(), []);
+  const isStagnant = (p: PinnedIdea) =>
+    p.status === "gravando" && p.statusChangedAt && now - new Date(p.statusChangedAt).getTime() > STAGNATION_DAYS * 24 * 60 * 60 * 1000;
+  const stagnantDays = (p: PinnedIdea) =>
+    p.statusChangedAt ? Math.floor((now - new Date(p.statusChangedAt).getTime()) / (24 * 60 * 60 * 1000)) : 0;
 
   const kanbanDragIndex = useRef<number | null>(null);
   const kanbanDragStatus = useRef<"planejada" | "gravando" | "publicada" | null>(null);
@@ -588,6 +615,7 @@ export default function IdeaHistory() {
                 suggestionTitle: p.suggestionTitle,
                 viralityScore: p.viralityScore,
                 notes: p.notes,
+                status: p.status,
               }));
               const csvIdeas = ideas.map((idea) => ({
                 date: idea.date,
@@ -611,8 +639,23 @@ export default function IdeaHistory() {
             <p className="mb-3 text-xs text-muted-foreground">
               Arraste os cards para reordenar dentro da coluna ou movê-los entre as colunas de status. As fixadas aparecem primeiro no PDF exportado.
             </p>
+            <div className="mb-3 flex flex-wrap items-center gap-3">
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 accent-primary"
+                  checked={hidePublished}
+                  onChange={(e) => toggleHidePublished(e.target.checked)}
+                />
+                Ocultar publicadas
+              </label>
+              {hidePublished && (
+                <span className="text-[11px] text-muted-foreground/70">A coluna "Publicada" fica oculta apenas nesta sessão.</span>
+              )}
+            </div>
             <div className="grid gap-4 md:grid-cols-3">
               {STATUS_LIST.map(({ key, label, accent }) => {
+                if (hidePublished && key === "publicada") return null;
                 const column = pinned.filter((p) => p.status === key);
                 return (
                   <div key={key} className="flex flex-col rounded-lg border border-border bg-card/50">
@@ -634,7 +677,14 @@ export default function IdeaHistory() {
                           >
                             <CardContent className="flex flex-1 flex-col p-4">
                               <div className="flex items-start justify-between gap-2">
-                                <span className="text-[10px] font-medium text-muted-foreground">{idx + 1}º na coluna</span>
+                                <span className="flex items-center gap-1.5">
+                                  <span className="text-[10px] font-medium text-muted-foreground">{idx + 1}º na coluna</span>
+                                  {isStagnant(p) && (
+                                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/50 bg-amber-500/15 px-1.5 py-px text-[10px] font-semibold text-amber-600" title={`Esta ideia está em "Gravando" há ${stagnantDays(p)} dias`}>
+                                      ⏸ Estagnada há {stagnantDays(p)}d
+                                    </span>
+                                  )}
+                                </span>
                                 <Button
                                   variant="ghost"
                                   size="icon"

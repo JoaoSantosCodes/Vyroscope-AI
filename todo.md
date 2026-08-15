@@ -132,3 +132,11 @@
 - [x] Ideias fixadas: frontend "Duplicar como sugestão" — botão Duplicar por card → buildSuggestionFromPinned via LLM (usa título + anotações da ideia fixada) → modal SuggestionDialog com título/hook/ângulo/estrutura/duração/score/reasoning, botões Copiar sugestão e Exportar TXT
 - [x] Testes vitest das novas funcionalidades (90 testes: updateIdeaStatus x2, buildSuggestionFromPinned x1, buildIdeaHistoryPdf com anotações/status x1)
 - [x] Verificação visual e checkpoint
+
+## Melhorias solicitadas (rodada 15)
+- [x] Atualizar habilidade vyroscope-video-analyst (skill-creator) com todo o processo usado até aqui: Kanban de status, fixação com notas/status, duplicar como sugestão via LLM, CSV com Status, filtro ocultar publicadas (sessionStorage), estagnação com statusChangedAt > 7d; referência de features-roadmap e pipeline-architecture atualizadas; validada com quick_validate
+- [x] Histórico: incluir coluna de status (Planejada/Gravando/Publicada) na exportação CSV do histórico (buildIdeaHistoryCsv com STATUS_LABEL pt-BR)
+- [x] Kanban: filtro "Ocultar publicadas" — checkbox que esconde a coluna Publicada, persistido na sessão via sessionStorage (vyroscope-kanban-hide-published)
+- [x] Kanban: alerta visual de estagnação — badge âmbar "Estagnada há Xd" (tooltip) para ideias em "Gravando" há mais de 7 dias (limiar em STAGNATION_DAYS)
+- [x] Testes vitest das novas funcionalidades (92 testes: buildIdeaHistoryCsv com Status x4, listPinnedIdeas com status/statusChangedAt, updateIdeaStatus com timestamp)
+- [ ] Verificação visual e checkpoint

@@ -55,8 +55,8 @@ describe("buildFavoritesCsv", () => {
 });
 
 describe("buildIdeaHistoryCsv", () => {
-  it("emits pinned rows first, then history rows, with the notes column", () => {
-    const pinned = [{ date: "2026-08-14", niche: "fitness", suggestionTitle: "Ideia fixada", viralityScore: 85, notes: "Rascunho: começar com hook" }];
+  it("emits pinned rows first, then history rows, with notes and status columns", () => {
+    const pinned = [{ date: "2026-08-14", niche: "fitness", suggestionTitle: "Ideia fixada", viralityScore: 85, notes: "Rascunho: começar com hook", status: "gravando" }];
     const ideas = [
       {
         date: "2026-08-13",
@@ -72,6 +72,7 @@ describe("buildIdeaHistoryCsv", () => {
     expect(csv[1]).toContain("\"Fixada\"");
     expect(csv[1]).toContain("\"Ideia fixada\"");
     expect(csv[1]).toContain("\"Rascunho: começar com hook\"");
+    expect(csv[1]).toContain("\"Gravando\"");
     expect(csv[2]).toContain("\"Histórico\"");
     expect(csv[2]).toContain("\"Ideia rotacionada\"");
     expect(csv[2]).toContain("\"Hook 1\"");
@@ -79,16 +80,33 @@ describe("buildIdeaHistoryCsv", () => {
 
   it("escapes quotes and keeps null notes empty", () => {
     const csv = buildIdeaHistoryCsv(
-      [{ date: "2026-08-14", niche: "financeiro", suggestionTitle: 'Ideia com "aspas"', viralityScore: 60, notes: null }],
+      [{ date: "2026-08-14", niche: "financeiro", suggestionTitle: 'Ideia com "aspas"', viralityScore: 60, notes: null, status: "planejada" }],
       []
     );
     expect(csv[1]).toContain('"Ideia com ""aspas"""');
     expect(csv[1]).toContain("60");
-    // notes null vira vazio: termina com aspas duplas vazias
-    expect(csv[1]).toMatch(/,\"\"$/);
+    // notes null vira vazio; status conhecido vem como rótulo antes do fechamento
+    expect(csv[1]).toContain('"Planejada"');
+    expect(csv[1]).toMatch(/Planejada"$/);
   });
 
   it("works with empty inputs, returning only the header", () => {
-    expect(buildIdeaHistoryCsv([], [])).toEqual(["Seção,Data,Nicho,Score,Título,Hook,Ângulo,Anotações"]);
+    expect(buildIdeaHistoryCsv([], [])).toEqual(["Seção,Data,Nicho,Score,Título,Hook,Ângulo,Anotações,Status"]);
+  });
+
+  it("maps status values to pt-BR labels and defaults unknown to Planejada", () => {
+    const csv = buildIdeaHistoryCsv(
+      [
+        { date: "2026-08-14", niche: "fitness", suggestionTitle: "A", viralityScore: 80, notes: null, status: "planejada" },
+        { date: "2026-08-13", niche: "fitness", suggestionTitle: "B", viralityScore: 70, notes: null, status: "publicada" },
+        { date: "2026-08-12", niche: "fitness", suggestionTitle: "C", viralityScore: 60, notes: null, status: "outro" },
+        { date: "2026-08-11", niche: "fitness", suggestionTitle: "D", viralityScore: 50, notes: null },
+      ],
+      []
+    );
+    expect(csv[1]).toContain("\"Planejada\"");
+    expect(csv[2]).toContain("\"Publicada\"");
+    expect(csv[3]).toContain("\"Planejada\""); // status desconhecido cai no default
+    expect(csv[4]).toContain("\"Planejada\""); // status ausente cai no default
   });
 });

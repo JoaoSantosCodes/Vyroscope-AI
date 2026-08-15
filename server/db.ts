@@ -419,6 +419,7 @@ export async function listPinnedIdeas(userId: number) {
       sortOrder: pinnedIdeaHistory.sortOrder,
       notes: pinnedIdeaHistory.notes,
       status: pinnedIdeaHistory.status,
+      statusChangedAt: pinnedIdeaHistory.statusChangedAt,
       createdAt: pinnedIdeaHistory.createdAt,
     })
     .from(pinnedIdeaHistory)
@@ -486,7 +487,7 @@ export async function updatePinnedNote(userId: number, pinnedId: number, notes: 
     .where(eq(pinnedIdeaHistory.id, pinnedId));
 }
 
-/** Atualiza o status de produção de uma ideia fixada. */
+/** Atualiza o status de produção de uma ideia fixada, registrando o momento da mudança. */
 export async function updateIdeaStatus(userId: number, pinnedId: number, status: "planejada" | "gravando" | "publicada") {
   const db = await getDb();
   if (!db) return;
@@ -496,7 +497,10 @@ export async function updateIdeaStatus(userId: number, pinnedId: number, status:
     .where(and(eq(pinnedIdeaHistory.id, pinnedId), eq(pinnedIdeaHistory.userId, userId)))
     .limit(1);
   if (owns.length === 0) throw new Error("Ideia fixada não encontrada");
-  await db.update(pinnedIdeaHistory).set({ status }).where(eq(pinnedIdeaHistory.id, pinnedId));
+  await db
+    .update(pinnedIdeaHistory)
+    .set({ status, statusChangedAt: new Date() })
+    .where(eq(pinnedIdeaHistory.id, pinnedId));
 }
 
 /** Reordena as ideias fixadas pelo sortOrder (a posição na lista é a ordem desejada).
