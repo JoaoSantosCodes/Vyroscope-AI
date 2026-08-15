@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import type { AnalysisResult } from "../analysis";
-import { analyzeNicheComparison, generateContentAgenda, generateExtendedScript } from "../extended";
+import { analyzeNicheComparison, buildThumbnailPrompt, generateContentAgenda, generateExtendedScript } from "../extended";
 import { fetchTrendingVideosForNiche } from "../youtube";
 import { protectedProcedure, router } from "../_core/trpc";
 
@@ -89,6 +89,47 @@ export const extendedRouter = router({
     comparison.niches = enriched;
     return comparison;
   }),
+
+  /** Gera uma thumbnail sugerida por IA para uma sugestão de uma análise. */
+  generateThumbnail: protectedProcedure
+    .input(z.object({ analysisId: z.string().min(1), suggestionIndex: z.number().int().min(0).max(10) }))
+    .mutation(async ({ ctx, input }) => {
+      const { getAnalysisById, saveSuggestionThumbnail } = await import("../db");
+      const analysis = await getAnalysisById(input.analysisId);
+      if (!analysis) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Análise não encontrada." });
+      }
+      if (analysis.userId !== ctx.user.id) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Esta análise não pertence a você." });
+      }
+      const result = parseResult(analysis.result);
+      if (!result) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Esta análise ainda não foi concluída." });
+      }
+      const suggestion = result.suggestions?.[input.suggestionIndex];
+      if (!suggestion) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Sugestão não encontrada." });
+      }
+      const { generateImage } = await import("../_core/imageGeneration");
+      const prompt = buildThumbnailPrompt(analysis.niche, suggestion.title, result.patterns ?? []);
+      let imageUrl: string;
+      try {
+        const generated = await generateImage({ prompt });
+        imageUrl = generated.url ?? "";
+      } catch {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Falha ao gerar a imagem. Tente novamente." });
+      }
+      if (!imageUrl) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "A geração da imagem retornou vazia. Tente novamente." });
+      }
+      await saveSuggestionThumbnail({
+        analysisId: analysis.id,
+        suggestionTitle: suggestion.title,
+        imageUrl,
+        prompt,
+      });
+      return { imageUrl, prompt, suggestionTitle: suggestion.title } as const;
+    }),
 
   /** Gera agenda de conteúdo de 4 semanas a partir das sugestões de uma análise. */
   generateAgenda: protectedProcedure.input(agendaInput).mutation(async ({ ctx, input }) => {

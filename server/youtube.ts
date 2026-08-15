@@ -132,3 +132,31 @@ export function formatCompact(value: number | null): string {
   if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
   return String(value);
 }
+
+/**
+ * Busca estatísticas atuais de um vídeo específico pelo ID.
+ */
+export async function fetchVideoStatsById(
+  videoId: string
+): Promise<{ title: string | null; viewCount: number | null; likeCount: number | null; commentCount: number | null; publishedAt: string | null } | null> {
+  try {
+    const detailsRes = (await callDataApi("Youtube/videos", {
+      query: {
+        part: "snippet,statistics",
+        id: videoId,
+      },
+    })) as { items?: VideoDetail[] };
+
+    const d = (detailsRes.items ?? []).find((item) => item.id === videoId);
+    if (!d?.statistics) return null;
+    return {
+      title: d.snippet?.title ?? null,
+      viewCount: safeInt(d.statistics.viewCount),
+      likeCount: safeInt(d.statistics.likeCount),
+      commentCount: safeInt(d.statistics.commentCount),
+      publishedAt: d.snippet?.publishedAt ?? null,
+    };
+  } catch {
+    return null;
+  }
+}

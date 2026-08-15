@@ -54,6 +54,16 @@ export default function SiteLayout({ children }: { children: React.ReactNode }) 
             )}
             {isAuthenticated && (
               <Link
+                href="/monitorar"
+                className={`rounded-md px-3.5 py-2 text-sm font-medium transition-colors ${
+                  location === "/monitorar" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Monitorar
+              </Link>
+            )}
+            {isAuthenticated && (
+              <Link
                 href="/historico"
                 className={`rounded-md px-3.5 py-2 text-sm font-medium transition-colors ${
                   location === "/historico" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground"

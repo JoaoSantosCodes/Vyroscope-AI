@@ -39,3 +39,13 @@
 - [x] Visualização da agenda no dashboard (nova aba "Agenda do mês")
 - [x] Testes vitest das novas funcionalidades (27 testes passando)
 - [x] Verificação visual (screenshots desktop)
+
+## Melhorias solicitadas (rodada 4)
+- [x] Habilidade reutilizável do processo Vyroscope (skill-creator, /home/ubuntu/skills/vyroscope-video-analyst)
+- [x] Gerador de thumbnails com IA baseado em título e padrões do nicho (buildThumbnailPrompt + generateImage)
+- [x] Botão de gerar thumbnail no card de sugestão + exibição com download PNG
+- [x] Exportação da agenda do mês em PDF (/api/export-agenda-pdf + buildAgendaPdf)
+- [x] Monitoramento: vídeos publicados com desempenho real (performanceScore) vs. score previsto
+- [x] Tela de monitoramento (/monitorar) com atualização de métricas do YouTube e comparação
+- [x] Testes vitest das novas funcionalidades (35 testes passando)
+- [x] Verificação visual (screenshots desktop)

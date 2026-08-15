@@ -4,7 +4,7 @@ vi.mock("./_core/llm", () => ({
   invokeLLM: vi.fn(),
 }));
 
-import { analyzeNicheComparison, generateContentAgenda, generateExtendedScript } from "./extended";
+import { analyzeNicheComparison, buildThumbnailPrompt, generateContentAgenda, generateExtendedScript } from "./extended";
 import { invokeLLM } from "./_core/llm";
 
 const mockedInvokeLLM = vi.mocked(invokeLLM);
@@ -154,6 +154,29 @@ describe("generateContentAgenda", () => {
     expect(result.items).toHaveLength(4);
     expect(result.strategy).toBeTruthy();
     expect(result.items.every((i) => typeof i.goal === "string")).toBe(true);
+  });
+
+  it("includes niche, title and up to 3 patterns in the prompt", () => {
+    const prompt = buildThumbnailPrompt("inteligência artificial", "5 erros com IA", [
+      { pattern: "título com número", explanation: "x", evidenceVideoCount: 5, score: 90 },
+      { pattern: "antes e depois", explanation: "y", evidenceVideoCount: 4, score: 80 },
+      { pattern: "curiosidade", explanation: "z", evidenceVideoCount: 3, score: 70 },
+      { pattern: "excesso", explanation: "w", evidenceVideoCount: 2, score: 60 },
+    ]);
+
+    expect(prompt).toContain('nicho "inteligência artificial"');
+    expect(prompt).toContain('"5 erros com IA"');
+    expect(prompt).toContain("título com número");
+    expect(prompt).toContain("antes e depois");
+    expect(prompt).toContain("curiosidade");
+    expect(prompt).not.toContain("excesso");
+    expect(prompt).toContain("16:9");
+  });
+
+  it("handles an empty patterns list", () => {
+    const prompt = buildThumbnailPrompt("fitness", "Treino rápido", []);
+    expect(prompt).toContain("nicho \"fitness\"");
+    expect(prompt).toContain("Treino rápido");
   });
 
   it("throws when fewer than 4 items", async () => {

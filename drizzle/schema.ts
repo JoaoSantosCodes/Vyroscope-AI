@@ -66,3 +66,47 @@ export const analysisVideos = mysqlTable("analysis_videos", {
 
 export type AnalysisVideo = typeof analysisVideos.$inferSelect;
 export type InsertAnalysisVideo = typeof analysisVideos.$inferInsert;
+
+/**
+ * Thumbnails geradas por IA para as sugestões de uma análise.
+ */
+export const suggestionThumbnails = mysqlTable("suggestion_thumbnails", {
+  id: int("id").autoincrement().primaryKey(),
+  analysisId: varchar("analysisId", { length: 24 }).notNull(),
+  suggestionTitle: varchar("suggestionTitle", { length: 255 }).notNull(),
+  imageUrl: text("imageUrl").notNull(),
+  /** Prompt usado na geração (para rastreabilidade e reuso) */
+  prompt: text("prompt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type SuggestionThumbnail = typeof suggestionThumbnails.$inferSelect;
+export type InsertSuggestionThumbnail = typeof suggestionThumbnails.$inferInsert;
+
+/**
+ * Vídeos publicados pelo criador, monitorados contra o score previsto.
+ */
+export const watchedVideos = mysqlTable("watched_videos", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  /** ID do vídeo no YouTube (publicado pelo criador) */
+  youtubeId: varchar("youtubeId", { length: 32 }).notNull(),
+  title: varchar("title", { length: 255 }).notNull(),
+  /** Título da sugestão original que deu origem ao vídeo (opcional) */
+  suggestionTitle: varchar("suggestionTitle", { length: 255 }),
+  /** Score de viralidade previsto quando a sugestão foi criada */
+  predictedScore: int("predictedScore"),
+  /** URL do vídeo publicado */
+  videoUrl: text("videoUrl"),
+  publishedAt: timestamp("publishedAt"),
+  views: int("views").default(0).notNull(),
+  likes: int("likes").default(0).notNull(),
+  comments: int("comments").default(0).notNull(),
+  /** Última atualização das métricas do YouTube */
+  metricsUpdatedAt: timestamp("metricsUpdatedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type WatchedVideo = typeof watchedVideos.$inferSelect;
+export type InsertWatchedVideo = typeof watchedVideos.$inferInsert;

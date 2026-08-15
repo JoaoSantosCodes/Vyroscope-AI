@@ -342,3 +342,25 @@ export async function generateContentAgenda(
   }
   return parsed;
 }
+
+/**
+ * Constrói o prompt de imagem para uma thumbnail baseada no título da
+ * sugestão e nos padrões de viralidade do nicho.
+ */
+export function buildThumbnailPrompt(
+  niche: string,
+  title: string,
+  patterns: ViralityPattern[]
+): string {
+  const topPatterns = patterns
+    .slice(0, 3)
+    .map((p) => p.pattern)
+    .join("; ");
+  return [
+    `Thumbnail de YouTube profissional e de alto contraste para o nicho "${niche}".`,
+    `Título do vídeo (texto grande e legível na thumbnail, curto): "${title}"`,
+    `Padrões do nicho a refletir visualmente: ${topPatterns}.`,
+    `Estilo: composição impactante com rosto expressivo ou elemento central forte, cores vibrantes (fundo escuro com destaque âmbar/laranja), texto em até 4 palavras grandes, iluminação dramática de estúdio, profundidade de campo, alta nitidez, proporção 16:9.`,
+    `Sem marcas d'água, sem logotipos, sem texto extra além do título.`,
+  ].join("\n");
+}

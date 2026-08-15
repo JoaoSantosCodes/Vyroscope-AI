@@ -82,3 +82,23 @@ function downloadBlob(blob: Blob, filename: string) {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+import type { ContentAgenda } from "@vyroscope-ai-server/extended";
+
+/**
+ * Exporta a agenda do mês como PDF. Delega a geração ao servidor
+ * (pdfkit, rota /api/export-agenda-pdf); o download é disparado no navegador.
+ */
+export async function exportAgendaPdf(agenda: ContentAgenda) {
+  const response = await fetch("/api/export-agenda-pdf", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ agenda }),
+  });
+  if (!response.ok) {
+    throw new Error(`PDF generation failed: ${response.status}`);
+  }
+  const blob = await response.blob();
+  downloadBlob(blob, `vyroscope-agenda-${slugify(agenda.niche)}.pdf`);
+}

@@ -31,7 +31,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { Calendar as CalendarIcon } from "lucide-react";
-import { exportAnalysisCsv, exportAnalysisPdf } from "@/lib/export";
+import { exportAgendaPdf, exportAnalysisCsv, exportAnalysisPdf } from "@/lib/export";
 import { useMemo, useState } from "react";
 import ScriptDialog from "@/components/ScriptDialog";
 import { toast } from "sonner";
@@ -347,6 +347,22 @@ function Dashboard({
               </>
             )}
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              if (!agenda) {
+                toast.error("Gere a agenda primeiro para exportá-la.");
+                return;
+              }
+              exportAgendaPdf(agenda)
+                .then(() => toast.success("Agenda baixada em PDF."))
+                .catch(() => toast.error("Não foi possível gerar o PDF da agenda."));
+            }}
+            disabled={!agenda}
+          >
+            <Download className="mr-1.5 h-3.5 w-3.5" /> Exportar PDF
+          </Button>
         </div>
         {agenda ? (
           <div className="space-y-4">
@@ -457,10 +473,35 @@ function SuggestionCard({
 }) {
   const [copied, setCopied] = useState(false);
   const [scriptDialog, setScriptDialog] = useState(false);
+  const [thumbnail, setThumbnail] = useState<string | null>(null);
   const generateScriptMutation = trpc.extended.generateScript.useMutation({
     onSuccess: () => setScriptDialog(true),
     onError: (err) => toast.error(err.message),
   });
+  const generateThumbnailMutation = trpc.extended.generateThumbnail.useMutation({
+    onSuccess: (data) => {
+      setThumbnail(data.imageUrl);
+      toast.success("Thumbnail gerada com sucesso.");
+    },
+    onError: (err) => toast.error(err.message),
+  });
+  const openThumbnail = () => {
+    if (!thumbnail) return;
+    const a = document.createElement("a");
+    a.href = thumbnail;
+    a.download = `vyroscope-thumbnail-${slugifyText(suggestion.title)}.png`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+  const slugifyText = (t: string) =>
+    t
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40);
 
   const copyAll = async () => {
     const text = [
@@ -522,7 +563,38 @@ function SuggestionCard({
                 </>
               )}
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => generateThumbnailMutation.mutate({ analysisId, suggestionIndex: index })}
+              disabled={generateThumbnailMutation.isPending}
+            >
+              {generateThumbnailMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Gerando…
+                </>
+              ) : (
+                <>
+                  <Radar className="mr-1.5 h-3.5 w-3.5" /> Gerar thumbnail
+                </>
+              )}
+            </Button>
           </div>
+          {thumbnail && (
+            <div className="mt-4 w-full overflow-hidden rounded-lg border border-border/60">
+              <div className="flex items-start justify-between gap-2 bg-background/60 px-4 py-2.5">
+                <p className="text-xs font-semibold uppercase tracking-wider text-primary">Thumbnail sugerida</p>
+                <button
+                  type="button"
+                  className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+                  onClick={openThumbnail}
+                >
+                  Baixar PNG
+                </button>
+              </div>
+              <img src={thumbnail} alt={`Thumbnail sugerida para ${suggestion.title}`} className="aspect-video w-full object-cover" loading="lazy" />
+            </div>
+          )}
         {scriptDialog && generateScriptMutation.data && (
           <ScriptDialog
             suggestion={suggestion}

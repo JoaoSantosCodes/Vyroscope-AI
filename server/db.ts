@@ -1,4 +1,4 @@
-import { asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   analysisVideos,
@@ -205,4 +205,36 @@ export async function updateUserProfile(userId: number, patch: { name?: string |
     await db.update(users).set(updateSet).where(eq(users.id, userId));
   }
   return db.select().from(users).where(eq(users.id, userId)).limit(1).then((r) => r[0]);
+}
+import { suggestionThumbnails, InsertSuggestionThumbnail, watchedVideos, InsertWatchedVideo } from "../drizzle/schema";
+
+export async function saveSuggestionThumbnail(row: InsertSuggestionThumbnail) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.insert(suggestionThumbnails).values(row);
+}
+
+export async function getThumbnailsByAnalysis(analysisId: string) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(suggestionThumbnails).where(eq(suggestionThumbnails.analysisId, analysisId));
+}
+
+export async function listWatchedVideos(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(watchedVideos).where(eq(watchedVideos.userId, userId)).orderBy(watchedVideos.updatedAt);
+}
+
+export async function addWatchedVideo(row: InsertWatchedVideo) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.insert(watchedVideos).values(row);
+  return db.select().from(watchedVideos).where(eq(watchedVideos.userId, row.userId)).orderBy(watchedVideos.updatedAt);
+}
+
+export async function removeWatchedVideo(userId: number, id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.delete(watchedVideos).where(and(eq(watchedVideos.id, id), eq(watchedVideos.userId, userId)));
 }

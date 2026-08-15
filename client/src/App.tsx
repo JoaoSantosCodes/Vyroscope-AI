@@ -8,6 +8,7 @@ import Analysis from "./pages/Analysis";
 import Compare from "./pages/Compare";
 import History from "./pages/History";
 import Home from "./pages/Home";
+import Monitoring from "./pages/Monitoring";
 import Profile from "./pages/Profile";
 import Result from "./pages/Result";
 
@@ -20,6 +21,7 @@ function Router() {
       <Route path={"/resultado/:id"} component={Result} />
       <Route path={"/historico"} component={History} />
       <Route path={"/comparador"} component={Compare} />
+      <Route path={"/monitorar"} component={Monitoring} />
       <Route path={"/perfil"} component={Profile} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
