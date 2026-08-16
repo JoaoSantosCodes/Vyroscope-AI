@@ -375,6 +375,23 @@ function IdeaOfTheDayCard() {
     ? Math.min(100, Math.round((monthProgressStats.publishedThisMonth / monthProgressStats.goal) * 100))
     : 0;
 
+  // ===== Alerta de fim de mês (rodada 24) =====
+  // Mostra quando o mês está avançando (dia >= 20), a meta ainda não foi
+  // atingida e ainda há dias suficientes para atingi-la:
+  // "Restam N publicações para atingir a meta até o fim do mês".
+  const endOfMonthQuery = trpc.extended.endOfMonthGoalAlert.useQuery(undefined, {
+    refetchInterval: 15 * 60 * 1000,
+    enabled: !showGoalAlert,
+  });
+  const endAlert = endOfMonthQuery.data;
+  const showEndOfMonthAlert =
+    endOfMonthQuery.isSuccess &&
+    !!endAlert &&
+    endAlert.isEndOfMonth &&
+    !endAlert.met &&
+    endAlert.reachable &&
+    endAlert.needsN > 0;
+
   const archivePublishedMutation = trpc.extended.archivePublishedIdeas.useMutation({
     onSuccess: (data) => {
       utils.extended.listPinnedIdeas.invalidate();
@@ -414,6 +431,18 @@ function IdeaOfTheDayCard() {
           <span className="animate-pulse text-amber-500">●</span>
           <span className="flex-1 text-xs sm:text-sm">
             <strong className="text-amber-600">Dia {monthProgressDay} do mês</strong>: <strong className="text-amber-600">{monthProgressStats.publishedThisMonth}/{monthProgressStats.goal} publicada{monthProgressStats.publishedThisMonth === 1 ? "" : "s"}</strong> ({monthProgressPct}% concluído) — a meta de publicações ainda não foi alcançada. Abra o quadro Kanban para avançar.
+          </span>
+        </button>
+      )}
+      {showEndOfMonthAlert && endAlert && (
+        <button
+          type="button"
+          onClick={() => navigate("/ideia-do-dia")}
+          className="mb-4 flex w-full max-w-2xl items-center gap-2.5 rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-4 py-2.5 text-left transition-colors hover:border-emerald-500/70 hover:bg-emerald-500/15"
+        >
+          <span className="animate-pulse text-emerald-500">●</span>
+          <span className="flex-1 text-xs sm:text-sm">
+            <strong className="text-emerald-500">Fim do mês</strong>: faltam <strong className="text-emerald-500">{endAlert.needsN} publicação{endAlert.needsN === 1 ? "" : "s"}</strong> para atingir a meta de {endAlert.goal} até o dia {endAlert.remainingDays === 0 ? "último" : `${endAlert.remainingDays} do mês`} — ainda dá tempo, continue no ritmo!
           </span>
         </button>
       )}

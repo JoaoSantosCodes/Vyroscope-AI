@@ -887,3 +887,91 @@ export async function reorderPinnedIdeas(userId: number, orderedIds: number[]) {
   }
   return { success: true } as const;
 }
+
+/* ==================== Rodada 24: alerta fim de mês, meta anual e comparativo de anos ==================== */
+
+export const END_OF_MONTH_DAY_THRESHOLD = 20;
+
+/** Alerta de fim de mês: avalia se o mês está avançando (dia >= 20), a meta
+ * ainda não foi atingida e ainda há dias suficientes para atingi-la
+ * (publicadas + dias restantes >= meta). Rodada 24. */
+export async function getEndOfMonthGoalAlert(userId: number): Promise<{
+  isEndOfMonth: boolean;
+  monthKey: string;
+  dayOfMonthNow: number;
+  goal: number;
+  published: number;
+  remainingDays: number;
+  met: boolean;
+  reachable: boolean;
+  needsN: number;
+}> {
+  const db = await getDb();
+  const now = new Date();
+  const dayNow = now.getDate();
+  const key = monthKeyOf(now);
+  const stats = await getPinnedProductionStats(userId, key);
+  const { goal, publishedThisMonth } = stats;
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  // dias restantes no mês: total do mês - dia corrente
+  const totalDaysInMonth = new Date(year, month + 1, 0).getDate();
+  const remainingDays = totalDaysInMonth - dayNow;
+  const met = publishedThisMonth >= goal;
+  const needsN = Math.max(0, goal - publishedThisMonth);
+  const reachable = publishedThisMonth + remainingDays >= goal;
+  return {
+    isEndOfMonth: dayNow >= END_OF_MONTH_DAY_THRESHOLD,
+    monthKey: key,
+    dayOfMonthNow: dayNow,
+    goal,
+    published: publishedThisMonth,
+    remainingDays,
+    met,
+    reachable,
+    needsN,
+  };
+}
+
+/** Resumo agregado de um ano: soma das metas mensais, publicações acumuladas,
+ * meses com meta cumprida, média de produção e flag de "ano completo" (todos
+ * os meses do ano — ou todos os passados + mês corrente — cumpriram a meta).
+ * Rodada 24. */
+export async function getAnnualGoal(userId: number, year: number = new Date().getFullYear()): Promise<{
+  year: number;
+  monthsCounted: number;
+  annualGoal: number;
+  published: number;
+  metMonths: number;
+  progressRatio: number;
+  yearComplete: boolean;
+  allMet: boolean;
+}> {
+  const summary = await getYearSummary(userId, year);
+  const months = summary.months;
+  const annualGoal = months.reduce((sum, m) => sum + m.goal, 0);
+  const published = months.reduce((sum, m) => sum + m.publishedThisMonth, 0);
+  const metMonths = months.filter((m) => m.met).length;
+  const progressRatio = annualGoal > 0 ? Math.round((published / annualGoal) * 100) : 0;
+  // Ano completo: todos os meses computados cumpriram a meta e há pelo menos um mês
+  const allMet = months.length > 0 && metMonths === months.length;
+  return { year, monthsCounted: months.length, annualGoal, published, metMonths, progressRatio, yearComplete: allMet, allMet };
+}
+
+/** Comparativo entre dois anos: soma os resumos anuais e calcula deltas.
+ * Rodada 24. */
+export async function getYearComparison(userId: number, years: [number, number]): Promise<{
+  current: Awaited<ReturnType<typeof getAnnualGoal>>;
+  previous: Awaited<ReturnType<typeof getAnnualGoal>>;
+  deltaPublished: number;
+  deltaMetMonths: number;
+  deltaAnnualGoal: number;
+  currentBetter: boolean;
+}> {
+  const current = await getAnnualGoal(userId, years[1]);
+  const previous = await getAnnualGoal(userId, years[0]);
+  const deltaPublished = current.published - previous.published;
+  const deltaMetMonths = current.metMonths - previous.metMonths;
+  const deltaAnnualGoal = current.annualGoal - previous.annualGoal;
+  return { current, previous, deltaPublished, deltaMetMonths, deltaAnnualGoal, currentBetter: current.published > previous.published };
+}

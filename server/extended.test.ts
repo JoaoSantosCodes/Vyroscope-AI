@@ -298,6 +298,9 @@ vi.mock("./db", async (importOriginal) => {
     insertGoalSuggestion: vi.fn(),
     listGoalSuggestions: vi.fn(),
     getYearSummary: vi.fn(),
+    getEndOfMonthGoalAlert: vi.fn(),
+    getAnnualGoal: vi.fn(),
+    getYearComparison: vi.fn(),
   };
 });
 
@@ -331,6 +334,9 @@ const mockedListCelebrations = vi.mocked(db.listGoalCelebrations);
 const mockedListSuggestions = vi.mocked(db.listGoalSuggestions);
 const mockedYearSummary = vi.mocked(db.getYearSummary);
 const mockedInsertSuggestion = vi.mocked(db.insertGoalSuggestion);
+const mockedEndOfMonthAlert = vi.mocked(db.getEndOfMonthGoalAlert);
+const mockedAnnualGoal = vi.mocked(db.getAnnualGoal);
+const mockedYearComparison = vi.mocked(db.getYearComparison);
 
 const folderUser = {
   id: 2,
@@ -1230,5 +1236,82 @@ describe("reorderThumbnails", () => {
     mockedReorder.mockRejectedValueOnce(new Error("Uma ou mais thumbnails não foram encontradas"));
     const caller = appRouter.createCaller(createFolderCtx());
     await expect(caller.extended.reorderThumbnails({ folderId: 3, orderedIds: [999] })).rejects.toThrow("Uma ou mais thumbnails não foram encontradas");
+  });
+});
+
+describe("rodada 24: endOfMonthGoalAlert / annualGoal / yearComparison", () => {
+  it("endOfMonthGoalAlert avalia o dia do mês, dias restantes e atingibilidade da meta", async () => {
+    mockedEndOfMonthAlert.mockResolvedValueOnce({
+      isEndOfMonth: true,
+      monthKey: "2026-08",
+      dayOfMonthNow: 22,
+      goal: 4,
+      published: 2,
+      remainingDays: 9,
+      met: false,
+      reachable: true,
+      needsN: 2,
+    } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.endOfMonthGoalAlert();
+    expect(result.isEndOfMonth).toBe(true);
+    expect(result.needsN).toBe(2);
+    expect(result.reachable).toBe(true);
+    expect(mockedEndOfMonthAlert).toHaveBeenCalledWith(2);
+  });
+  it("endOfMonthGoalAlert marca a meta como atingida quando publicadas >= meta", async () => {
+    mockedEndOfMonthAlert.mockResolvedValueOnce({
+      isEndOfMonth: false,
+      monthKey: "2026-08",
+      dayOfMonthNow: 10,
+      goal: 4,
+      published: 4,
+      remainingDays: 21,
+      met: true,
+      reachable: true,
+      needsN: 0,
+    } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.endOfMonthGoalAlert();
+    expect(result.met).toBe(true);
+    expect(result.needsN).toBe(0);
+  });
+  it("annualGoal agrega as metas mensais do ano com selo de ano completo", async () => {
+    mockedAnnualGoal.mockResolvedValueOnce({
+      year: 2026,
+      monthsCounted: 7,
+      annualGoal: 28,
+      published: 28,
+      metMonths: 7,
+      progressRatio: 100,
+      yearComplete: true,
+      allMet: true,
+    } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.annualGoal({ year: 2026 });
+    expect(result.year).toBe(2026);
+    expect(result.annualGoal).toBe(28);
+    expect(result.progressRatio).toBe(100);
+    expect(result.yearComplete).toBe(true);
+    expect(mockedAnnualGoal).toHaveBeenCalledWith(2, 2026);
+  });
+  it("yearComparison calcula deltas entre dois anos", async () => {
+    mockedYearComparison.mockResolvedValueOnce({
+      current: { year: 2026, monthsCounted: 8, annualGoal: 32, published: 20, metMonths: 5, progressRatio: 62, yearComplete: false, allMet: false },
+      previous: { year: 2025, monthsCounted: 12, annualGoal: 24, published: 15, metMonths: 4, progressRatio: 62, yearComplete: false, allMet: false },
+      deltaPublished: 5,
+      deltaMetMonths: 1,
+      deltaAnnualGoal: 8,
+      currentBetter: true,
+    } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.yearComparison({ years: [2025, 2026] });
+    expect(result.deltaPublished).toBe(5);
+    expect(result.currentBetter).toBe(true);
+    expect(mockedYearComparison).toHaveBeenCalledWith(2, [2025, 2026]);
+  });
+  it("yearComparison rejeita quando o primeiro ano não é anterior ao segundo", async () => {
+    const caller = appRouter.createCaller(createFolderCtx());
+    await expect(caller.extended.yearComparison({ years: [2026, 2026] })).rejects.toThrow();
   });
 });

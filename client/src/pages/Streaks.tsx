@@ -13,11 +13,14 @@ import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import {
   ArrowLeft,
+  ArrowRight,
   Award,
   CheckCircle2,
   Flame,
   PartyPopper,
   Target,
+  TrendingDown,
+  TrendingUp,
   Trophy,
   XCircle,
   CalendarDays,
@@ -62,6 +65,20 @@ export default function Streaks() {
   });
   const year = yearSummaryQuery.data?.year ?? new Date().getFullYear();
   const sy = yearSummaryQuery.data;
+
+  // ===== Comparativo de anos (rodada 24) =====
+  const [compareYear, setCompareYear] = useState<number | null>(null);
+  const compareQuery = trpc.extended.yearComparison.useQuery(
+    { years: [compareYear ?? year - 1, year] as [number, number] },
+    { refetchOnWindowFocus: false, staleTime: 5 * 60 * 1000, enabled: compareYear !== null }
+  );
+
+  // ===== Meta anual (rodada 24) =====
+  const annualGoalQuery = trpc.extended.annualGoal.useQuery(
+    { year },
+    { refetchOnWindowFocus: false, staleTime: 5 * 60 * 1000, enabled: !!sy }
+  );
+  const ag = annualGoalQuery.data;
 
   // ===== Persistência da celebração (rodada 23): rever confetes =====
   const celebrationsQuery = trpc.extended.listGoalCelebrations.useQuery(undefined, {
@@ -328,7 +345,24 @@ export default function Streaks() {
                 ))}
               </div>
             ) : null}
-            <div className="mt-3 flex justify-end">
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Comparar com:</span>
+                <div className="flex rounded-md border border-border p-0.5">
+                  {[2025, 2026].filter((y) => y !== year).map((y) => (
+                    <button
+                      key={y}
+                      type="button"
+                      className={`px-2 py-0.5 text-[10px] transition-colors ${
+                        compareYear === y ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                      }`}
+                      onClick={() => setCompareYear(compareYear === y ? null : y)}
+                    >
+                      {y}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <Button
                 variant="outline"
                 size="sm"
@@ -343,6 +377,94 @@ export default function Streaks() {
                 )}
                 Exportar ano em PDF
               </Button>
+            </div>
+            {ag && ag.yearComplete ? (
+              <div className="mt-3 flex items-center gap-3 rounded-md border border-amber-500/50 bg-amber-500/10 p-3">
+                <Award className="h-6 w-6 shrink-0 text-amber-500" />
+                <div>
+                  <div className="text-[12px] font-bold text-amber-500">SELO · ANO COMPLETO {year}</div>
+                  <div className="text-[11px] text-muted-foreground">
+                    Todos os meses do ano cumpriram a meta — {ag.published}/{ag.annualGoal} publicações, {ag.metMonths} de
+                    {" "}{ag.monthsCounted} metas cumpridas.
+                  </div>
+                </div>
+              </div>
+            ) : ag ? (
+              <div className="mt-3 space-y-1.5">
+                <div className="flex items-center gap-2 text-[11px]">
+                  <span className="w-36 text-muted-foreground">Meta anual {year}</span>
+                  <Progress value={Math.min(100, ag.progressRatio)} className="h-2 flex-1" aria-label={`Meta anual ${year}: ${ag.progressRatio}%`} />
+                  <span className="w-20 text-right font-medium text-foreground">{ag.published}/{ag.annualGoal}</span>
+                </div>
+                <div className="text-[10px] text-muted-foreground">
+                  {ag.metMonths} de {ag.monthsCounted} meses com a meta cumprida
+                  {ag.yearComplete ? " · ano completo" : ""}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        )}
+
+        {/* Comparativo de anos (rodada 24): evolução {compareYear} → {year} */}
+        {compareYear !== null && compareQuery.data && (
+          <div className="mt-3 rounded-lg border border-amber-500/30 bg-card p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-foreground">
+                Comparativo {compareYear} → {year}
+              </h3>
+              <button
+                type="button"
+                className="text-[10px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                onClick={() => setCompareYear(null)}
+              >
+                fechar
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {[
+                {
+                  label: "Publicações",
+                  value: `${compareQuery.data.previous.published} → ${compareQuery.data.current.published}`,
+                  delta: compareQuery.data.deltaPublished,
+                },
+                {
+                  label: "Metas cumpridas",
+                  value: `${compareQuery.data.previous.metMonths} → ${compareQuery.data.current.metMonths}`,
+                  delta: compareQuery.data.deltaMetMonths,
+                },
+                {
+                  label: "Meta anual",
+                  value: `${compareQuery.data.previous.annualGoal} → ${compareQuery.data.current.annualGoal}`,
+                  delta: compareQuery.data.deltaAnnualGoal,
+                },
+                {
+                  label: "Resultado",
+                  value: compareQuery.data.currentBetter ? "Evoluiu" : compareQuery.data.deltaPublished === 0 ? "Estável" : "Recuou",
+                  delta: null,
+                },
+              ].map((tile) => (
+                <div key={tile.label} className="rounded-md bg-card/50 p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{tile.label}</div>
+                  <div className="mt-1 flex items-center gap-1 text-[13px] font-bold text-foreground">
+                    {tile.delta !== null && tile.delta !== 0 ? (
+                      tile.delta > 0 ? (
+                        <TrendingUp className="h-3.5 w-3.5 text-emerald-500" />
+                      ) : (
+                        <TrendingDown className="h-3.5 w-3.5 text-rose-500" />
+                      )
+                    ) : tile.delta === 0 ? (
+                      <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
+                    ) : null}
+                    {tile.value}
+                  </div>
+                  {tile.delta !== null ? (
+                    <div className={`text-[10px] ${tile.delta > 0 ? "text-emerald-500" : tile.delta < 0 ? "text-rose-500" : "text-muted-foreground"}`}>
+                      {tile.delta > 0 ? "+" : ""}{tile.delta}
+                      {tile.delta !== 0 ? " vs ano anterior" : " sem variação"}
+                    </div>
+                  ) : null}
+                </div>
+              ))}
             </div>
           </div>
         )}

@@ -491,6 +491,35 @@ export const extendedRouter = router({
       await setPinnedMonthlyGoal(ctx.user.id, input.monthKey, input.goal);
       return { success: true } as const;
     }),
+  /** Alerta de fim de mês: dia >= 20, meta do mês ainda não atingida e dias
+   *  restantes suficientes para atingi-la (publicadas + dias restantes >= meta).
+   *  Rodada 24. */
+  endOfMonthGoalAlert: protectedProcedure.query(async ({ ctx }) => {
+    const { getEndOfMonthGoalAlert } = await import("../db");
+    return getEndOfMonthGoalAlert(ctx.user.id);
+  }),
+  /** Meta anual agregada: soma das metas mensais do ano, publicações
+   *  acumuladas, meses cumpridos, progresso e selo de "ano completo".
+   *  Rodada 24. */
+  annualGoal: protectedProcedure
+    .input(z.object({ year: z.number().int().min(2020).max(2100).optional() }))
+    .query(async ({ ctx, input }) => {
+      const { getAnnualGoal } = await import("../db");
+      return getAnnualGoal(ctx.user.id, input.year);
+    }),
+  /** Comparativo entre dois anos (publicações, metas cumpridas, metas anuais
+   *  e deltas). Rodada 24. */
+  yearComparison: protectedProcedure
+    .input(z.object({ years: z.tuple([z.number().int().min(2020).max(2100), z.number().int().min(2020).max(2100)]).optional() }))
+    .query(async ({ ctx, input }) => {
+      const { getYearComparison } = await import("../db");
+      const now = new Date().getFullYear();
+      const years = input?.years ?? ([now - 1, now] as [number, number]);
+      if (years[0] >= years[1]) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "O primeiro ano deve ser anterior ao segundo." });
+      }
+      return getYearComparison(ctx.user.id, years);
+    }),
   /** Streak de meses consecutivos com a meta de publicações cumprida
    *  (retrocedendo do mês corrente, exclusive). Rodada 20. */
   pinnedGoalStreak: protectedProcedure.query(async ({ ctx }) => {
