@@ -293,6 +293,11 @@ vi.mock("./db", async (importOriginal) => {
     getMonthlyHistory: vi.fn(),
     getMonthlyGoalByMonth: vi.fn(),
     deletePinnedIdea: vi.fn(),
+    markGoalCelebration: vi.fn(),
+    listGoalCelebrations: vi.fn(),
+    insertGoalSuggestion: vi.fn(),
+    listGoalSuggestions: vi.fn(),
+    getYearSummary: vi.fn(),
   };
 });
 
@@ -321,6 +326,11 @@ const mockedStreak = vi.mocked(db.getMonthlyGoalStreak);
 const mockedMonthlyHistory = vi.mocked(db.getMonthlyHistory);
 const mockedExistingGoal = vi.mocked(db.getMonthlyGoalByMonth);
 const mockedDeletePinned = vi.mocked(db.deletePinnedIdea);
+const mockedMarkCelebration = vi.mocked(db.markGoalCelebration);
+const mockedListCelebrations = vi.mocked(db.listGoalCelebrations);
+const mockedListSuggestions = vi.mocked(db.listGoalSuggestions);
+const mockedYearSummary = vi.mocked(db.getYearSummary);
+const mockedInsertSuggestion = vi.mocked(db.insertGoalSuggestion);
 
 const folderUser = {
   id: 2,
@@ -1044,6 +1054,153 @@ describe("extended.suggestMonthlyGoal", () => {
   it("rejects a malformed month key", async () => {
     const caller = appRouter.createCaller(createFolderCtx());
     await expect(caller.extended.suggestMonthlyGoal({ monthKey: "2026/08" })).rejects.toThrow();
+  });
+  it("persiste a sugestão no histórico mesmo sem meta anterior (rodada 23)", async () => {
+    mockedStreak.mockResolvedValueOnce({ streak: 0, lastMetKey: null } as never);
+    mockedMonthlyHistory.mockResolvedValueOnce(baseMonth as never);
+    mockedExistingGoal.mockResolvedValueOnce(null as never);
+    mockedInsertSuggestion.mockResolvedValueOnce({ id: 9, applied: false, keepExisting: false } as never);
+    mockedInvokeLLM.mockResolvedValueOnce({
+      choices: [
+        {
+          message: { content: JSON.stringify({ suggestedGoal: 3, reason: "Ritmo consistente" }) },
+        },
+      ],
+    } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.suggestMonthlyGoal({ monthKey: "2026-09" });
+    expect(result.suggestedGoal).toBe(3);
+    expect(mockedInsertSuggestion).toHaveBeenCalledWith(2, "2026-09", 3, "Ritmo consistente", null, false, false);
+  });
+  it("persiste a recomendação de manter a meta existente (rodada 23)", async () => {
+    const withGoal = [...baseMonth, {
+      monthKey: "2026-09",
+      label: "mês extra",
+      publishedThisMonth: 2,
+      avgProductionDays: null,
+      goal: 5,
+      met: false,
+      isCurrent: true,
+    }];
+    mockedStreak.mockResolvedValueOnce({ streak: 0, lastMetKey: null } as never);
+    mockedMonthlyHistory.mockResolvedValueOnce(withGoal as never);
+    mockedExistingGoal.mockResolvedValueOnce({ goal: 5 } as never);
+    mockedInsertSuggestion.mockResolvedValueOnce({ id: 10, applied: false, keepExisting: true } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.suggestMonthlyGoal({ monthKey: "2026-09" });
+    expect(result.keepExisting).toBe(true);
+    const args = mockedInsertSuggestion.mock.calls[0] as unknown as [number, string, number, string, unknown, boolean, boolean];
+    expect(mockedInsertSuggestion).toHaveBeenCalledWith(2, "2026-09", 5, expect.any(String), null, false, true);
+    expect(String(args[3])).toContain("mantê-la");
+  });
+  it("não falha a sugestão quando a persistência falha (rodada 23)", async () => {
+    mockedStreak.mockResolvedValueOnce({ streak: 0, lastMetKey: null } as never);
+    mockedMonthlyHistory.mockResolvedValueOnce(baseMonth as never);
+    mockedExistingGoal.mockResolvedValueOnce(null as never);
+    mockedInsertSuggestion.mockRejectedValueOnce(new Error("db fora"));
+    mockedInvokeLLM.mockResolvedValueOnce({
+      choices: [
+        {
+          message: { content: JSON.stringify({ suggestedGoal: 4, reason: "estável" }) },
+        },
+      ],
+    } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.suggestMonthlyGoal({ monthKey: "2026-10" });
+    expect(result.suggestedGoal).toBe(4);
+  });
+});
+
+describe("rodada 23 (persistência da celebração, histórico de sugestões, ano em números)", () => {
+  const baseMonth = Array.from({ length: 4 }, (_, i) => ({
+    monthKey: `2026-${String(i + 1).padStart(2, "0")}`,
+    label: `mês ${i + 1}`,
+    publishedThisMonth: 3,
+    avgProductionDays: 4,
+    goal: 4,
+    met: true,
+    isCurrent: false,
+  }));
+  it("markGoalReached registra a celebração quando a meta foi atingida", async () => {
+    mockedStats.mockResolvedValueOnce({ monthKey: "2026-08", publishedThisMonth: 5, goal: 4, avgProductionDays: 3 } as never);
+    mockedMarkCelebration.mockResolvedValueOnce(undefined as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.markGoalReached({ monthKey: "2026-08" });
+    expect(result.monthKey).toBe("2026-08");
+    expect(result.goal).toBe(4);
+    expect(mockedMarkCelebration).toHaveBeenCalledWith(2, "2026-08", 4);
+  });
+  it("markGoalReached rejeita quando o mês ainda não atingiu a meta", async () => {
+    mockedStats.mockResolvedValueOnce({ monthKey: "2026-08", publishedThisMonth: 2, goal: 4, avgProductionDays: null } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    await expect(caller.extended.markGoalReached({ monthKey: "2026-08" })).rejects.toThrow(/não atingiu a meta/);
+    expect(mockedMarkCelebration).not.toHaveBeenCalled();
+  });
+  it("listGoalCelebrations retorna as celebrações do usuário", async () => {
+    mockedListCelebrations.mockResolvedValueOnce([
+      { id: 1, userId: 2, monthKey: "2026-07", goal: 4, createdAt: new Date() },
+    ] as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.listGoalCelebrations();
+    expect(result).toHaveLength(1);
+    expect(mockedListCelebrations).toHaveBeenCalledWith(2, 12);
+  });
+  it("listGoalSuggestions retorna o histórico de sugestões da IA", async () => {
+    mockedListSuggestions.mockResolvedValueOnce([
+      { id: 1, userId: 2, monthKey: "2026-09", suggestedGoal: 5, reason: "ritmo", factors: null, applied: false, keepExisting: false, createdAt: new Date() },
+    ] as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.listGoalSuggestions();
+    expect(result).toHaveLength(1);
+    expect(mockedListSuggestions).toHaveBeenCalledWith(2, 30);
+  });
+  it("yearSummary retorna a consolidação do ano corrente", async () => {
+    mockedYearSummary.mockResolvedValueOnce({
+      year: 2026,
+      months: [{ monthKey: "2026-01", label: "janeiro de 2026", publishedThisMonth: 3, avgProductionDays: null, goal: 4, ratio: 75, met: false, isCurrent: false }],
+      totalPublished: 3,
+      totalGoalsMet: 0,
+      avgProductionDays: null,
+      bestMonth: null,
+    } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.yearSummary({});
+    expect(result.year).toBe(2026);
+    expect(result.totalPublished).toBe(3);
+    expect(mockedYearSummary).toHaveBeenCalledWith(2, undefined);
+  });
+  it("exportYearPdf gera o PDF consolidado com KPIs e envia para o storage", async () => {
+    mockedYearSummary.mockResolvedValueOnce({
+      year: 2026,
+      months: baseMonth.map((m) => ({ ...m, ratio: 75, isCurrent: false })),
+      totalPublished: 12,
+      totalGoalsMet: 4,
+      avgProductionDays: 4,
+      bestMonth: { monthKey: "2026-04", label: "abril de 2026", publishedThisMonth: 3 },
+    } as never);
+    mockedStreak.mockResolvedValueOnce({ streak: 4, lastMetKey: "2026-04" } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.exportYearPdf({});
+    expect(result.fileName).toBe("ano-em-numeros-2026.pdf");
+    expect(result.downloadUrl).toBe("https://s3.example/p.pdf");
+    expect(storagePut).toHaveBeenCalledWith(
+      expect.stringMatching(/^exports\/ano-em-numeros-2026-\d+-2\.pdf$/),
+      expect.any(Buffer),
+      "application/pdf"
+    );
+  });
+  it("exportYearPdf rejeita quando não há meses no ano", async () => {
+    mockedYearSummary.mockResolvedValueOnce({
+      year: 2025,
+      months: [],
+      totalPublished: 0,
+      totalGoalsMet: 0,
+      avgProductionDays: null,
+      bestMonth: null,
+    } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    await expect(caller.extended.exportYearPdf({ year: 2025 })).rejects.toThrow();
+    expect(storagePut).not.toHaveBeenCalled();
   });
 });
 

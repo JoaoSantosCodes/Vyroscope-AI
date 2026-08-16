@@ -28,7 +28,7 @@ import GoalCelebrationView from "@/components/GoalCelebration";
 import { quickNoteValue, shouldSaveQuickNote } from "@/lib/quickNote";
 import { formatDate, scoreColor, scoreLabel } from "@/lib/score";
 import { trpc } from "@/lib/trpc";
-import { Archive, ArrowUpDown, CalendarDays, Clock, Edit3, FileDown, FileText, Flame, Lightbulb, Loader2, Pin, PinOff, Radar, Search, Sparkles, StickyNote, Target, TrendingUp } from "lucide-react";
+import { Archive, ArrowUpDown, CalendarDays, Clock, Edit3, FileDown, FileText, Flame, Lightbulb, Loader2, PartyPopper, Pin, PinOff, Radar, Search, Sparkles, StickyNote, Target, TrendingUp, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 
@@ -654,7 +654,7 @@ export default function IdeaHistory() {
     onError: (err) => toast.error(err.message || "Falha ao gerar o resumo mensal."),
   });
 
-  // ===== Sugestão de meta realista via IA para um mês (rodada 22) =====
+  // ===== Sugestão de meta realista via IA para um mês (rodada 22/23) =====
   const suggestGoalMutation = trpc.extended.suggestMonthlyGoal.useMutation({
     onSuccess: (data) => {
       setSuggestedGoal({ goal: data.suggestedGoal, reason: data.reason, keepExisting: data.keepExisting });
@@ -668,6 +668,38 @@ export default function IdeaHistory() {
     setGoalMutation.mutate({ monthKey: statsMonthKey, goal: suggestedGoal.goal }, {
       onSuccess: () => setSuggestedGoal(null),
     });
+  };
+
+  // ===== Persistência da celebração no servidor (rodada 23) =====
+  // Ao carregar dados do mês corrente com a meta atingida, registra a
+  // celebração no servidor (idempotente) para poder "rever os confetes".
+  const currentCelebrationQuery = trpc.extended.listGoalCelebrations.useQuery(undefined, {
+    refetchOnWindowFocus: false,
+    staleTime: 5 * 60 * 1000,
+  });
+  const markReachedMutation = trpc.extended.markGoalReached.useMutation({
+    onError: (err) => toast.error(err.message || "Falha ao registrar a celebração."),
+  });
+  const goalReachedAt = useMemo(() => {
+    const reached = (currentCelebrationQuery.data ?? []).find((c) => c.monthKey === currentMonthKey);
+    return reached ?? null;
+  }, [currentCelebrationQuery.data, currentMonthKey]);
+  const [replayCount, setReplayCount] = useState<number>(0);
+
+  // ===== Histórico de sugestões de metas da IA (rodada 23) =====
+  const goalSuggestionsQuery = trpc.extended.listGoalSuggestions.useQuery(undefined, {
+    refetchOnWindowFocus: false,
+    staleTime: 1 * 60 * 1000,
+  });
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const parseFactors = (raw: string | null): string[] => {
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter((f): f is string => typeof f === "string") : [];
+    } catch {
+      return [];
+    }
   };
 
   const archivePublishedMutation = trpc.extended.archivePublishedIdeas.useMutation({
@@ -1020,6 +1052,22 @@ export default function IdeaHistory() {
                   )}
                   Sugerir meta (IA)
                 </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 border-border bg-card px-2 text-[11px]"
+                  onClick={() => {
+                    utils.extended.listGoalSuggestions.invalidate();
+                    setSuggestionsOpen(true);
+                  }}
+                  title="Revisar as justificativas e recomendações de metas passadas da IA"
+                >
+                  <Wand2 className="mr-1.5 h-3 w-3 text-amber-500" />
+                  Histórico de metas
+                  {(goalSuggestionsQuery.data?.length ?? 0) > 0 && (
+                    <span className="ml-1 rounded-full bg-primary/20 px-1.5 text-[9px] font-semibold text-primary">{goalSuggestionsQuery.data?.length}</span>
+                  )}
+                </Button>
               </div>
               {/* Mini-gráfico de barras: publicadas nos últimos 6 meses (rodada 21) */}
               <div className="mt-2">
@@ -1140,10 +1188,71 @@ export default function IdeaHistory() {
                 </button>
               </div>
             )}
-            {/* Celebração ao atingir 100% da meta mensal (rodada 22) */}
-            {isCurrentMonthView && statsQuery.data && statsQuery.data.goal > 0 && statsQuery.data.publishedThisMonth >= statsQuery.data.goal ? (
-              <GoalCelebrationView />
-            ) : null}
+            {/* Celebração ao atingir 100% da meta mensal (rodada 22;
+                rodada 23: celebração persistida no servidor via markGoalReached
+                + botão "Rever confetes" controlado por triggerKey) */}
+            {isCurrentMonthView && statsQuery.data && statsQuery.data.goal > 0 && statsQuery.data.publishedThisMonth >= statsQuery.data.goal && (
+              <GoalCelebrationView triggerKey={replayCount + (goalReachedAt ? 1 : 0)} />
+            )}
+            {isCurrentMonthView && statsQuery.data && statsQuery.data.goal > 0 && statsQuery.data.publishedThisMonth >= statsQuery.data.goal && (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-emerald-500/50 bg-emerald-500/15 px-2.5 py-1 text-[10px] font-semibold text-emerald-400 transition-colors hover:bg-emerald-500/25 active:scale-[0.97]"
+                  title="Reviver a animação de confetes da meta atingida"
+                  onClick={() => {
+                    // Registra a celebração no servidor na primeira vez (falha silenciosa se já registrada)
+                    markReachedMutation.mutate({ monthKey: currentMonthKey });
+                    setReplayCount((c) => c + 1);
+                  }}
+                >
+                  <PartyPopper className="h-3 w-3" />
+                  {markReachedMutation.isPending ? "Registrando…" : "Rever confetes"}
+                </button>
+              </div>
+            )}
+            {/* Histórico de sugestões de metas da IA (rodada 23) */}
+            <Dialog open={suggestionsOpen} onOpenChange={setSuggestionsOpen}>
+              <DialogContent className="max-h-[75vh] max-w-lg overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2 text-sm">
+                    <Wand2 className="h-4 w-4 text-amber-500" />
+                    Histórico de sugestões de metas (IA)
+                  </DialogTitle>
+                </DialogHeader>
+                {goalSuggestionsQuery.isLoading ? (
+                  <div className="space-y-2 py-3">
+                    <Skeleton className="h-14 w-full" />
+                    <Skeleton className="h-14 w-full" />
+                    <Skeleton className="h-14 w-full" />
+                  </div>
+                ) : !goalSuggestionsQuery.data?.length ? (
+                  <p className="py-4 text-center text-xs text-muted-foreground">
+                    Nenhuma sugestão de meta gerada pela IA ainda — use o botão "Sugerir meta (IA)" no painel de estatísticas para criar a primeira.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {goalSuggestionsQuery.data.map((s) => (
+                      <div key={s.id} className="rounded-lg border border-border bg-card/50 px-3 py-2.5">
+                        <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+                          <span className="font-semibold text-foreground">{formatMonthKey(s.monthKey)}</span>
+                          <span>meta sugerida: <strong className="text-amber-400">{s.suggestedGoal}</strong></span>
+                          <Badge variant={s.applied ? "default" : s.keepExisting ? "outline" : "secondary"} className="px-1.5 text-[9px]">
+                            {s.applied ? "aplicada" : s.keepExisting ? "manter atual" : "descartada"}
+                          </Badge>
+                          <span className="ml-auto">{new Date(s.createdAt).toLocaleString("pt-BR")}</span>
+                        </div>
+                        {s.reason ? <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">{s.reason}</p> : null}
+                        {parseFactors(s.factors).length > 0 ? (
+                          <p className="mt-1 text-[10px] text-muted-foreground/70">Fatores: {parseFactors(s.factors).join(" · ")}</p>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </DialogContent>
+            </Dialog>
+
             <p className="mb-3 text-xs text-muted-foreground">
               Arraste os cards para reordenar dentro da coluna ou movê-los entre as colunas de status. As fixadas aparecem primeiro no PDF exportado e as arquivadas entram nas exportações em uma seção dedicada.
             </p>

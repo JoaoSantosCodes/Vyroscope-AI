@@ -1,17 +1,24 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { useLocation } from "wouter";
+import { useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Badge as GoalBadge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import GoalCelebrationView from "@/components/GoalCelebration";
 import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis, Tooltip as ChartTooltip } from "recharts";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import {
   ArrowLeft,
+  Award,
   CheckCircle2,
   Flame,
+  PartyPopper,
   Target,
+  Trophy,
   XCircle,
   CalendarDays,
   FileDown,
@@ -40,6 +47,31 @@ export default function Streaks() {
     },
     onError: (err) => toast.error(err.message || "Falha ao gerar o PDF de metas mensais."),
   });
+
+  // ===== Ano em números (rodada 23) =====
+  const yearSummaryQuery = trpc.extended.yearSummary.useQuery({}, {
+    refetchOnWindowFocus: false,
+    staleTime: 5 * 60 * 1000,
+  });
+  const exportYearMutation = trpc.extended.exportYearPdf.useMutation({
+    onSuccess: (data) => {
+      window.open(data.downloadUrl, "_blank");
+      toast.success(`PDF do ano em números (${yearSummaryQuery.data?.year ?? ""}) gerado.`);
+    },
+    onError: (err) => toast.error(err.message || "Falha ao gerar o PDF do ano em números."),
+  });
+  const year = yearSummaryQuery.data?.year ?? new Date().getFullYear();
+  const sy = yearSummaryQuery.data;
+
+  // ===== Persistência da celebração (rodada 23): rever confetes =====
+  const celebrationsQuery = trpc.extended.listGoalCelebrations.useQuery(undefined, {
+    refetchOnWindowFocus: false,
+    staleTime: 5 * 60 * 1000,
+  });
+  const markReachedMutation = trpc.extended.markGoalReached.useMutation({
+    onError: (err) => toast.error(err.message || "Falha ao registrar a celebração."),
+  });
+  const [replayCount, setReplayCount] = useState<number>(0);
 
   if (!isAuthenticated) return null;
 
@@ -234,6 +266,113 @@ export default function Streaks() {
                 )}
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Ano em números (rodada 23): consolidação das metas do ano corrente */}
+        <h2 className="mt-6 mb-2 flex items-center gap-2 text-sm font-semibold text-foreground">
+          <Award className="h-4 w-4 text-amber-500" />
+          Ano em números · {year}
+        </h2>
+        {yearSummaryQuery.isLoading ? (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-16 w-full" />
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="rounded-md bg-card/50 p-3">
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Publicações</div>
+                <div className="mt-1 text-lg font-bold text-foreground">{sy?.totalPublished ?? 0}</div>
+                <div className="text-[10px] text-muted-foreground">no ano</div>
+              </div>
+              <div className="rounded-md bg-card/50 p-3">
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Metas cumpridas</div>
+                <div className="mt-1 text-lg font-bold text-emerald-500">{sy?.totalGoalsMet ?? 0}</div>
+                <div className="text-[10px] text-muted-foreground">meses do ano</div>
+              </div>
+              <div className="rounded-md bg-card/50 p-3">
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Média de produção</div>
+                <div className="mt-1 text-lg font-bold text-foreground">
+                  {sy === undefined || sy.avgProductionDays === null ? "—" : `${sy.avgProductionDays.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}d`}
+                </div>
+                <div className="text-[10px] text-muted-foreground">por vídeo publicado</div>
+              </div>
+              <div className="rounded-md bg-card/50 p-3">
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Melhor mês</div>
+                <div className="mt-1 flex items-center gap-1 text-lg font-bold text-amber-500">
+                  <Trophy className="h-4 w-4" />
+                  {sy?.bestMonth ? `${sy.bestMonth.publishedThisMonth}` : "—"}
+                </div>
+                <div className="text-[10px] text-muted-foreground">{sy?.bestMonth ? sy.bestMonth.label : "sem dados"}</div>
+              </div>
+            </div>
+            {(sy?.months?.length ?? 0) > 0 ? (
+              <div className="mt-3 space-y-1.5">
+                {[...sy!.months].reverse().map((m) => (
+                  <div key={m.monthKey} className="flex items-center gap-2 text-[11px]">
+                    <span className="w-36 truncate text-muted-foreground capitalize">{m.label}</span>
+                    <Progress value={Math.min(100, m.ratio)} className="h-2 flex-1" aria-label={`${m.label}: ${m.ratio}% da meta`} />
+                    <span className={`w-14 text-right font-medium ${m.met ? "text-emerald-500" : "text-muted-foreground"}`}>
+                      {m.publishedThisMonth}/{m.goal}
+                    </span>
+                    <GoalBadge
+                      variant={m.isCurrent ? "outline" : m.met ? "default" : "secondary"}
+                      className="w-28 justify-center px-1.5 text-[9px]"
+                    >
+                      {m.isCurrent ? "mês atual" : m.met ? "meta cumprida" : "não cumprida"}
+                    </GoalBadge>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            <div className="mt-3 flex justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs"
+                disabled={exportYearMutation.isPending}
+                onClick={() => exportYearMutation.mutate({ year })}
+              >
+                {exportYearMutation.isPending ? (
+                  <FileDown className="mr-1.5 h-3.5 w-3.5 animate-spin opacity-70" />
+                ) : (
+                  <FileDown className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                Exportar ano em PDF
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Persistência da celebração (rodada 23): rever os confetes de metas atingidas */}
+        {(celebrationsQuery.data?.length ?? 0) > 0 && (
+          <div className="mt-6">
+            <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold text-foreground">
+              <PartyPopper className="h-4 w-4 text-emerald-500" />
+              Metas celebradas
+            </h2>
+            <GoalCelebrationView triggerKey={replayCount} />
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs"
+                disabled={markReachedMutation.isPending}
+                onClick={() => setReplayCount((c: number) => c + 1)}
+                title="Reviver a animação de confetes da última meta atingida"
+              >
+                <PartyPopper className="mr-1.5 h-3.5 w-3.5 text-emerald-500" />
+                Rever confetes
+              </Button>
+              <span className="text-[11px] text-muted-foreground">
+                {(celebrationsQuery.data ?? []).length} {" "}
+                {celebrationsQuery.data?.length === 1 ? "celebração registrada" : "celebrações registradas"} no servidor
+                {celebrationsQuery.data?.[0] ? ` · última: ${celebrationsQuery.data[0].monthKey} (meta ${celebrationsQuery.data[0].goal})` : ""}
+              </span>
+            </div>
           </div>
         )}
 

@@ -218,6 +218,10 @@ import {
   thumbnailFolders,
   pinnedIdeaHistory,
   pinnedMonthlyGoal,
+  goalCelebrations,
+  goalSuggestions,
+  InsertGoalCelebration,
+  GoalSuggestion,
 } from "../drizzle/schema";
 
 export async function saveSuggestionThumbnail(row: InsertSuggestionThumbnail) {
@@ -609,6 +613,59 @@ export function dayOfMonth(date: Date = new Date()): number {
   return date.getDate();
 }
 
+/* ==================== Rodada 23: celebração persistente + sugestões de meta ==================== */
+
+/** Registra que a meta do mês foi atingida (primeira vez → INSERT). Rodada 23. */
+export async function markGoalCelebration(userId: number, monthKey: string, goal: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(goalCelebrations).values({ userId, monthKey, goal }).onDuplicateKeyUpdate({ set: { goal } });
+}
+
+/** Retorna as celebrações registradas do usuário, mais recentes primeiro. Rodada 23. */
+export async function listGoalCelebrations(userId: number, limit = 12): Promise<InsertGoalCelebration[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(goalCelebrations).where(eq(goalCelebrations.userId, userId)).orderBy(desc(goalCelebrations.createdAt)).limit(limit);
+}
+
+/** Registra uma sugestão de meta gerada pela IA. Rodada 23. */
+export async function insertGoalSuggestion(
+  userId: number,
+  monthKey: string,
+  suggestedGoal: number,
+  reason: string | null,
+  factors: string[] | null,
+  applied: boolean,
+  keepExisting: boolean
+): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(goalSuggestions).values({
+    userId,
+    monthKey,
+    suggestedGoal,
+    reason,
+    factors: factors ? JSON.stringify(factors) : null,
+    applied: applied ? 1 : 0,
+    keepExisting: keepExisting ? 1 : 0,
+  });
+}
+
+/** Atualiza o flag applied de uma sugestão (quando a meta é aplicada após sugestão). Rodada 23. */
+export async function markGoalSuggestionApplied(suggestionId: number, userId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(goalSuggestions).set({ applied: 1 }).where(and(eq(goalSuggestions.id, suggestionId), eq(goalSuggestions.userId, userId)));
+}
+
+/** Histórico de sugestões de metas da IA do usuário, mais recentes primeiro. Rodada 23. */
+export async function listGoalSuggestions(userId: number, limit = 30): Promise<GoalSuggestion[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(goalSuggestions).where(eq(goalSuggestions.userId, userId)).orderBy(desc(goalSuggestions.createdAt)).limit(limit);
+}
+
 /** Retorna a meta configurada para o mês (ou null se não houver). Rodada 22
  * — extrai a consulta para que o caminho "meta já existe" seja testável
  * isoladamente no teste do procedimento de sugestão. */
@@ -672,6 +729,62 @@ export async function getMonthlyHistory(
   }
   // Mais antigos primeiro (janeiro → corrente) para gráficos e lista
   return rows.reverse();
+}
+
+/** Consolida o "ano em números" do usuário para o ano corrente (ou ano
+ * explícito): série de janeiro até o mês corrente com publicadas/meta/%/
+ * cumprida, além dos agregados do ano (publicações totais, metas cumpridas,
+ * média de produção, melhor mês). Rodada 23. */
+export async function getYearSummary(userId: number, year: number = new Date().getFullYear()): Promise<{
+  year: number;
+  months: {
+    monthKey: string;
+    label: string;
+    publishedThisMonth: number;
+    avgProductionDays: number | null;
+    goal: number;
+    ratio: number;
+    met: boolean;
+    isCurrent: boolean;
+  }[];
+  totalPublished: number;
+  totalGoalsMet: number;
+  avgProductionDays: number | null;
+  bestMonth: { monthKey: string; label: string; publishedThisMonth: number } | null;
+}> {
+  const db = await getDb();
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+  const currentKey = monthKeyOf(now);
+  const months: Awaited<ReturnType<typeof getYearSummary>>["months"] = [];
+  for (let m = 1; m <= 12; m += 1) {
+    // Meses futuros do ano corrente ficam fora da série
+    if (year === currentYear && m > currentMonth) break;
+    const key = `${year}-${String(m).padStart(2, "0")}`;
+    const stats = await getPinnedProductionStats(userId, key);
+    const label = new Date(year, m - 1, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+    const ratio = stats.goal > 0 ? Math.round((stats.publishedThisMonth / stats.goal) * 100) : 0;
+    months.push({
+      monthKey: key,
+      label,
+      publishedThisMonth: stats.publishedThisMonth,
+      avgProductionDays: stats.avgProductionDays,
+      goal: stats.goal,
+      ratio,
+      met: stats.publishedThisMonth >= stats.goal,
+      isCurrent: key === currentKey,
+    });
+  }
+  const totalPublished = months.reduce((sum, m) => sum + m.publishedThisMonth, 0);
+  const totalGoalsMet = months.filter((m) => m.met).length;
+  const withDays = months.filter((m) => m.avgProductionDays !== null).map((m) => m.avgProductionDays as number);
+  const avgProductionDays = withDays.length > 0 ? Math.round((withDays.reduce((a, b) => a + b, 0) / withDays.length) * 10) / 10 : null;
+  const best = months.reduce<Awaited<ReturnType<typeof getYearSummary>>["bestMonth"]>(
+    (acc, m) => (!acc || m.publishedThisMonth > acc.publishedThisMonth ? { monthKey: m.monthKey, label: m.label, publishedThisMonth: m.publishedThisMonth } : acc),
+    null
+  );
+  return { year, months, totalPublished, totalGoalsMet, avgProductionDays, bestMonth: best };
 }
 
 /** Quantos meses consecutivos (retrocedendo do mês corrente, exclusive, sem

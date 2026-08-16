@@ -199,3 +199,48 @@ export const pinnedMonthlyGoal = mysqlTable("pinned_monthly_goal", {
 
 export type PinnedMonthlyGoal = typeof pinnedMonthlyGoal.$inferSelect;
 export type InsertPinnedMonthlyGoal = typeof pinnedMonthlyGoal.$inferInsert;
+
+/**
+ * Celebrações de meta cumprida por mês (rodada 23). Registra no servidor quando
+ * o progresso da meta de um mês atinge 100% pela primeira vez, permitindo
+ * rever a animação de confetes pela página de metas independentemente de
+ * sessionStorage.
+ */
+export const goalCelebrations = mysqlTable("goal_celebrations", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  /** Mês da meta celebrada (YYYY-MM) */
+  monthKey: varchar("monthKey", { length: 7 }).notNull(),
+  /** Meta que foi atingida quando celebrada */
+  goal: int("goal").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type GoalCelebration = typeof goalCelebrations.$inferSelect;
+export type InsertGoalCelebration = typeof goalCelebrations.$inferInsert;
+
+/**
+ * Histórico de sugestões de metas geradas pela IA (rodada 23). Cada chamada a
+ * suggestMonthlyGoal é registrada com a justificativa, os fatores e se a meta
+ * sugerida foi aplicada ou descartada, para revisão futura.
+ */
+export const goalSuggestions = mysqlTable("goal_suggestions", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  /** Mês alvo da sugestão (YYYY-MM) */
+  monthKey: varchar("monthKey", { length: 7 }).notNull(),
+  /** Meta sugerida pela IA (1–100) */
+  suggestedGoal: int("suggestedGoal").notNull(),
+  /** Justificativa retornada pela IA */
+  reason: text("reason"),
+  /** Fatores considerados (JSON array de strings) */
+  factors: text("factors"),
+  /** Meta aplicada de fato (1 = aplicada via setMonthlyGoal, 0 = descartada/não aplicada) */
+  applied: int("applied").default(0).notNull(),
+  /** Meta mantida porque já existia para o mês (rodada 22: keepExisting) */
+  keepExisting: int("keepExisting").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type GoalSuggestion = typeof goalSuggestions.$inferSelect;
+export type InsertGoalSuggestion = typeof goalSuggestions.$inferInsert;

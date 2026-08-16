@@ -561,7 +561,15 @@ export const extendedRouter = router({
       }
       const existing = await getMonthlyGoalByMonth(ctx.user.id, target);
       if (existing) {
-        return { suggestedGoal: existing.goal, reason: "Meta já definida para este mês — a IA recomenda mantê-la até você revisar manualmente.", keepExisting: true } as const;
+        const keepReason = "Meta já definida para este mês — a IA recomenda mantê-la até você revisar manualmente.";
+        // Persiste a recomendação no histórico para revisão futura (rodada 23)
+        try {
+          const { insertGoalSuggestion } = await import("../db");
+          await insertGoalSuggestion(ctx.user.id, target, existing.goal, keepReason, null, false, true);
+        } catch {
+          // A falha de persistência não deve impedir a entrega da recomendação
+        }
+        return { suggestedGoal: existing.goal, reason: keepReason, keepExisting: true } as const;
       }
       const current = history[history.length - 1];
       const previous = history.slice(0, history.length - 1);
@@ -615,7 +623,15 @@ export const extendedRouter = router({
       if (suggestedGoal < 1) {
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "A IA não retornou uma meta válida — tente novamente." });
       }
-      return { suggestedGoal, reason: String(parsed.reason ?? ""), keepExisting: false } as const;
+      const suggestion = { suggestedGoal, reason: String(parsed.reason ?? ""), keepExisting: false } as const;
+      // Persiste a sugestão no histórico para revisão futura (rodada 23)
+      try {
+        const { insertGoalSuggestion } = await import("../db");
+        await insertGoalSuggestion(ctx.user.id, target, suggestedGoal, suggestion.reason, null, false, false);
+      } catch {
+        // A falha de persistência não deve impedir a entrega da sugestão
+      }
+      return suggestion;
     }),
   /** Exporta um resumo mensal de produção em PDF curto (página única)
    *  com o resumo do mês selecionado, dia do mês e selo de streak. Rodada 20. */
@@ -780,6 +796,56 @@ export const extendedRouter = router({
       const result = parseResult(analysis.result)!;
       const outline = await generateOutline(analysis.niche, suggestion, result.patterns ?? []);
       return { niche: analysis.niche, analysisId: analysis.id, suggestion, outline };
+    }),
+
+  /** Marca a meta do mês como atingida (100%) de forma persistente — a
+   *  celebração fica registrada no servidor e pode ser revivida pela página
+   *  de metas. Rodada 23. */
+  markGoalReached: protectedProcedure
+    .input(z.object({ monthKey: z.string().regex(/^\d{4}-\d{2}$/) }))
+    .mutation(async ({ ctx, input }) => {
+      const { getPinnedProductionStats, markGoalCelebration } = await import("../db");
+      const stats = await getPinnedProductionStats(ctx.user.id, input.monthKey);
+      if (stats.publishedThisMonth < stats.goal) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: `O mês ainda não atingiu a meta (${stats.publishedThisMonth}/${stats.goal} publicações).` });
+      }
+      await markGoalCelebration(ctx.user.id, stats.monthKey, stats.goal);
+      return { monthKey: stats.monthKey, goal: stats.goal } as const;
+    }),
+  /** Lista as celebrações de meta registradas no servidor (para "rever
+   *  confetes" na página de metas). Rodada 23. */
+  listGoalCelebrations: protectedProcedure.query(async ({ ctx }) => {
+    const { listGoalCelebrations: list } = await import("../db");
+    return list(ctx.user.id, 12);
+  }),
+  /** Histórico de sugestões de metas geradas pela IA com justificativas.
+   *  Rodada 23. */
+  listGoalSuggestions: protectedProcedure.query(async ({ ctx }) => {
+    const { listGoalSuggestions: list } = await import("../db");
+    return list(ctx.user.id, 30);
+  }),
+  /** Consolidação "Ano em números": série de meses do ano corrente com
+   *  publicados/meta/%/cumprida + agregados (total, metas cumpridas, média
+   *  de dias, melhor mês). Rodada 23. */
+  yearSummary: protectedProcedure
+    .input(z.object({ year: z.number().int().min(2020).max(2100).optional() }))
+    .query(async ({ ctx, input }) => {
+      const { getYearSummary } = await import("../db");
+      return getYearSummary(ctx.user.id, input.year);
+    }),
+  /** Exporta o PDF consolidado do "Ano em números". Rodada 23. */
+  exportYearPdf: protectedProcedure
+    .input(z.object({ year: z.number().int().min(2020).max(2100).optional() }))
+    .mutation(async ({ ctx, input }) => {
+      const { getYearSummary, getMonthlyGoalStreak } = await import("../db");
+      const summary = await getYearSummary(ctx.user.id, input.year);
+      const { streak } = await getMonthlyGoalStreak(ctx.user.id);
+      const { buildYearPdf } = await import("../exportPdf");
+      const buffer = await buildYearPdf({ summary, streak, userName: ctx.user.name });
+      const key = `exports/ano-em-numeros-${summary.year}-${Date.now()}-${ctx.user.id}.pdf`;
+      const { storagePut } = await import("../storage");
+      const { url } = await storagePut(key, buffer, "application/pdf");
+      return { downloadUrl: url, fileName: `ano-em-numeros-${summary.year}.pdf` } as const;
     }),
 
   /** Gera agenda de conteúdo de 4 semanas a partir das sugestões de uma análise. */

@@ -513,3 +513,56 @@ describe("buildMonthlyPdf (resumo de produção mensal, rodada 20)", () => {
     expect(compact).toContain("SELODECONSECUTIVIDADE:3MESESSEGUIDOSCOMAMETACUMPRIDA");
   });
 });
+
+// ===== "Ano em números" (rodada 23) =====
+import { buildYearPdf, type YearPdfInput } from "./exportPdf";
+
+function baseYearSummary(): YearPdfInput["summary"] {
+  return {
+    year: 2026,
+    months: Array.from({ length: 8 }, (_, i) => ({
+      monthKey: `2026-${String(i + 1).padStart(2, "0")}`,
+      label: `mês ${i + 1}`,
+      publishedThisMonth: i + 1,
+      avgProductionDays: i === 7 ? 3 : null,
+      goal: 4,
+      ratio: Math.round(((i + 1) / 4) * 100),
+      met: i >= 3,
+      isCurrent: i === 7,
+    })),
+    totalPublished: 36,
+    totalGoalsMet: 5,
+    avgProductionDays: 3,
+    bestMonth: { monthKey: "2026-08", label: "agosto de 2026", publishedThisMonth: 8 },
+  };
+}
+
+describe("buildYearPdf (rodada 23)", () => {
+  it("recusa série de meses vazia", async () => {
+    await expect(buildYearPdf({ summary: { ...baseYearSummary(), months: [], totalPublished: 0, totalGoalsMet: 0, avgProductionDays: null, bestMonth: null } })).rejects.toThrow("Dados inválidos");
+  });
+  it("renderiza os KPIs do ano e a tabela mês a mês no texto do PDF", async () => {
+    const buffer = await buildYearPdf({ summary: baseYearSummary(), streak: 5, userName: "Ana" });
+    const { spawnSync } = await import("node:child_process");
+    const { writeFileSync, mkdtempSync } = await import("node:fs");
+    const tmp = mkdtempSync("/tmp/pdf-test-");
+    const file = `${tmp}/year.pdf`;
+    writeFileSync(file, buffer);
+    const run = spawnSync(
+      process.execPath,
+      ["/home/ubuntu/vyroscope-ai/node_modules/pdf-parse/bin/cli.mjs", "text", file],
+      { encoding: "utf-8", cwd: "/home/ubuntu/vyroscope-ai" }
+    );
+    const text = run.stdout + run.stderr;
+    if (run.status !== 0) throw new Error(`pdf-parse CLI falhou: ${text}`);
+    const compact = text.replace(/[\s ]/g, "").toUpperCase();
+    expect(compact).toContain("ANOEMNÚMEROS·2026");
+    expect(compact).toContain("36NOANO");
+    expect(compact).toContain("5MESESDOANO");
+    expect(compact).toContain("MELHORMÊS:AGOSTODE2026");
+    expect(compact).toContain("SELODECONSECUTIVIDADE:5MESESSEGUIDOSCOMAMETACUMPRIDA");
+    expect(compact).toContain("MÊSAMÊS·2026");
+    expect(compact).toContain("MÊSMETAPUBLICADAS%DAMETASTATUS");
+    expect(compact).toContain("MÊS848200%MÊSCORRENTE");
+  });
+});

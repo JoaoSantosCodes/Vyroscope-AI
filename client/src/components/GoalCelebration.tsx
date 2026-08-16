@@ -4,11 +4,19 @@ import { useEffect, useMemo, useState } from "react";
  *  (evita disparar o canhão de confete repetidamente na mesma sessão). */
 const celebratedKey = (monthKey: string) => `vyroscope-goal-celebrated-${monthKey}`;
 
+/** Props do GoalCelebrationView (rodada 23). `triggerKey` permite disparar
+ *  manualmente a animação a partir do servidor ("rever confetes") — qualquer
+ *  mudança no valor dispara um novo canhão de confete. */
+export type GoalCelebrationProps = {
+  /** Chave arbitrária: mudar o valor dispara a animação (rodada 23). */
+  triggerKey?: number;
+};
+
 /** Partículas simples de confete que caem a partir do topo da faixa.
  *  Dispara uma vez por mês (registrado no sessionStorage) e respeita
  *  `prefers-reduced-motion` — nesse caso o banner aparece sem animação.
  *  Rodada 22: celebração visual ao atingir 100% da meta mensal. */
-export default function GoalCelebrationView() {
+export default function GoalCelebrationView(props: GoalCelebrationProps = {}) {
   const currentMonthKey = useMemo(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -18,6 +26,18 @@ export default function GoalCelebrationView() {
     return window.sessionStorage.getItem(celebratedKey(currentMonthKey)) === "1";
   });
   const [visible, setVisible] = useState<boolean>(() => !celebrated);
+  // Rodada 23: `triggerKey` aumenta a cada "rever confetes" (servidor ou botão),
+  // reexibindo o canhão mesmo quando a celebração do mês já foi registrada.
+  const [triggerKey, setTriggerKey] = useState<number>(props.triggerKey ?? 0);
+
+  useEffect(() => {
+    if (props.triggerKey !== undefined && props.triggerKey !== triggerKey) {
+      setTriggerKey(props.triggerKey);
+      setVisible(true);
+      const hide = window.setTimeout(() => setVisible(false), 3500);
+      return () => window.clearTimeout(hide);
+    }
+  }, [props.triggerKey, triggerKey]);
 
   useEffect(() => {
     if (!celebrated) {

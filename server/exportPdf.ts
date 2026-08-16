@@ -698,3 +698,144 @@ export async function buildStreaksPdf(input: StreaksPdfInput): Promise<Buffer> {
     }
   });
 }
+
+/** Input do builder do PDF consolidado "Ano em números" (rodada 23). */
+export type YearPdfInput = {
+  /** Consolidação do ano (série de meses + agregados). */
+  summary: {
+    year: number;
+    months: {
+      monthKey: string;
+      label: string;
+      publishedThisMonth: number;
+      avgProductionDays: number | null;
+      goal: number;
+      ratio: number;
+      met: boolean;
+      isCurrent: boolean;
+    }[];
+    totalPublished: number;
+    totalGoalsMet: number;
+    avgProductionDays: number | null;
+    bestMonth: { monthKey: string; label: string; publishedThisMonth: number } | null;
+  };
+  /** Sequência atual de streak (para o selo na capa). */
+  streak?: number;
+  /** Nome do usuário para a capa (opcional). */
+  userName?: string | null;
+};
+
+/**
+ * PDF consolidado "Ano em números" (rodada 23): capa escura com 4 KPIs
+ * (publicações totais, metas cumpridas, média de produção, melhor mês),
+ * gráfico de barras dos meses do ano e tabela mês a mês com % da meta e
+ * status de cumprimento.
+ */
+export async function buildYearPdf(input: YearPdfInput): Promise<Buffer> {
+  if (!input?.summary?.months?.length) {
+    throw new Error("Dados inválidos para exportação do ano em números.");
+  }
+  const { summary, streak = 0, userName } = input;
+  const { year, months, totalPublished, totalGoalsMet, avgProductionDays, bestMonth } = summary;
+  return new Promise<Buffer>((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ size: "A4", margin: 54 });
+      const chunks: Buffer[] = [];
+      doc.on("data", (c) => chunks.push(c));
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("error", reject);
+
+      // ===== Capa =====
+      doc.rect(0, 0, doc.page.width, doc.page.height).fill(COLORS.dark);
+      doc.fillColor(COLORS.amber).fontSize(11).text("VYROSCOPE AI", 54, 72, { characterSpacing: 4 });
+      doc.moveTo(54, 96).lineTo(150, 96).strokeColor(COLORS.amber).lineWidth(1.5).stroke();
+      doc.fillColor(COLORS.light).fontSize(24).font("Helvetica-Bold").text(`Ano em números · ${year}`, 54, 150);
+      doc.fillColor(COLORS.gray).fontSize(11).text("Consolidação das metas mensais de publicações", 54, 190);
+      doc.fillColor(COLORS.gray).fontSize(10).text("Gerado em " + new Date().toLocaleString("pt-BR") + (userName ? ` · ${userName}` : ""), 54, 220);
+
+      // ===== Cartão de KPIs =====
+      const kpiW = Math.floor((doc.page.width - 108 - 24) / 4);
+      doc.fillColor(COLORS.cardBg).roundedRect(54, 260, doc.page.width - 108, 100, 6).fill();
+      const kpis = [
+        { label: "PUBLICAÇÕES", value: `${totalPublished} no ano` },
+        { label: "METAS CUMPRIDAS", value: `${totalGoalsMet} ${totalGoalsMet === 1 ? "mês" : "meses"} do ano` },
+        {
+          label: "MÉDIA DE PRODUÇÃO",
+          value: avgProductionDays !== null ? `${avgProductionDays} dias` : "sem dados",
+        },
+        {
+          label: "MELHOR MÊS",
+          value: bestMonth ? `${bestMonth.publishedThisMonth} pub.` : "sem dados",
+        },
+      ];
+      kpis.forEach((kpi, i) => {
+        const x = 70 + i * (kpiW + 8);
+        doc.fillColor(COLORS.amber).fontSize(8).font("Helvetica-Bold").text(kpi.label, x, 278, { characterSpacing: 1 });
+        doc.fillColor(COLORS.light).fontSize(10).font("Helvetica").text(kpi.value, x, 298, { width: kpiW - 16 });
+      });
+      if (bestMonth) {
+        doc.fillColor(COLORS.gray).fontSize(9).text("Melhor mês: " + bestMonth.label, 70, 336, { width: doc.page.width - 140 });
+      }
+      const seal =
+        streak > 0
+          ? `SELO DE CONSECUTIVIDADE: ${streak} ${streak === 1 ? "mês" : "meses"} seguido${streak === 1 ? "" : "s"} com a meta cumprida`
+          : "Continue a sequência: cada meta cumprida alimenta o selo de consecutividade";
+      doc.fillColor(streak > 0 ? "#4C9F70" : COLORS.gray).fontSize(10).font("Helvetica-Bold").text(seal, 70, 400, { width: doc.page.width - 140 });
+
+      // ===== Gráfico de barras (meses do ano) =====
+      const chartY = 460;
+      const chartH = 150;
+      doc.fillColor(COLORS.amber).fontSize(9).font("Helvetica-Bold").text("PUBLICAÇÕES POR MÊS · " + year, 70, 440, { characterSpacing: 2 });
+      const maxPub = Math.max(1, ...months.map((m) => m.publishedThisMonth));
+      const maxGoal = Math.max(1, ...months.map((m) => m.goal));
+      const chartW = doc.page.width - 108 - 40;
+      const slot = chartW / months.length;
+      months.forEach((m, i) => {
+        const pubH = Math.max(2, Math.round((Math.min(m.publishedThisMonth, maxPub) / maxPub) * chartH));
+        const goalH = Math.max(2, Math.round((Math.min(m.goal, maxGoal) / maxGoal) * chartH));
+        const x = 70 + i * slot;
+        doc.fillColor("#3A3A46").rect(x + slot / 2 - 1.5, chartY + chartH - goalH, 3, goalH).fill();
+        doc.fillColor(streakBarColor(m.met, m.isCurrent)).rect(x + slot / 2 + 2.5, chartY + chartH - pubH, 6, pubH).fill();
+        doc.save();
+        doc.translate(x + slot / 2, chartY + chartH + 8);
+        doc.rotate(-45);
+        doc.fillColor(COLORS.gray).fontSize(6).text(m.monthKey.slice(2), 0, 0, { align: "center" });
+        doc.restore();
+      });
+      doc.fillColor(COLORS.gray).fontSize(8).text("Barras coloridas: publicadas (verde = meta cumprida, âmbar = mês corrente, roxo = demais) · linha fina = meta", 70, chartY + chartH + 28, { width: doc.page.width - 140 });
+
+      // ===== Tabela mês a mês =====
+      doc.addPage();
+      doc.rect(0, 0, doc.page.width, doc.page.height).fill(COLORS.dark);
+      doc.fillColor(COLORS.amber).fontSize(10).font("Helvetica-Bold").text(`MÊS A MÊS · ${year}`, 54, 72, { characterSpacing: 2 });
+      doc.fillColor(COLORS.gray).fontSize(9).text("Meta, publicações, percentual de cumprimento e status de cada mês", 54, 96);
+
+      const headerY = 130;
+      doc.fillColor(COLORS.cardBg).roundedRect(54, headerY - 10, doc.page.width - 108, 26, 4).fill();
+      doc.fillColor(COLORS.amber).fontSize(8.5).font("Helvetica-Bold").text("MÊS", 70, headerY, { width: 140 });
+      doc.fillColor(COLORS.amber).fontSize(8.5).font("Helvetica-Bold").text("META", 220, headerY, { width: 70, align: "right" });
+      doc.fillColor(COLORS.amber).fontSize(8.5).font("Helvetica-Bold").text("PUBLICADAS", 300, headerY, { width: 90, align: "right" });
+      doc.fillColor(COLORS.amber).fontSize(8.5).font("Helvetica-Bold").text("% DA META", 400, headerY, { width: 80, align: "right" });
+      doc.fillColor(COLORS.amber).fontSize(8.5).font("Helvetica-Bold").text("STATUS", 490, headerY, { width: 110, align: "right" });
+
+      let y = headerY + 34;
+      const sorted = [...months].reverse(); // mais recentes primeiro
+      sorted.forEach((m) => {
+        if (y > doc.page.height - 40) doc.addPage();
+        const accent = m.isCurrent ? COLORS.amber : m.met ? COLORS.light : COLORS.gray;
+        doc.fillColor(accent).fontSize(9).font(m.isCurrent ? "Helvetica-Bold" : "Helvetica").text(m.label, 70, y, { width: 140 });
+        doc.fillColor(accent).text(`${m.goal}`, 220, y, { width: 70, align: "right" });
+        doc.fillColor(accent).text(`${m.publishedThisMonth}`, 300, y, { width: 90, align: "right" });
+        doc.fillColor(accent).text(`${m.ratio}%`, 400, y, { width: 80, align: "right" });
+        const status = m.isCurrent ? "mês corrente" : m.met ? "meta cumprida" : "não cumprida";
+        doc.fillColor(m.isCurrent ? COLORS.amber : m.met ? "#4C9F70" : COLORS.gray).text(status, 490, y, { width: 110, align: "right" });
+        y += 22;
+      });
+      doc.fillColor(COLORS.gray).fontSize(8).text(`Resumo do ano: ${totalPublished} publicações · ${totalGoalsMet} metas cumpridas · sequência atual de ${streak} ${streak === 1 ? "mês" : "meses"}`, 54, doc.page.height - 40, { width: doc.page.width - 108 });
+
+      doc.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}

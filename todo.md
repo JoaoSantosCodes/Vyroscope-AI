@@ -201,3 +201,11 @@
 - [x] Testes vitest das novas funcionalidades (suggestMonthlyGoal x4: sugere via LLM, keepExisting, rejeita mês passado, rejeita sem histórico; buildStreaksPdf x4 no texto do PDF — 151 testes totais)
 - [x] Atualizar habilidade vyroscope-video-analyst com a rodada 22 (SKILL.md: seção "Streaks PDF, AI goal suggestion and 100% celebration (round 22)" + quick reference; features-roadmap.md: parágrafo Round 22, helper getMonthlyGoalByMonth)
 - [x] Verificação visual (/streaks e /ideia-do-dia renderizando; 151 testes) e checkpoint
+
+## Melhorias solicitadas (rodada 23)
+- [ ] Persistência da celebração no servidor: registrar no banco quando a meta do mês é atingida (tabela nova), com botão "Rever confetes" na página de metas (/streaks) que dispare a animação sem depender de sessionStorage
+- [ ] Histórico de sugestões de metas da IA: salvar cada sugestão da IA (monthKey, suggestedGoal, reason, factors, keepExisting) ao chamar suggestMonthlyGoal e listar em tela (modal/histórico) para revisar justificativas passadas
+- [ ] Painel "Ano em números": agregar metas e streaks do ano corrente (2026) — mês a mês, metas cumpridas, publicações totais, média, melhor mês — com botão de exportar PDF consolidado (buildYearPdf + exportYearPdf)
+- [ ] Testes vitest das novas funcionalidades
+- [ ] Atualizar habilidade vyroscope-video-analyst com a rodada 23
+- [ ] Verificação visual e checkpoint
