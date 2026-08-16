@@ -908,11 +908,12 @@ export const extendedRouter = router({
   exportYearPdf: protectedProcedure
     .input(z.object({ year: z.number().int().min(2020).max(2100).optional() }))
     .mutation(async ({ ctx, input }) => {
-      const { getYearSummary, getMonthlyGoalStreak } = await import("../db");
+      const { getYearSummary, getMonthlyGoalStreak, getIntermediateAchievements } = await import("../db");
       const summary = await getYearSummary(ctx.user.id, input.year);
       const { streak } = await getMonthlyGoalStreak(ctx.user.id);
+      const intermediateSeals = await getIntermediateAchievements(ctx.user.id);
       const { buildYearPdf } = await import("../exportPdf");
-      const buffer = await buildYearPdf({ summary, streak, userName: ctx.user.name });
+      const buffer = await buildYearPdf({ summary, streak, intermediateSeals, userName: ctx.user.name });
       const key = `exports/ano-em-numeros-${summary.year}-${Date.now()}-${ctx.user.id}.pdf`;
       const { storagePut } = await import("../storage");
       const { url } = await storagePut(key, buffer, "application/pdf");

@@ -234,3 +234,11 @@
 - [x] Testes vitest das novas funcionalidades (+4: intermediateAchievements ×1, applySuggestedGoal ×3 → 176 passando)
 - [x] Atualizar habilidade vyroscope-video-analyst com a rodada 26 (SKILL.md + features-roadmap.md)
 - [x] Documentação da rodada 26 para o Obsidian (rodada-26-obsidian.md), verificação visual e checkpoint
+
+## Melhorias solicitadas (rodada 27)
+- [x] PDF do "Ano em números": incluir seção de selos intermediários (trimestres/semestres completos do ano) consolidando as conquistas na exportação anual (buildYearPdf + input intermediateSeals; exportYearPdf busca via getIntermediateAchievements)
+- [x] Galeria de conquistas: indicador de progresso do trimestre atual ("TRIMESTRE ATUAL · Qn · AAAA" + barra esmeralda/âmbar N/T metas cumpridas), derivado de yearSummary do ano corrente
+- [x] Banner de feedback: tooltip no botão "Aplicar meta sugerida" explicando o cálculo (média de publicações dos últimos 6 meses, arredondada para cima, aplicada ao mês corrente, limitada 1–100)
+- [x] Testes vitest das novas funcionalidades (+3: buildYearPdf com selos ×1, sem selos ×1, exportYearPdf mock ×1 → 178 passando)
+- [x] Atualizar habilidade vyroscope-video-analyst com a rodada 27 (SKILL.md + features-roadmap.md)
+- [x] Documentação da rodada 27 para o Obsidian (rodada-27-obsidian.md), verificação visual e checkpoint

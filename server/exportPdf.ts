@@ -721,6 +721,11 @@ export type YearPdfInput = {
   };
   /** Sequência atual de streak (para o selo na capa). */
   streak?: number;
+  /** Selos intermediários do ano (trimestres/semestres completos) — rodada 27. */
+  intermediateSeals?: {
+    quarters: { year: number; quarter: number; label: string; metMonths: number; published: number; annualGoal: number }[];
+    halfYears: { year: number; half: number; label: string; metMonths: number; published: number; annualGoal: number }[];
+  } | null;
   /** Nome do usuário para a capa (opcional). */
   userName?: string | null;
 };
@@ -803,7 +808,22 @@ export async function buildYearPdf(input: YearPdfInput): Promise<Buffer> {
         doc.restore();
       });
       doc.fillColor(COLORS.gray).fontSize(8).text("Barras coloridas: publicadas (verde = meta cumprida, âmbar = mês corrente, roxo = demais) · linha fina = meta", 70, chartY + chartH + 28, { width: doc.page.width - 140 });
-
+      // ===== Selos intermediários do ano (trimestres/semestres — rodada 27) =====
+      const qSeals = (input.intermediateSeals?.quarters ?? []).filter((q) => q.year === year);
+      const hSeals = (input.intermediateSeals?.halfYears ?? []).filter((h) => h.year === year);
+      if (qSeals.length > 0 || hSeals.length > 0) {
+        const sealStart = chartY + chartH + 46;
+        doc.fillColor(COLORS.amber).fontSize(9).font("Helvetica-Bold").text("CONQUISTAS INTERMEDIÁRIAS · " + year, 70, sealStart, { characterSpacing: 2 });
+        let sy = sealStart + 18;
+        const sealLine = (icon: string, label: string, published: number, goal: number) => {
+          if (sy > doc.page.height - 40) doc.addPage();
+          doc.fillColor(COLORS.light).fontSize(9).font("Helvetica-Bold").text(`${icon} ${label}`, 70, sy, { width: 310 });
+          doc.fillColor(COLORS.gray).fontSize(9).text(`${published}/${goal} publicadas no período`, 390, sy, { width: 160, align: "right" });
+          sy += 15;
+        };
+        hSeals.forEach((h) => sealLine("MEDAL", h.label, h.published, h.annualGoal));
+        qSeals.forEach((q) => sealLine("Q", q.label, q.published, q.annualGoal));
+      }
       // ===== Tabela mês a mês =====
       doc.addPage();
       doc.rect(0, 0, doc.page.width, doc.page.height).fill(COLORS.dark);
@@ -831,7 +851,10 @@ export async function buildYearPdf(input: YearPdfInput): Promise<Buffer> {
         doc.fillColor(m.isCurrent ? COLORS.amber : m.met ? "#4C9F70" : COLORS.gray).text(status, 490, y, { width: 110, align: "right" });
         y += 22;
       });
-      doc.fillColor(COLORS.gray).fontSize(8).text(`Resumo do ano: ${totalPublished} publicações · ${totalGoalsMet} metas cumpridas · sequência atual de ${streak} ${streak === 1 ? "mês" : "meses"}`, 54, doc.page.height - 40, { width: doc.page.width - 108 });
+      const qCount = (input.intermediateSeals?.quarters ?? []).filter((q) => q.year === year).length;
+      const hCount = (input.intermediateSeals?.halfYears ?? []).filter((h) => h.year === year).length;
+      const sealsTotal = qCount + hCount;
+      doc.fillColor(COLORS.gray).fontSize(8).text(`Resumo do ano: ${totalPublished} publicações · ${totalGoalsMet} metas cumpridas · ${sealsTotal} selo${sealsTotal === 1 ? "" : "s"} intermediário${sealsTotal === 1 ? "" : "s"} · sequência atual de ${streak} ${streak === 1 ? "mês" : "meses"}`, 54, doc.page.height - 40, { width: doc.page.width - 108 });
 
       doc.end();
     } catch (err) {

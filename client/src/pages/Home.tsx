@@ -24,6 +24,12 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { toast } from "sonner";
 import { FileText } from "lucide-react";
 import { useLocation } from "wouter";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 const EXAMPLE_NICHES = ["inteligência artificial", "fitness", "finanças", "games", "produtividade", "moda"];
 
@@ -482,15 +488,29 @@ function IdeaOfTheDayCard() {
             <strong className="text-sky-500">Meta de {missedAlert.previousMonthKey} não atingida</strong>: {missedAlert.published} de {missedAlert.goal} publicações — {missedAlert.suggestion}
           </span>
           {missedAlert.suggestedGoal !== null && (
-            <button
-              type="button"
-              disabled={applySuggestedGoalMutation.isPending}
-              onClick={handleApplySuggestedGoal}
-              className="shrink-0 rounded-md bg-sky-500/20 px-2.5 py-1 text-[11px] font-medium text-sky-300 transition-colors hover:bg-sky-500/30 disabled:cursor-not-allowed disabled:opacity-60"
-              title={`Aplicar a meta sugerida de ${missedAlert.suggestedGoal} publicações no mês corrente (média dos últimos 6 meses)`}
-            >
-              {applySuggestedGoalMutation.isPending ? "Aplicando…" : `Aplicar meta ${missedAlert.suggestedGoal}`}
-            </button>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    disabled={applySuggestedGoalMutation.isPending}
+                    onClick={handleApplySuggestedGoal}
+                    className="shrink-0 rounded-md bg-sky-500/20 px-2.5 py-1 text-[11px] font-medium text-sky-300 transition-colors hover:bg-sky-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+                    title={`Aplicar a meta sugerida de ${missedAlert.suggestedGoal} publicações no mês corrente (média dos últimos 6 meses)`}
+                  >
+                    {applySuggestedGoalMutation.isPending ? "Aplicando…" : `Aplicar meta ${missedAlert.suggestedGoal}`}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs text-[11px] leading-relaxed" side="bottom" align="end">
+                  <p>
+                    <strong>Como a meta foi calculada:</strong> média aritmética das publicações dos
+                    últimos 6 meses do seu histórico, arredondada para cima para garantir um desafio
+                    alcançável. A meta sugerida é aplicada ao mês corrente e limitada entre 1 e 100
+                    publicações.
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
         </div>
       )}

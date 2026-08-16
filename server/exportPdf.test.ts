@@ -565,4 +565,55 @@ describe("buildYearPdf (rodada 23)", () => {
     expect(compact).toContain("MÊSMETAPUBLICADAS%DAMETASTATUS");
     expect(compact).toContain("MÊS848200%MÊSCORRENTE");
   });
+  it("inclui os selos intermediários do ano quando intermediateSeals é informado (rodada 27)", async () => {
+    const buffer = await buildYearPdf({
+      summary: baseYearSummary(),
+      streak: 2,
+      userName: "João",
+      intermediateSeals: {
+        quarters: [
+          { year: 2026, quarter: 1, label: "2026 · 1º trimestre", metMonths: 3, published: 9, annualGoal: 12 },
+          { year: 2026, quarter: 2, label: "2026 · 2º trimestre", metMonths: 3, published: 18, annualGoal: 12 },
+        ],
+        halfYears: [{ year: 2026, half: 1, label: "2026 · 1º semestre", metMonths: 6, published: 27, annualGoal: 24 }],
+      },
+    });
+    const { spawnSync } = await import("node:child_process");
+    const { writeFileSync, mkdtempSync } = await import("node:fs");
+    const tmp = mkdtempSync("/tmp/pdf-test-");
+    const file = `${tmp}/year-seals.pdf`;
+    writeFileSync(file, buffer);
+    const run = spawnSync(process.execPath, ["/home/ubuntu/vyroscope-ai/node_modules/pdf-parse/bin/cli.mjs", "text", file], {
+      encoding: "utf-8",
+      cwd: "/home/ubuntu/vyroscope-ai",
+    });
+    const text = run.stdout + run.stderr;
+    if (run.status !== 0) throw new Error(`pdf-parse CLI falhou: ${text}`);
+    const compact = text.replace(/[\s ]/g, "").toUpperCase();
+    expect(compact).toContain("CONQUISTASINTERMEDIÁRIAS·2026");
+    expect(compact).toContain("MEDAL2026·1ºSEMESTRE");
+    expect(compact).toContain("27/24PUBLICADASNOPERÍODO");
+    expect(compact).toContain("Q2026·1ºTRIMESTRE");
+    expect(compact).toContain("Q2026·2ºTRIMESTRE");
+    expect(compact).toContain("9/12PUBLICADASNOPERÍODO");
+    expect(compact).toContain("3SELOSINTERMEDIÁRIOS");
+  });
+  it("não renderiza a seção de selos quando intermediateSeals não é informado", async () => {
+    const buffer = await buildYearPdf({ summary: baseYearSummary(), streak: 1 });
+    const { spawnSync } = await import("node:child_process");
+    const { writeFileSync, mkdtempSync } = await import("node:fs");
+    const tmp = mkdtempSync("/tmp/pdf-test-");
+    const file = `${tmp}/year-noseals.pdf`;
+    writeFileSync(file, buffer);
+    const run = spawnSync(process.execPath, ["/home/ubuntu/vyroscope-ai/node_modules/pdf-parse/bin/cli.mjs", "text", file], {
+      encoding: "utf-8",
+      cwd: "/home/ubuntu/vyroscope-ai",
+    });
+    const text = run.stdout + run.stderr;
+    if (run.status !== 0) throw new Error(`pdf-parse CLI falhou: ${text}`);
+    const compact = text.replace(/[\s ]/g, "").toUpperCase();
+    expect(compact).not.toContain("CONQUISTASINTERMEDIÁRIAS");
+    expect(compact).toContain("0SELOSINTERMEDIÁRIOS");
+    expect(compact).toContain("SEQUÊNCIAATUAL");
+  });
 });

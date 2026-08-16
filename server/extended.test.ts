@@ -1195,9 +1195,15 @@ describe("rodada 23 (persistência da celebração, histórico de sugestões, an
       bestMonth: { monthKey: "2026-04", label: "abril de 2026", publishedThisMonth: 3 },
     } as never);
     mockedStreak.mockResolvedValueOnce({ streak: 4, lastMetKey: "2026-04" } as never);
+    mockedIntermediateAchievements.mockResolvedValueOnce({
+      quarters: [{ year: 2026, quarter: 1, label: "2026 · 1º trimestre", metMonths: 3, published: 9, annualGoal: 12 }],
+      halfYears: [],
+      yearsChecked: 1,
+    } as never);
     const caller = appRouter.createCaller(createFolderCtx());
     const result = await caller.extended.exportYearPdf({});
     expect(result.fileName).toBe("ano-em-numeros-2026.pdf");
+    expect(mockedIntermediateAchievements).toHaveBeenCalledWith(2);
     expect(result.downloadUrl).toBe("https://s3.example/p.pdf");
     expect(storagePut).toHaveBeenCalledWith(
       expect.stringMatching(/^exports\/ano-em-numeros-2026-\d+-2\.pdf$/),

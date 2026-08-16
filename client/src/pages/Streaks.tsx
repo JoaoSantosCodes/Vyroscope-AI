@@ -569,6 +569,44 @@ export default function Streaks() {
             </div>
           </div>
         )}
+        {/* Trimestre atual em andamento (rodada 27): progresso das metas mensais do trimestre corrente. */}
+        {(() => {
+          const now = new Date();
+          const quarterIdx = Math.floor(now.getMonth() / 3); // 0–3
+          const qLabel = ["1º trimestre", "2º trimestre", "3º trimestre", "4º trimestre"][quarterIdx];
+          const startMonth = quarterIdx * 3 + 1; // 1º mês do trimestre corrente (1, 4, 7 ou 10)
+          const monthsInQ = Array.from({ length: 3 }, (_, i) => `${now.getFullYear()}-${String(startMonth + i).padStart(2, "0")}`);
+          const qMonths = (sy?.months ?? []).filter((m) => monthsInQ.includes(m.monthKey));
+          const passed = qMonths.filter((m) => !m.isCurrent);
+          const metPassed = passed.filter((m) => m.met).length;
+          const total = qMonths.length;
+          if (total > 0 && passed.length > 0) {
+            const pct = Math.round((metPassed / total) * 100);
+            const done = metPassed === passed.length;
+            return (
+              <div className="mt-6 rounded-md border border-emerald-500/30 bg-emerald-500/[0.06] p-3">
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-[12px] font-bold text-emerald-400">
+                    <CalendarDays className="h-4 w-4" />
+                    TRIMESTRE ATUAL · {qLabel.toUpperCase()} · {now.getFullYear()}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground">
+                    {done
+                      ? "Metas do trimestre cumpridas"
+                      : `${metPassed}/${total} metas cumpridas (${pct}%)`}
+                  </div>
+                </div>
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary">
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ${done ? "bg-emerald-500" : pct >= 50 ? "bg-emerald-500/80" : "bg-amber-500/70"}`}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              </div>
+            );
+          }
+          return null;
+        })()}
         {/* Conquistas intermediárias (rodada 26): semestres e trimestres completos */}
         {((intermediateQuery.data?.halfYears.length ?? 0) > 0 || (intermediateQuery.data?.quarters.length ?? 0) > 0) && (
           <div className="mt-6">
