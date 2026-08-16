@@ -1,4 +1,52 @@
 import { callDataApi } from "./_core/dataApi";
+import { ENV } from "./_core/env";
+
+// --- Provider próprio do YouTube Data API v3 (Rodada 31) ---
+// Quando YOUTUBE_DATA_API_KEY está definida (deploy fora da Manus), as buscas
+// vão direto ao endpoint público do Google; caso contrário, usa o hub de dados
+// interno da Manus (callDataApi).
+
+const useDirectProvider = () =>
+  ENV.youtubeApiKey !== undefined && ENV.youtubeApiKey.trim().length > 0;
+
+const DIRECT_BASE = "https://www.googleapis.com/youtube/v3";
+
+async function fetchJson(url: string): Promise<unknown> {
+  const response = await fetch(url, {
+    headers: { accept: "application/json" },
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    const status = response.status;
+    // 403/400 com quota ou chave inválida — mensagens autoexplicativas
+    if (status === 403) {
+      throw new Error(
+        `youtube_quota_or_key (${status} ${response.statusText})${detail ? `: ${detail}` : ""}`
+      );
+    }
+    if (status === 400 || status === 401) {
+      throw new Error(
+        `youtube_invalid_key (${status} ${response.statusText})${detail ? `: ${detail}` : ""}`
+      );
+    }
+    throw new Error(
+      `youtube_request_failed (${status} ${response.statusText})${detail ? `: ${detail}` : ""}`
+    );
+  }
+  return response.json();
+}
+
+const buildDirectUrl = (
+  endpoint: string,
+  params: Record<string, string | number>
+) => {
+  const url = new URL(`${DIRECT_BASE}/${endpoint}`);
+  url.searchParams.set("key", ENV.youtubeApiKey);
+  for (const [key, value] of Object.entries(params)) {
+    url.searchParams.set(key, String(value));
+  }
+  return url.toString();
+};
 
 export type VideoItem = {
   id: string;
@@ -44,18 +92,27 @@ export async function fetchTrendingVideosForNiche(
   niche: string,
   maxResults = 12
 ): Promise<VideoItem[]> {
-  const searchRes = (await callDataApi("Youtube/search", {
-    query: {
-      part: "snippet",
-      type: "video",
-      q: `${niche} trending`,
-      maxResults: 20,
-      order: "viewCount",
-      publishedAfter: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
-        .toISOString()
-        .split("T")[0],
-    },
-  })) as { items?: { id?: string | { videoId?: string }; snippet?: SearchSnippet }[] };
+  const searchQuery = {
+    part: "snippet",
+    type: "video",
+    q: `${niche} trending`,
+    maxResults: 20,
+    order: "viewCount",
+    publishedAfter: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .split("T")[0],
+  };
+
+  const searchRes = useDirectProvider()
+    ? ((await fetchJson(buildDirectUrl("search", {
+        ...searchQuery,
+        maxResults: String(searchQuery.maxResults),
+      } as unknown as Record<string, string>))) as {
+        items?: { id?: string | { videoId?: string }; snippet?: SearchSnippet }[];
+      })
+    : ((await callDataApi("Youtube/search", { query: searchQuery })) as {
+        items?: { id?: string | { videoId?: string }; snippet?: SearchSnippet }[];
+      });
 
   const videoIds = (searchRes.items ?? [])
     .map((item) => (typeof item.id === "string" ? item.id : item.id?.videoId))
@@ -65,12 +122,17 @@ export async function fetchTrendingVideosForNiche(
     throw new Error("no_videos_found");
   }
 
-  const detailsRes = (await callDataApi("Youtube/videos", {
-    query: {
-      part: "snippet,contentDetails,statistics",
-      id: videoIds.slice(0, 20).join(","),
-    },
-  })) as { items?: VideoDetail[] };
+  const detailsQuery = {
+    part: "snippet,contentDetails,statistics",
+    id: videoIds.slice(0, 20).join(","),
+  };
+  const detailsRes = useDirectProvider()
+    ? ((await fetchJson(buildDirectUrl("videos", detailsQuery as Record<string, string>))) as {
+        items?: VideoDetail[];
+      })
+    : ((await callDataApi("Youtube/videos", { query: detailsQuery })) as {
+        items?: VideoDetail[];
+      });
 
   const details = detailsRes.items ?? [];
 
@@ -140,12 +202,14 @@ export async function fetchVideoStatsById(
   videoId: string
 ): Promise<{ title: string | null; viewCount: number | null; likeCount: number | null; commentCount: number | null; publishedAt: string | null } | null> {
   try {
-    const detailsRes = (await callDataApi("Youtube/videos", {
-      query: {
-        part: "snippet,statistics",
-        id: videoId,
-      },
-    })) as { items?: VideoDetail[] };
+    const detailsQuery = { part: "snippet,statistics", id: videoId };
+    const detailsRes = useDirectProvider()
+      ? ((await fetchJson(buildDirectUrl("videos", detailsQuery as Record<string, string>))) as {
+          items?: VideoDetail[];
+        })
+      : ((await callDataApi("Youtube/videos", { query: detailsQuery })) as {
+          items?: VideoDetail[];
+        });
 
     const d = (detailsRes.items ?? []).find((item) => item.id === videoId);
     if (!d?.statistics) return null;

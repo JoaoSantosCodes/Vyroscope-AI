@@ -7,4 +7,10 @@ export const ENV = {
   isProduction: process.env.NODE_ENV === "production",
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
+  // --- Providers próprios (Rodada 31) — para deploy fora da Manus (Vercel etc.) ---
+  openaiApiKey: process.env.OPENAI_API_KEY ?? "",
+  openaiApiBase: process.env.OPENAI_API_BASE ?? "https://api.openai.com/v1",
+  openaiModel: process.env.OPENAI_MODEL ?? "gpt-4o",
+  imageModel: process.env.IMAGE_MODEL ?? "dall-e-3",
+  youtubeApiKey: process.env.YOUTUBE_DATA_API_KEY ?? "",
 };

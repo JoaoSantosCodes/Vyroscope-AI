@@ -212,14 +212,37 @@ const normalizeToolChoice = (
   return toolChoice;
 };
 
-const resolveApiUrl = () =>
-  ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0
+/**
+ * Resolve a origem da API de LLM (Rodada 31 — providers próprios).
+ * Quando OPENAI_API_KEY está definida (deploy Vercel/fora da Manus), usa o
+ * provider OpenAI (chat/completions da base configurada em OPENAI_API_BASE).
+ * Caso contrário, cai para o Forge interno da Manus.
+ */
+const resolveApiUrl = () => {
+  if (ENV.openaiApiKey && ENV.openaiApiKey.trim().length > 0) {
+    const base = ENV.openaiApiBase.endsWith("/")
+      ? ENV.openaiApiBase.slice(0, -1)
+      : ENV.openaiApiBase;
+    return `${base}/chat/completions`;
+  }
+  return ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0
     ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`
     : "https://forge.manus.im/v1/chat/completions";
+};
+
+/** Resolve a chave de autenticação: OpenAI quando configurada, Forge caso contrário. */
+const resolveApiKey = () =>
+  ENV.openaiApiKey && ENV.openaiApiKey.trim().length > 0
+    ? ENV.openaiApiKey
+    : ENV.forgeApiKey;
 
 const assertApiKey = () => {
-  if (!ENV.forgeApiKey) {
-    throw new Error("OPENAI_API_KEY is not configured");
+  if (!resolveApiKey()) {
+    throw new Error(
+      ENV.openaiApiKey && ENV.openaiApiKey.trim().length > 0
+        ? "OPENAI_API_KEY is not configured"
+        : "Neither OPENAI_API_KEY nor BUILT_IN_FORGE_API_KEY is configured"
+    );
   }
 };
 
@@ -362,8 +385,15 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     messages: messages.map(normalizeMessage),
   };
 
-  if (model) {
-    payload.model = model;
+  // Rodada 31: no provider OpenAI, o modelo padrão vem de OPENAI_MODEL quando
+  // o chamador não especifica — o Forge ignora o campo quando ausente.
+  const resolvedModel =
+    model ??
+    (ENV.openaiApiKey && ENV.openaiApiKey.trim().length > 0
+      ? ENV.openaiModel || undefined
+      : undefined);
+  if (resolvedModel) {
+    payload.model = resolvedModel;
   }
 
   if (tools && tools.length > 0) {
@@ -405,7 +435,7 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${ENV.forgeApiKey}`,
+      authorization: `Bearer ${resolveApiKey()}`,
     },
     body: JSON.stringify(payload),
   });
@@ -435,12 +465,20 @@ export type ModelsResponse = {
 export async function listLLMModels(): Promise<ModelsResponse> {
   assertApiKey();
 
-  const url = ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0
-    ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/models`
-    : "https://forge.manus.im/v1/models";
+  const url =
+    ENV.openaiApiKey && ENV.openaiApiKey.trim().length > 0
+      ? (() => {
+          const base = ENV.openaiApiBase.endsWith("/")
+            ? ENV.openaiApiBase.slice(0, -1)
+            : ENV.openaiApiBase;
+          return `${base}/models`;
+        })()
+      : ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0
+        ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/models`
+        : "https://forge.manus.im/v1/models";
 
   const response = await fetchWithBackoff(url, {
-    headers: { authorization: `Bearer ${ENV.forgeApiKey}` },
+    headers: { authorization: `Bearer ${resolveApiKey()}` },
   });
 
   if (!response.ok) {

@@ -40,7 +40,24 @@ export type GenerateImageResponse = {
   url?: string;
 };
 
+/**
+ * (Rodada 31) Decidir o provider de imagem: se OPENAI_API_KEY está definida
+ * (deploy fora da Manus), usa o provider OpenAI (dall-e-3); caso contrário,
+ * usa o ImageService interno do Forge.
+ */
+const useOpenAiProvider = () =>
+  ENV.openaiApiKey !== undefined && ENV.openaiApiKey.trim().length > 0;
+
 export async function generateImage(
+  options: GenerateImageOptions
+): Promise<GenerateImageResponse> {
+  if (useOpenAiProvider()) {
+    return generateImageWithOpenAi(options);
+  }
+  return generateImageWithForge(options);
+}
+
+async function generateImageWithForge(
   options: GenerateImageOptions
 ): Promise<GenerateImageResponse> {
   if (!ENV.forgeApiUrl) {
@@ -104,6 +121,68 @@ export async function generateImage(
   return {
     url,
   };
+}
+
+/**
+ * (Rodada 31) Geração de imagem via OpenAI Images API (dall-e-3 padrão).
+ * Original images/edição não são suportadas pelo dall-e-3 — editar via forge
+ * exige as envs do Forge; sem elas, a geração de edição falha com mensagem clara.
+ */
+async function generateImageWithOpenAi(
+  options: GenerateImageOptions
+): Promise<GenerateImageResponse> {
+  if (!ENV.openaiApiKey) {
+    throw new Error("OPENAI_API_KEY is not configured");
+  }
+  if (options.originalImages && options.originalImages.length > 0) {
+    throw new Error(
+      "O provider OpenAI (dall-e-3) não suporta edição de imagens. Configure BUILT_IN_FORGE_API_KEY para usar a edição."
+    );
+  }
+
+  const base = ENV.openaiApiBase.endsWith("/")
+    ? ENV.openaiApiBase.slice(0, -1)
+    : ENV.openaiApiBase;
+  const url = `${base}/images/generations`;
+  const model = options.model ?? ENV.imageModel ?? "dall-e-3";
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${ENV.openaiApiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      prompt: options.prompt,
+      size: "1792x1024",
+      quality: options.quality === "high" ? "hd" : "standard",
+      response_format: "b64_json",
+    }),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(
+      `Image generation request failed (${response.status} ${response.statusText})${detail ? `: ${detail}` : ""}`
+    );
+  }
+
+  const result = (await response.json()) as {
+    data?: Array<{ b64_json?: string }>;
+  };
+  const base64Data = result.data?.[0]?.b64_json;
+  if (!base64Data) {
+    throw new Error("Image generation returned no image data");
+  }
+  const buffer = Buffer.from(base64Data, "base64");
+
+  const { url: storedUrl } = await storagePut(
+    `generated/${Date.now()}.png`,
+    buffer,
+    "image/png"
+  );
+  return { url: storedUrl };
 }
 
 export type ImageModelInfo = {

@@ -274,3 +274,14 @@
 - [x] Configuração Vercel (vercel.json — build + routes, scripts start + engine, env documentation no README)
 - [x] README de deploy atualizado com variáveis e providers (DEPLOY_VERCel.md + seção no README.md)
 - [x] Push das mudanças ao GitHub
+
+## Autenticação modular: providers próprios e UX (rodada 31)
+- [ ] Backend: provider próprio de LLM — env OPENAI_API_KEY (+ OPENAI_MODEL opcional); fallback para o Forge interno quando a chave não estiver definida; interface interna comum usada por todos os fluxos (análise, roteiros, títulos, ideias, metas)
+- [ ] Backend: provider próprio de imagem — env OPENAI_API_KEY reutilizada (dall-e-3); fallback para o Forge interno quando ausente
+- [ ] Frontend/backend: diagnóstico claro da chave de YouTube — YOUTUBE_DATA_API_KEY configurável via env; mensagem de erro diferenciada quando a chave está ausente/inválida (além da mensagem genérica de conexão)
+- [ ] Perfil: página/seção de configuração do código secreto (trocar AUTH_SECRET_CODE via UI) — procedure setSecretCode e UI no /perfil com campo de novo código + confirmação
+- [ ] Login: feedback visual do método de auth ativo (badge/pill "Autenticação local" ou "Manus OAuth" na tela de login, baseado em VITE_AUTH_PROVIDER)
+- [ ] Testes vitest das novas funcionalidades (LLM provider x3, imagem x2, setSecretCode x2, diagnóstico YouTube x2)
+- [ ] Atualizar DEPLOY_VERCEL.md/README.md com OPENAI_API_KEY e YOUTUBE_DATA_API_KEY
+- [ ] Push ao GitHub, skill vyroscope-video-analyst atualizada e validada
+- [ ] Documentação da rodada 31 para o Obsidian e checkpoint

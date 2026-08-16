@@ -155,7 +155,12 @@ async function runAnalysisAsync(analysisId: string, niche: string) {
     await updateAnalysisProgress(analysisId, 100);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const isRateLimit = /429|rate.?limit|quota/i.test(message);
+    const isRateLimit = /429|rate.?limit|youtube_quota_or_key/i.test(message);
+    const isInvalidKey = /youtube_invalid_key/i.test(message);
+    const isMissingKey =
+      /Neither OPENAI_API_KEY nor BUILT_IN_FORGE_API_KEY is configured|BUILT_IN_FORGE_API_KEY is not configured|BUILT_IN_FORGE_API_URL is not configured/i.test(
+        message
+      );
     await updateAnalysisProgress(analysisId, 0).catch(() => undefined);
     await updateAnalysis(analysisId, {
       status: "failed",
@@ -164,9 +169,13 @@ async function runAnalysisAsync(analysisId: string, niche: string) {
           ? "Nenhum vídeo em alta foi encontrado para este nicho. Tente outro termo ou amplie o nicho."
           : message.startsWith("llm_")
             ? "A análise de padrões falhou. Tente novamente em alguns instantes."
-            : isRateLimit
-              ? "O serviço de dados do YouTube atingiu o limite de requisições no momento. Aguarde alguns minutos e tente novamente."
-              : "Falha ao consultar o YouTube. Verifique sua conexão e tente novamente.",
+            : isMissingKey
+              ? "O serviço de dados ainda não está configurado neste ambiente (chave de API ausente). Verifique as variáveis de ambiente do servidor (YOUTUBE_DATA_API_KEY / BUILT_IN_FORGE_API_KEY)."
+              : isInvalidKey
+                ? "A chave do YouTube Data API é inválida ou está ausente (YOUTUBE_DATA_API_KEY). Configure uma chave válida no console do Google Cloud."
+                : isRateLimit
+                  ? "O serviço de dados do YouTube atingiu o limite de requisições (quota) no momento. Aguarde alguns minutos e tente novamente."
+                  : "Falha ao consultar o YouTube. Verifique sua conexão e tente novamente.",
     });
   }
 }
