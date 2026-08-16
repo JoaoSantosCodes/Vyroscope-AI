@@ -311,3 +311,12 @@
 - [x] Testes vitest (testAllConnections, retry summary no history), docs, skill atualizada, Obsidian rodada-34
 - [x] Deploy Vercel: confirmar/ajustar documentação DEPLOY_VERCEL.md, garantir build compatível e entregar instruções + push GitHub
 - [x] Checkpoint final
+
+## Melhorias solicitadas (rodada 35)
+- [x] Backend: rastreamento de consumo — tokens LLM por análise (usage da resposta) e unidades da cota YouTube por coleta, persistidos em api_usage (userId, scope llm/youtube, date, tokens/units)
+- [x] Backend: procedure getUsageSummary (período: hoje/semana/mês) agregando api_usage por usuário
+- [x] Backend: procedure exportAnalysisHistoryCsv — CSV do histórico com retryLog resumido (colunas: Data, Nicho, Status, Tentativas, Falhas, Desistiu, Score médio, Títulos)
+- [x] Frontend: painel "Consumo de APIs" no perfil com uso de hoje/semana/mês (tokens e unidades YouTube)
+- [x] Frontend: botão "Reconfigurar" ao lado de cada provedor com falha no painel do Verificar tudo (abre o diálogo de configuração direto)
+- [x] Frontend: botão "Exportar histórico CSV" na página /historico incluindo o resumo de retentativas
+- [x] Testes vitest (consumo, export CSV), docs Vercel confirmados, skill, Obsidian rodada-35 e checkpoint final

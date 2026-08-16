@@ -26,6 +26,10 @@ export type AnalysisResult = {
   patterns: ViralityPattern[];
   videoScores: { videoId: string; viralityScore: number }[];
   suggestions: Suggestion[];
+  /** Tokens LLM consumidos pela análise (resposta do invokeLLM). */
+  llmTokens?: number;
+  /** Unidades da cota YouTube Data API consumidas pela coleta (opcional, registrado no run). */
+  youtubeUnits?: number;
 };
 
 const ANALYSIS_SCHEMA = {
@@ -140,6 +144,8 @@ export async function analyzeNiche(
     configs?.llmConfig
   );
 
+  const llmTokens = response.usage?.total_tokens ?? 0;
+
   const raw = response.choices[0]?.message?.content;
   if (!raw || typeof raw !== "string") {
     throw new Error("llm_empty_response");
@@ -158,5 +164,6 @@ export async function analyzeNiche(
 
   parsed.niche = niche;
   parsed.analyzedAt = new Date().toISOString();
+  parsed.llmTokens = llmTokens;
   return parsed;
 }

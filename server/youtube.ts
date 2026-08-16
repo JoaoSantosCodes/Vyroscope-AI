@@ -165,7 +165,9 @@ type VideoDetail = {
 export async function fetchTrendingVideosForNiche(
   niche: string,
   maxResults = 12,
-  onRetryEvent?: (event: RetryEventPayload) => void
+  onRetryEvent?: (event: RetryEventPayload) => void,
+  /** (Rodada 35) Reporta as unidades da cota YouTube consumidas por chamada. */
+  onUsageEvent?: (event: { units: number; endpoint: "search" | "videos" }) => void
 ): Promise<VideoItem[]> {
   const searchQuery = {
     part: "snippet",
@@ -215,7 +217,9 @@ export async function fetchTrendingVideosForNiche(
         items?: VideoDetail[];
       });
 
+  onUsageEvent?.({ units: 100, endpoint: "search" });
   const details = detailsRes.items ?? [];
+  onUsageEvent?.({ units: 1, endpoint: "videos" });
 
   const items = details
     .filter((d): d is VideoDetail => !!d.id && !!d.statistics)

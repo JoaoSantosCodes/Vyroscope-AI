@@ -1,4 +1,4 @@
-import { index, int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { bigint, index, int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
 
 // Nota: o banco usa text() no modelo (máx. ~64KB) — suficiente para o log de
 // retentativas; a coluna real no banco é MEDIUMTEXT via migração SQL manual.
@@ -8,6 +8,17 @@ import { index, int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "dri
  * Extend this file with additional tables as your product grows.
  * Columns use camelCase to match both database fields and generated types.
  */
+export const apiUsage = mysqlTable("api_usage", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: varchar("user_id", { length: 255 }).notNull(),
+  scope: varchar("scope", { length: 32 }).notNull(),
+  usageDate: varchar("usage_date", { length: 10 }).notNull(),
+  tokens: int("tokens").notNull().default(0),
+  units: int("units").notNull().default(0),
+  requests: int("requests").notNull().default(0),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+});
+
 export const users = mysqlTable("users", {
   /**
    * Surrogate primary key. Auto-incremented numeric value managed by the database.

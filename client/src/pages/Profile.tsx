@@ -11,7 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { formatDate } from "@/lib/score";
 import { trpc } from "@/lib/trpc";
-import { BarChart3, Clapperboard, Loader2, Radar, Save, ShieldCheck, Settings2, UserRound, Zap } from "lucide-react";
+import { BarChart3, Clapperboard, Gauge, Loader2, Radar, RefreshCw, Save, ShieldCheck, Settings2, UserRound, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
@@ -127,6 +127,12 @@ export default function Profile() {
   const testYoutubeConnection = () => {
     testConnectionMutation.mutate({ target: "youtube" });
   };
+
+  // (Rodada 35) Consumo de APIs (tokens LLM e unidades YouTube por período)
+  const usageQuery = trpc.profile.getUsageSummary.useQuery(undefined, {
+    enabled: isAuthenticated,
+    staleTime: 60_000,
+  });
 
   // (Rodada 34) Verificação em lote de todos os provedores
   const testAllMutation = trpc.profile.testAllConnections.useMutation({
@@ -303,6 +309,49 @@ export default function Profile() {
             </CardContent>
           </Card>
         </div>
+
+        {/* (Rodada 35) Consumo de APIs: tokens LLM e unidades da cota YouTube */}
+        <Card className="border-border/60">
+          <CardHeader className="flex flex-row items-center justify-between gap-4">
+            <div>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Gauge className="h-5 w-5 text-primary" />
+                Consumo de APIs
+              </CardTitle>
+              <CardDescription>
+                Tokens de LLM e unidades da cota do YouTube consumidas nas suas análises.
+                Uma análise típica consome ~1.000–3.000 tokens de LLM e ~101 unidades do YouTube.
+              </CardDescription>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => usageQuery.refetch()}
+              disabled={usageQuery.isRefetching}
+            >
+              {usageQuery.isRefetching ? (
+                <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-3.5 w-3.5" />
+              )}
+              Atualizar
+            </Button>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <UsageColumn
+                title="LLM (tokens)"
+                summary={usageQuery.data?.llm}
+                loading={usageQuery.isLoading}
+              />
+              <UsageColumn
+                title="YouTube (unidades de cota)"
+                summary={usageQuery.data?.youtube}
+                loading={usageQuery.isLoading}
+              />
+            </div>
+          </CardContent>
+        </Card>
 
         {/* (Rodada 31) Código de acesso pessoal para o login local */}
         <Card className="border-border/60">
@@ -582,6 +631,14 @@ export default function Profile() {
                         status={testResults?.llm?.status}
                         message={testAllMutation.isPending ? "Testando..." : testResults?.llm?.message}
                         latencyMs={testResults?.llm?.latencyMs ?? null}
+                        failed={Boolean(!testAllMutation.isPending && testResults?.llm?.status && testResults.llm.status !== "ok")}
+                        onReconfigure={
+                          !testAllMutation.isPending &&
+                          testResults?.llm?.status &&
+                          testResults.llm.status !== "ok"
+                            ? () => setProviderDialogOpen(true)
+                            : undefined
+                        }
                       />
                     )}
                     {(testResults?.youtube || testAllMutation.isPending) && (
@@ -590,6 +647,22 @@ export default function Profile() {
                         status={testResults?.youtube?.status}
                         message={testAllMutation.isPending ? "Testando..." : testResults?.youtube?.message}
                         latencyMs={testResults?.youtube?.latencyMs ?? null}
+                        failed={
+                          !testAllMutation.isPending &&
+                          Boolean(testResults?.youtube?.status && testResults.youtube.status !== "ok")
+                        }
+                        onReconfigure={
+                          !testAllMutation.isPending &&
+                          testResults?.youtube?.status &&
+                          testResults.youtube.status !== "ok"
+                            ? () => {
+                                setProviderDialogOpen(true);
+                                toast.info(
+                                  "A chave do YouTube é configurada no servidor (YOUTUBE_DATA_API_KEY). Para trocar o provedor de LLM/imagem, ajuste no diálogo."
+                                );
+                              }
+                            : undefined
+                        }
                       />
                     )}
                     {testResults?.summary && (
@@ -645,14 +718,55 @@ export default function Profile() {
   );
 }
 
+/** Coluna do painel de consumo (Rodada 35). */
+function UsageColumn(props: {
+  title: string;
+  summary?: { today: { tokens: number; units: number; requests: number }; week: { tokens: number; units: number; requests: number }; month: { tokens: number; units: number; requests: number } };
+  loading: boolean;
+}) {
+  const { title, summary, loading } = props;
+  if (loading) {
+    return (
+      <div className="space-y-2 rounded-lg border border-border/60 bg-muted/40 p-4">
+        <Skeleton className="h-4 w-24" />
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-full" />
+      </div>
+    );
+  }
+  const isTokens = title.includes("tokens");
+  const periods = [
+    { label: "Hoje", value: isTokens ? summary?.today.tokens ?? 0 : summary?.today.units ?? 0, requests: summary?.today.requests ?? 0 },
+    { label: "7 dias", value: isTokens ? summary?.week.tokens ?? 0 : summary?.week.units ?? 0, requests: summary?.week.requests ?? 0 },
+    { label: "Mês", value: isTokens ? summary?.month.tokens ?? 0 : summary?.month.units ?? 0, requests: summary?.month.requests ?? 0 },
+  ];
+  return (
+    <div className="rounded-lg border border-border/60 bg-muted/40 p-4">
+      <p className="text-sm font-medium">{title}</p>
+      <dl className="mt-3 grid grid-cols-3 gap-2 text-center">
+        {periods.map((p) => (
+          <div key={p.label} className="space-y-0.5">
+            <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">{p.label}</dt>
+            <dd className="text-lg font-bold tabular-nums">{p.value.toLocaleString("pt-BR")}</dd>
+            <dd className="text-[11px] text-muted-foreground">{p.requests} req.</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
 /** Linha de resultado do teste em lote (Rodada 34). */
 function TestResultLine(props: {
   label: string;
   status?: string;
   message?: string;
   latencyMs: number | null;
+  /** (Rodada 35) True quando o provedor falhou; exibe o botão "Reconfigurar". */
+  failed?: boolean;
+  onReconfigure?: () => void;
 }) {
-  const { label, status, message, latencyMs } = props;
+  const { label, status, message, latencyMs, failed, onReconfigure } = props;
   const pending = status === undefined;
   const ok = !pending && status === "ok";
   return (
@@ -674,11 +788,17 @@ function TestResultLine(props: {
         />
       )}
       <span className="font-medium">{label}</span>
-      <span className={ok ? "text-emerald-400" : pending ? "text-muted-foreground" : "text-destructive"}>
+      <span className={`flex-1 truncate ${ok ? "text-emerald-400" : pending ? "text-muted-foreground" : "text-destructive"}`}>
         {message ?? "aguardando..."}
       </span>
       {!pending && latencyMs != null && (
-        <span className="ml-auto shrink-0 text-muted-foreground">{latencyMs} ms</span>
+        <span className="shrink-0 text-muted-foreground">{latencyMs} ms</span>
+      )}
+      {!pending && failed && onReconfigure && (
+        <Button variant="outline" size="sm" className="shrink-0" onClick={onReconfigure}>
+          <Settings2 className="mr-1.5 h-3 w-3" />
+          Reconfigurar
+        </Button>
       )}
     </div>
   );

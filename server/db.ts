@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray, isNull, not, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
+  apiUsage,
   analysisVideos,
   analyses,
   InsertAnalysis,
@@ -1309,6 +1310,151 @@ export async function getProviderSettings(
     }
   });
   return result;
+}
+
+// ---------- Exportação CSV do histórico de análises ----------
+/** Monta o conteúdo CSV do histórico de análises com resumo de retentativas (Rodada 35). */
+export function buildAnalysisHistoryCsv(
+  rows: Array<{
+    id: string;
+    niche: string;
+    status: string;
+    result: string | null;
+    retryLog: string | null;
+    createdAt: Date;
+  }>
+): string {
+  const header = [
+    "Data",
+    "Nicho",
+    "Status",
+    "Tentativas",
+    "Falhas",
+    "Desistiu",
+    "Score médio",
+    "Títulos das sugestões",
+  ].join(";");
+  const body = rows.map((r) => {
+    const summary = parseRetrySummary(r.retryLog);
+    let parsed: { suggestions?: Array<{ title?: string; viralityScore?: number }> } | null = null;
+    try {
+      if (r.result) parsed = JSON.parse(r.result) as { suggestions?: Array<{ title?: string; viralityScore?: number }> };
+    } catch {
+      parsed = null;
+    }
+    const titles = (parsed?.suggestions ?? []).map((s) => s.title ?? "").join(" |");
+    const scores = (parsed?.suggestions ?? []).map((s) => (typeof s?.viralityScore === "number" ? s.viralityScore : ""));
+    const avgScore =
+      scores.length > 0 && scores.every((v) => typeof v === "number")
+        ? String(Math.round(scores.reduce((a, b) => (a as number) + (b as number), 0) / scores.length))
+        : "";
+    const cell = (value: string) => {
+      // Escape padrão CSV: aspas internas viram aspas duplas (""), e o campo é envolto em aspas
+      const escaped = value.split('"').join('""');
+      return /[;\n"]/.test(value) ? '"' + escaped + '"' : value;
+    };
+    return [
+      cell(new Date(r.createdAt).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })),
+      cell(r.niche),
+      cell(statusLabel(r.status)),
+      String(summary?.attempts ?? 0),
+      String(summary?.failures ?? 0),
+      cell(summary?.gaveUp ? "Sim" : "Não"),
+      cell(avgScore),
+      cell(titles),
+    ].join(";");
+  });
+  return [header, ...body].join("\n");
+}
+
+function statusLabel(status: string): string {
+  switch (status) {
+    case "completed":
+      return "Concluída";
+    case "running":
+      return "Em andamento";
+    case "failed":
+      return "Falhou";
+    default:
+      return status;
+  }
+}
+
+// ---------- Rastreamento de consumo de APIs ----------
+export type UsagePeriod = { tokens: number; units: number; requests: number };
+export type UsageSummary = {
+  llm: { today: UsagePeriod; week: UsagePeriod; month: UsagePeriod };
+  youtube: { today: UsagePeriod; week: UsagePeriod; month: UsagePeriod };
+};
+/** Incrementa o consumo de um escopo (llm/youtube) para o usuário no dia informado. */
+export async function recordApiUsage(input: {
+  userId: number;
+  scope: "llm" | "youtube";
+  tokens?: number;
+  units?: number;
+  requests?: number;
+}): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  const today = new Date().toISOString().slice(0, 10);
+  await db
+    .insert(apiUsage)
+    .values({
+      userId: String(input.userId),
+      scope: input.scope,
+      usageDate: today,
+      tokens: Math.max(0, input.tokens ?? 0),
+      units: Math.max(0, input.units ?? 0),
+      requests: Math.max(0, input.requests ?? 0),
+      updatedAt: Date.now(),
+    })
+    .onDuplicateKeyUpdate({
+      set: {
+        tokens: sql`tokens + VALUES(tokens)`,
+        units: sql`units + VALUES(units)`,
+        requests: sql`requests + VALUES(requests)`,
+        updatedAt: Date.now(),
+      },
+    });
+}
+
+/** Agrega o consumo por escopo nos períodos hoje/semana/mês. */
+export async function getUsageSummary(userId: number): Promise<UsageSummary> {
+  const db = await getDb();
+  const empty: UsagePeriod = { tokens: 0, units: 0, requests: 0 };
+  const emptyPeriods = { today: { ...empty }, week: { ...empty }, month: { ...empty } };
+  const result: UsageSummary = { llm: { ...emptyPeriods }, youtube: { ...emptyPeriods } };
+  if (!db) return result;
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  const weekStart = new Date(now); weekStart.setDate(now.getDate() - 6);
+  const monthStart = new Date(now); monthStart.setDate(1);
+  const rows = await db
+    .select()
+    .from(apiUsage)
+    .where(eq(apiUsage.userId, String(userId)));
+  for (const row of rows) {
+    const [scope, period] = pickScopePeriod(row.scope, row.usageDate, today, weekStart.toISOString().slice(0, 10), monthStart.toISOString().slice(0, 10));
+    if (!scope || !period) continue;
+    result[scope][period].tokens += row.tokens ?? 0;
+    result[scope][period].units += row.units ?? 0;
+    result[scope][period].requests += row.requests ?? 0;
+  }
+  return result;
+}
+
+function pickScopePeriod(
+  scope: string,
+  usageDate: string,
+  today: string,
+  weekStart: string,
+  monthStart: string
+): ["llm" | "youtube", "today" | "week" | "month"] | [null, null] {
+  if (scope !== "llm" && scope !== "youtube") return [null, null];
+  if (usageDate === today) return [scope, "today"];
+  if (usageDate >= weekStart) return [scope, "week"];
+  if (usageDate >= monthStart) return [scope, "month"];
+  return [null, null];
 }
 
 /** Persiste o mapa completo de configurações de providers do usuário. */

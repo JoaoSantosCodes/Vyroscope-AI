@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { getUserStats, setProviderSettings, updateLocalCode, updateUserProfile } from "../db";
+import { getUsageSummary, getUserStats, setProviderSettings, updateLocalCode, updateUserProfile } from "../db";
 import {
   resolveImageConfig,
   resolveLlmConfig,
@@ -205,5 +205,14 @@ export const profileRouter = router({
           : "Um ou mais provedores falharam na verificação."
         : "Existem provedores sem configuração — a análise usará o provedor interno (Manus) como fallback.",
     };
+  }),
+
+  /**
+   * (Rodada 35) Resumo de consumo das APIs do usuário:
+   * tokens LLM e unidades da cota YouTube por período (hoje/semana/mês).
+   */
+  getUsageSummary: protectedProcedure.query(async ({ ctx }) => {
+    const usage = await getUsageSummary(ctx.user.id);
+    return usage;
   }),
 });

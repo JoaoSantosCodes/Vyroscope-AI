@@ -4,11 +4,13 @@ import { z } from "zod";
 import {
   appendRetryEvent,
   createAnalysis,
+  recordApiUsage,
   deleteAnalysis as dbDeleteAnalysis,
   getAnalysisById,
   getUserStats,
   getThumbnailsByAnalysis,
   getVideosByAnalysis,
+  buildAnalysisHistoryCsv,
   listAnalysesByUser,
   parseRetrySummary,
   saveVideos,
@@ -43,7 +45,7 @@ export const analysisRouter = router({
         resolveLlmConfig(userId),
         resolveImageConfig(userId),
       ]);
-      await runAnalysisAsync(analysisId, niche, { llmConfig, imageConfig });
+      await runAnalysisAsync(analysisId, niche, { llmConfig, imageConfig, userId: Number(userId) });
     } catch {
       /* erros já gravados via updateAnalysis */
     }
@@ -76,7 +78,7 @@ export const analysisRouter = router({
           resolveLlmConfig(userId),
           resolveImageConfig(userId),
         ]);
-        await runAnalysisAsync(newId, row.niche, { llmConfig, imageConfig });
+        await runAnalysisAsync(newId, row.niche, { llmConfig, imageConfig, userId: Number(userId) });
       } catch {
         /* erros já gravados via updateAnalysis */
       }
@@ -98,6 +100,21 @@ export const analysisRouter = router({
       retrySummary: parseRetrySummary(r.retryLog),
       createdAt: r.createdAt.getTime(),
     }));
+  }),
+
+  /**
+   * (Rodada 35) Exporta o histórico de análises em CSV, incluindo o resumo
+   * de retentativas (tentativas, falhas, desistência) e os títulos das
+   * sugestões de cada análise concluída.
+   */
+  exportHistoryCsv: protectedProcedure.query(async ({ ctx }) => {
+    const rows = await listAnalysesByUser(ctx.user.id);
+    const content = buildAnalysisHistoryCsv(rows);
+    const when = new Date().toISOString().slice(0, 19).replace(/:/g, "-");
+    return {
+      filename: `vyroscope-historico-${when}.csv`,
+      content,
+    };
   }),
 
   /** Detalhe de uma análise (só do próprio usuário). */
@@ -185,25 +202,39 @@ export const analysisRouter = router({
 type AnalysisConfigs = {
   llmConfig: { apiUrl: string; apiKey: string | undefined; model?: string };
   imageConfig: { apiUrl: string; apiKey: string | undefined; model?: string };
+  /** (Rodada 35) usuário para o rastreamento de consumo. */
+  userId?: number;
 };
 
 async function runAnalysisAsync(
   analysisId: string,
   niche: string,
   configs: AnalysisConfigs
-) {
+): Promise<void> {
+  const userIdNum = configs.userId ?? 0;
+  if (!userIdNum) {
+    // Sem usuário informado: não há como rastrear o consumo; apenas omitimos o registro.
+  }
   try {
     await updateAnalysisProgress(analysisId, 15);
-    const videos = await fetchTrendingVideosForNiche(niche, 12, (event) => {
-      appendRetryEvent(analysisId, {
-        attempt: event.attempt,
-        at: event.at,
-        type: event.type,
-        message: event.message,
-        reason: event.reason,
-        waitSeconds: event.waitSeconds,
-      }).catch(() => undefined);
-    });
+    let youtubeUnits = 0;
+    const videos = await fetchTrendingVideosForNiche(
+      niche,
+      12,
+      (event) => {
+        appendRetryEvent(analysisId, {
+          attempt: event.attempt,
+          at: event.at,
+          type: event.type,
+          message: event.message,
+          reason: event.reason,
+          waitSeconds: event.waitSeconds,
+        }).catch(() => undefined);
+      },
+      (usage) => {
+        youtubeUnits += usage.units;
+      }
+    );
     await updateAnalysisProgress(analysisId, 45);
     await saveVideos(
       analysisId,
@@ -224,8 +255,14 @@ async function runAnalysisAsync(
 
     await updateAnalysisProgress(analysisId, 60);
     const result = await analyzeNiche(niche, videos, configs);
+    result.youtubeUnits = youtubeUnits;
     await updateAnalysisProgress(analysisId, 90);
     await updateAnalysis(analysisId, { status: "completed", result: JSON.stringify(result) });
+    // (Rodada 35) Registra o consumo para o painel de status das APIs.
+    if (userIdNum) {
+      recordApiUsage({ userId: userIdNum, scope: "llm", tokens: result.llmTokens, requests: 1 }).catch(() => undefined);
+      recordApiUsage({ userId: userIdNum, scope: "youtube", units: youtubeUnits, requests: 2 }).catch(() => undefined);
+    }
     await updateAnalysisProgress(analysisId, 100);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

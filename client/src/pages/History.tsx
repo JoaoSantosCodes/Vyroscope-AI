@@ -8,7 +8,8 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { startLogin } from "@/const";
 import { formatDate } from "@/lib/score";
 import { trpc } from "@/lib/trpc";
-import { Clock, Radar, RefreshCcw, Trash2 } from "lucide-react";
+import { Clock, Download, Loader2, Radar, RefreshCcw, Trash2 } from "lucide-react";
+import { useEffect } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 
@@ -18,6 +19,37 @@ export default function History() {
   const utils = trpc.useUtils();
 
   const listQuery = trpc.analysis.list.useQuery(undefined, { enabled: isAuthenticated });
+
+  // (Rodada 35) Exportação do histórico em CSV, incluindo as retentativas
+  const exportQuery = trpc.analysis.exportHistoryCsv.useQuery(undefined, {
+    enabled: false,
+    retry: false,
+  });
+  // (Rodada 35) dispara o download sempre que a query de exportação retorna dados
+  useEffect(() => {
+    const res = exportQuery.data;
+    if (res && exportQuery.isSuccess) {
+      const blob = new Blob(["\uFEFF" + res.content], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = res.filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      toast.success("Histórico exportado em CSV.");
+    }
+  }, [exportQuery.data, exportQuery.isSuccess]);
+  useEffect(() => {
+    if (exportQuery.isError) {
+      toast.error(exportQuery.error.message);
+    }
+  }, [exportQuery.isError, exportQuery.error]);
+  const handleExportCsv = () => {
+    utils.analysis.exportHistoryCsv.invalidate();
+    exportQuery.refetch();
+  };
   const removeMutation = trpc.analysis.remove.useMutation({
     onSuccess: () => {
       toast.success("Análise removida.");
@@ -44,13 +76,26 @@ export default function History() {
   return (
     <SiteLayout>
       <div className="container max-w-3xl py-10">
-        <div className="mb-6 flex items-center justify-between">
+        <div className="mb-6 flex items-center justify-between gap-4">
           <div>
             <h1 className="font-display text-3xl font-semibold">Histórico de análises</h1>
             <p className="mt-1 text-sm text-muted-foreground">
               Todas as suas análises ficam salvas na sua conta.
             </p>
           </div>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={exportQuery.isFetching || !listQuery.data?.length}
+            onClick={handleExportCsv}
+          >
+            {exportQuery.isFetching ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="mr-2 h-4 w-4" />
+            )}
+            Exportar CSV
+          </Button>
         </div>
 
         {listQuery.isLoading && (
