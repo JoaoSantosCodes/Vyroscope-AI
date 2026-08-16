@@ -406,6 +406,20 @@ function IdeaOfTheDayCard() {
     missedAlert.isMonthStart &&
     missedAlert.missed;
 
+  // Aplica a meta sugerida (média dos últimos 6 meses) na meta do mês corrente (rodada 26)
+  const applySuggestedGoalMutation = trpc.extended.applySuggestedGoal.useMutation({
+    onSuccess: (data) => {
+      utils.extended.pinnedProductionStats.invalidate();
+      utils.extended.missedGoalFeedback.invalidate();
+      toast.success(`Meta de ${data.goal} aplicada para ${data.monthKey} — com base na sua média dos últimos 6 meses.`);
+    },
+    onError: (err) => toast.error(err.message || "Falha ao aplicar a meta sugerida."),
+  });
+  const handleApplySuggestedGoal = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    applySuggestedGoalMutation.mutate();
+  };
+
   const archivePublishedMutation = trpc.extended.archivePublishedIdeas.useMutation({
     onSuccess: (data) => {
       utils.extended.listPinnedIdeas.invalidate();
@@ -460,18 +474,25 @@ function IdeaOfTheDayCard() {
           </span>
         </button>
       )}
-      {/* Feedback de meta não atingida no mês anterior (rodada 25) */}
+      {/* Feedback de meta não atingida no mês anterior (rodada 25) + aplicar meta sugerida (rodada 26) */}
       {showMissedGoalFeedback && missedAlert && (
-        <button
-          type="button"
-          onClick={() => navigate("/ideia-do-dia")}
-          className="mb-4 flex w-full max-w-2xl items-center gap-2.5 rounded-lg border border-sky-500/50 bg-sky-500/10 px-4 py-2.5 text-left transition-colors hover:border-sky-500/70 hover:bg-sky-500/15"
-        >
+        <div className="mb-4 flex w-full max-w-2xl items-center gap-2.5 rounded-lg border border-sky-500/50 bg-sky-500/10 px-4 py-2.5">
           <span className="animate-pulse text-sky-500">●</span>
           <span className="flex-1 text-xs sm:text-sm">
             <strong className="text-sky-500">Meta de {missedAlert.previousMonthKey} não atingida</strong>: {missedAlert.published} de {missedAlert.goal} publicações — {missedAlert.suggestion}
           </span>
-        </button>
+          {missedAlert.suggestedGoal !== null && (
+            <button
+              type="button"
+              disabled={applySuggestedGoalMutation.isPending}
+              onClick={handleApplySuggestedGoal}
+              className="shrink-0 rounded-md bg-sky-500/20 px-2.5 py-1 text-[11px] font-medium text-sky-300 transition-colors hover:bg-sky-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+              title={`Aplicar a meta sugerida de ${missedAlert.suggestedGoal} publicações no mês corrente (média dos últimos 6 meses)`}
+            >
+              {applySuggestedGoalMutation.isPending ? "Aplicando…" : `Aplicar meta ${missedAlert.suggestedGoal}`}
+            </button>
+          )}
+        </div>
       )}
       {staleQuery.isSuccess && staleIdeas.length > 0 && (
         <button

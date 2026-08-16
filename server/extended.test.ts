@@ -304,6 +304,8 @@ vi.mock("./db", async (importOriginal) => {
     getUserAchievements: vi.fn(),
     getMissedGoalFeedback: vi.fn(),
     getYearComparisonByMonth: vi.fn(),
+    getIntermediateAchievements: vi.fn(),
+    applySuggestedGoal: vi.fn(),
   };
 });
 
@@ -343,6 +345,8 @@ const mockedYearComparison = vi.mocked(db.getYearComparison);
 const mockedUserAchievements = vi.mocked(db.getUserAchievements);
 const mockedMissedGoalFeedback = vi.mocked(db.getMissedGoalFeedback);
 const mockedYearComparisonByMonth = vi.mocked(db.getYearComparisonByMonth);
+const mockedIntermediateAchievements = vi.mocked(db.getIntermediateAchievements);
+const mockedApplySuggestedGoal = vi.mocked(db.applySuggestedGoal);
 
 const folderUser = {
   id: 2,
@@ -1348,6 +1352,7 @@ describe("rodada 25", () => {
       missed: true,
       suggestion: "ajuste sugerido",
       avgPublishedPerMonth: 2.5,
+      suggestedGoal: 3,
     } as never);
     const caller = appRouter.createCaller(createFolderCtx());
     const result = await caller.extended.missedGoalFeedback();
@@ -1385,5 +1390,77 @@ describe("rodada 25", () => {
     expect(mockedYearComparisonByMonth).toHaveBeenCalledWith(2, [2025, 2026]);
     expect(result.previousYear).toBe(2025);
     await expect(caller.extended.yearComparisonByMonth({ years: [2026, 2026] })).rejects.toThrow();
+  });
+});
+
+describe("rodada 26", () => {
+  it("intermediateAchievements lista os selos de trimestres e semestres completos", async () => {
+    mockedIntermediateAchievements.mockResolvedValueOnce({
+      quarters: [
+        { year: 2026, quarter: 1, label: "2026 · 1º trimestre", metMonths: 3, published: 12, annualGoal: 12 },
+        { year: 2026, quarter: 2, label: "2026 · 2º trimestre", metMonths: 3, published: 15, annualGoal: 12 },
+      ],
+      halfYears: [{ year: 2026, half: 1, label: "2026 · 1º semestre", metMonths: 6, published: 27, annualGoal: 24 }],
+      yearsChecked: 6,
+    } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.intermediateAchievements();
+    expect(result.quarters).toHaveLength(2);
+    expect(result.halfYears).toHaveLength(1);
+    expect(result.halfYears[0].half).toBe(1);
+    expect(result.quarters[0].quarter).toBe(1);
+    expect(result.yearsChecked).toBe(6);
+    expect(mockedIntermediateAchievements).toHaveBeenCalledWith(2);
+  });
+
+  it("applySuggestedGoal aplica a meta sugerida do feedback quando válida", async () => {
+    mockedMissedGoalFeedback.mockResolvedValueOnce({
+      isMonthStart: true,
+      previousMonthKey: "2026-07",
+      published: 2,
+      goal: 4,
+      missed: true,
+      suggestion: "ajuste sugerido",
+      avgPublishedPerMonth: 2.3,
+      suggestedGoal: 3,
+    } as never);
+    mockedApplySuggestedGoal.mockResolvedValueOnce({ monthKey: "2026-08", goal: 3 } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.applySuggestedGoal();
+    expect(result.monthKey).toBe("2026-08");
+    expect(result.goal).toBe(3);
+    expect(mockedApplySuggestedGoal).toHaveBeenCalledWith(2, 3);
+  });
+
+  it("applySuggestedGoal rejeita quando não há meta sugerida disponível", async () => {
+    mockedMissedGoalFeedback.mockResolvedValueOnce({
+      isMonthStart: false,
+      previousMonthKey: "2026-06",
+      published: 2,
+      goal: 4,
+      missed: true,
+      suggestion: "ajuste sugerido",
+      avgPublishedPerMonth: 2.3,
+      suggestedGoal: null,
+    } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    await expect(caller.extended.applySuggestedGoal()).rejects.toThrow();
+    expect(mockedApplySuggestedGoal).not.toHaveBeenCalled();
+  });
+
+  it("applySuggestedGoal rejeita quando a média é zero (suggestedGoal null)", async () => {
+    mockedMissedGoalFeedback.mockResolvedValueOnce({
+      isMonthStart: true,
+      previousMonthKey: "2026-07",
+      published: 0,
+      goal: 4,
+      missed: true,
+      suggestion: "ajuste sugerido",
+      avgPublishedPerMonth: 0,
+      suggestedGoal: null,
+    } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    await expect(caller.extended.applySuggestedGoal()).rejects.toThrow();
+    expect(mockedApplySuggestedGoal).not.toHaveBeenCalled();
   });
 });

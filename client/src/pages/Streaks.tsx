@@ -19,6 +19,7 @@ import {
   PartyPopper,
   Target,
   TrendingDown,
+  Medal,
   TrendingUp,
   Trophy,
   XCircle,
@@ -83,6 +84,15 @@ export default function Streaks() {
     refetchOnWindowFocus: false,
     staleTime: 5 * 60 * 1000,
   });
+
+  // ===== Conquistas intermediárias (rodada 26): trimestres e semestres =====
+  const intermediateQuery = trpc.extended.intermediateAchievements.useQuery(undefined, {
+    refetchOnWindowFocus: false,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // ===== Toggle do gráfico comparativo (rodada 26): publicações vs % da meta =====
+  const [compareMode, setCompareMode] = useState<"published" | "percent">("published");
 
   // ===== Comparativo mês a mês (rodada 25): barras lado a lado =====
   const compareByMonthQuery = trpc.extended.yearComparisonByMonth.useQuery(
@@ -477,6 +487,23 @@ export default function Streaks() {
             {/* Gráfico mês a mês (rodada 25): barras lado a lado de {compareYear} vs {year} */}
             {compareByMonthQuery.data && compareByMonthQuery.data.months.length > 0 && (
               <div className="mt-4">
+                {/* Toggle (rodada 26): publicações absolutas vs % da meta mensal */}
+                <div className="mb-2 flex items-center justify-end gap-1 rounded-md border border-border p-0.5 text-[11px] w-fit ml-auto">
+                  <button
+                    type="button"
+                    className={`rounded px-2 py-0.5 transition-colors ${compareMode === "published" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                    onClick={() => setCompareMode("published")}
+                  >
+                    Publicações
+                  </button>
+                  <button
+                    type="button"
+                    className={`rounded px-2 py-0.5 transition-colors ${compareMode === "percent" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                    onClick={() => setCompareMode("percent")}
+                  >
+                    % da meta
+                  </button>
+                </div>
                 <div className="mb-2 flex items-center gap-3 text-[10px] uppercase tracking-wide text-muted-foreground">
                   <span className="flex items-center gap-1">
                     <span className="inline-block h-2 w-2 rounded-full bg-purple-500/70" />
@@ -488,22 +515,28 @@ export default function Streaks() {
                   </span>
                 </div>
                 <ResponsiveContainer width="100%" height={180}>
-                  <BarChart data={compareByMonthQuery.data.months} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
+                  <BarChart data={(compareByMonthQuery.data.months ?? []).map((m) => ({
+                    ...m,
+                    prevValue: compareMode === "percent" ? (m.previous.goal > 0 ? Math.round((m.previous.published / m.previous.goal) * 100) : 0) : m.previous.published,
+                    currValue: compareMode === "percent" ? (m.current.goal > 0 ? Math.round((m.current.published / m.current.goal) * 100) : 0) : m.current.published,
+                  }))} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
                     <XAxis dataKey="label" tick={{ fontSize: 10, fill: "var(--text-muted)" }} axisLine={false} tickLine={false} />
                     <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: "var(--text-muted)" }} axisLine={false} tickLine={false} width={22} />
                     <ChartTooltip
                       cursor={{ fill: "rgba(255,255,255,0.05)" }}
                       contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", fontSize: 11, borderRadius: 6 }}
                       formatter={(value: number, name: string) => [
-                        value,
+                        compareMode === "percent" ? `${value}%` : value,
                         name === "previous" ? String(compareByMonthQuery.data!.previousYear) : String(compareByMonthQuery.data!.currentYear),
                       ]}
                     />
-                    <Bar dataKey={(d: { previous: { published: number } }) => d.previous.published} name="previous" fill="rgba(168,85,247,0.7)" radius={[2, 2, 0, 0]} maxBarSize={14} />
-                    <Bar dataKey={(d: { current: { published: number } }) => d.current.published} name="current" fill="hsl(38 92% 50%)" radius={[2, 2, 0, 0]} maxBarSize={14} />
+                    <Bar dataKey="prevValue" name="previous" fill="rgba(168,85,247,0.7)" radius={[2, 2, 0, 0]} maxBarSize={14} />
+                    <Bar dataKey="currValue" name="current" fill="hsl(38 92% 50%)" radius={[2, 2, 0, 0]} maxBarSize={14} />
                   </BarChart>
                 </ResponsiveContainer>
-                <div className="mt-1 text-center text-[10px] text-muted-foreground">Publicações por mês · {compareYear ?? year - 1} vs {year}</div>
+                <div className="mt-1 text-center text-[10px] text-muted-foreground">
+                  {compareMode === "percent" ? "% da meta mensal por mês" : "Publicações por mês"} · {compareYear ?? year - 1} vs {year}
+                </div>
               </div>
             )}
           </div>
@@ -529,6 +562,50 @@ export default function Streaks() {
                     <div className="text-[12px] font-bold text-amber-500">SELO · ANO COMPLETO {b.year}</div>
                     <div className="text-[10px] text-muted-foreground">
                       {b.metMonths} de {b.metMonths} metas cumpridas · {b.published}/{b.annualGoal} publicações
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {/* Conquistas intermediárias (rodada 26): semestres e trimestres completos */}
+        {((intermediateQuery.data?.halfYears.length ?? 0) > 0 || (intermediateQuery.data?.quarters.length ?? 0) > 0) && (
+          <div className="mt-6">
+            <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold text-foreground">
+              <Medal className="h-4 w-4 text-amber-500" />
+              Conquistas intermediárias
+            </h2>
+            <p className="mb-3 text-[11px] text-muted-foreground">
+              {intermediateQuery.data
+                ? `${(intermediateQuery.data.quarters.length ?? 0) + (intermediateQuery.data.halfYears.length ?? 0)} selos intermediários acumulados em ${intermediateQuery.data.yearsChecked} ano${intermediateQuery.data.yearsChecked === 1 ? "" : "s"} analisado${intermediateQuery.data.yearsChecked === 1 ? "" : "s"}.`
+                : ""}
+            </p>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {(intermediateQuery.data?.halfYears ?? []).map((h) => (
+                <div
+                  key={`h${h.year}-${h.half}`}
+                  className="flex items-center gap-3 rounded-md border border-amber-500/30 bg-amber-500/[0.06] p-3"
+                >
+                  <Medal className="h-6 w-6 shrink-0 text-amber-400" />
+                  <div>
+                    <div className="text-[12px] font-bold text-amber-400">SELO · {h.label.toUpperCase()}</div>
+                    <div className="text-[10px] text-muted-foreground">
+                      6 de 6 metas cumpridas · {h.published}/{h.annualGoal} publicações
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {(intermediateQuery.data?.quarters ?? []).map((q) => (
+                <div
+                  key={`q${q.year}-${q.quarter}`}
+                  className="flex items-center gap-3 rounded-md border border-amber-500/25 bg-amber-500/[0.04] p-3"
+                >
+                  <CalendarDays className="h-6 w-6 shrink-0 text-amber-300/90" />
+                  <div>
+                    <div className="text-[12px] font-bold text-amber-300/90">SELO · {q.label.toUpperCase()}</div>
+                    <div className="text-[10px] text-muted-foreground">
+                      {q.metMonths} de {q.metMonths} metas cumpridas · {q.published}/{q.annualGoal} publicações
                     </div>
                   </div>
                 </div>

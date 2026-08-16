@@ -532,6 +532,23 @@ export const extendedRouter = router({
     const { getMissedGoalFeedback } = await import("../db");
     return getMissedGoalFeedback(ctx.user.id);
   }),
+  /** Conquistas intermediárias: trimestres e semestres completos por ano
+   *  (além dos selos anuais da procedure achievements). Rodada 26. */
+  intermediateAchievements: protectedProcedure.query(async ({ ctx }) => {
+    const { getIntermediateAchievements } = await import("../db");
+    return getIntermediateAchievements(ctx.user.id);
+  }),
+  /** Aplica a meta sugerida (média dos últimos 6 meses, arredondada para cima)
+   *  na meta do mês corrente. Só é permitida quando há sugestão válida
+   *  (feedback de início de mês com média > 0). Rodada 26. */
+  applySuggestedGoal: protectedProcedure.mutation(async ({ ctx }) => {
+    const { getMissedGoalFeedback, applySuggestedGoal } = await import("../db");
+    const feedback = await getMissedGoalFeedback(ctx.user.id);
+    if (!feedback.isMonthStart || feedback.suggestedGoal === null) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Não há meta sugerida disponível para aplicar neste momento." });
+    }
+    return applySuggestedGoal(ctx.user.id, feedback.suggestedGoal);
+  }),
   /** Comparativo mês a mês entre dois anos (barras agrupadas lado a lado).
    *  Rodada 25. */
   yearComparisonByMonth: protectedProcedure

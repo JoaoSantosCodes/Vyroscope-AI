@@ -226,3 +226,11 @@
 - [x] Testes vitest das novas funcionalidades (172 testes: achievements x1, missedGoalFeedback x1, yearComparisonByMonth x2 + mocks no db)
 - [x] Atualizar habilidade vyroscope-video-analyst com a rodada 25
 - [x] Verificação visual e checkpoint da rodada 25
+
+## Melhorias solicitadas (rodada 26)
+- [x] Selos intermediários na Galeria de Conquistas: trimestres completos (4 trimestres/ano, Q1–Q4) e semestres completos (2 semestres/ano, H1–H2) além dos selos anuais (getIntermediateAchievements + intermediateAchievements + seção "Conquistas intermediárias" com Medal/CalendarDays)
+- [x] Gráfico comparativo lado a lado: botão para alternar entre publicações absolutas e % da meta mensal (estado compareMode na /streaks, série derivada prevValue/currValue do mesmo yearComparisonByMonth)
+- [x] Banner de feedback (dia 1–5): botão "Aplicar meta sugerida" que aplica a meta com base na média dos últimos 6 meses (applySuggestedGoal: suggestedGoal no getMissedGoalFeedback + mutation com guard isMonthStart e clampGoal 1–100)
+- [x] Testes vitest das novas funcionalidades (+4: intermediateAchievements ×1, applySuggestedGoal ×3 → 176 passando)
+- [x] Atualizar habilidade vyroscope-video-analyst com a rodada 26 (SKILL.md + features-roadmap.md)
+- [x] Documentação da rodada 26 para o Obsidian (rodada-26-obsidian.md), verificação visual e checkpoint

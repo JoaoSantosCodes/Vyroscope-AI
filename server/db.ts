@@ -1009,6 +1009,7 @@ export async function getMissedGoalFeedback(userId: number): Promise<{
   missed: boolean;
   suggestion: string;
   avgPublishedPerMonth: number | null;
+  suggestedGoal: number | null;
 }> {
   const db = await getDb();
   const now = new Date();
@@ -1033,7 +1034,10 @@ export async function getMissedGoalFeedback(userId: number): Promise<{
   } else {
     suggestion = `O mês anterior terminou com ${publishedThisMonth} de ${goal} publicações (${goal - publishedThisMonth} a menos). Use o quadro Kanban para planejar as pendências logo no início do mês.`;
   }
-  return { isMonthStart, previousMonthKey: prevKey, published: publishedThisMonth, goal, missed, suggestion, avgPublishedPerMonth };
+  // Meta sugerida com base na média dos últimos 6 meses (usável pelo botão "Aplicar meta sugerida")
+  const suggestedGoal =
+    avgPublishedPerMonth !== null && avgPublishedPerMonth > 0 ? Math.ceil(avgPublishedPerMonth) : null;
+  return { isMonthStart, previousMonthKey: prevKey, published: publishedThisMonth, goal, missed, suggestion, avgPublishedPerMonth, suggestedGoal };
 }
 /** Comparativo mês a mês entre dois anos: para cada mês (1..12) devolve as
  * publicações e metas de cada ano, permitindo barras agrupadas lado a lado.
@@ -1067,4 +1071,84 @@ export async function getYearComparisonByMonth(userId: number, years: [number, n
     });
   }
   return { previousYear: years[0], currentYear: years[1], months };
+}
+/** Conquistas intermediárias: trimestres e semestres completos por ano.
+ * Um trimestre (Q1=jan–mar, Q2=abr–jun, Q3=jul–set, Q4=out–dez) é completo
+ * quando todos os seus meses (já passados ou com meta configurada) cumpriram
+ * a meta; um semestre (H1=jan–jun, H2=jul–dez) é completo quando os 6 meses
+ * cumpriram a meta. Meses futuros do ano corrente não entram no cálculo.
+ * Rodada 26. */
+export async function getIntermediateAchievements(
+  userId: number
+): Promise<{
+  quarters: { year: number; quarter: 1 | 2 | 3 | 4; label: string; metMonths: number; published: number; annualGoal: number }[];
+  halfYears: { year: number; half: 1 | 2; label: string; metMonths: number; published: number; annualGoal: number }[];
+  yearsChecked: number;
+}> {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const quarters: Awaited<ReturnType<typeof getIntermediateAchievements>>["quarters"] = [];
+  const halfYears: Awaited<ReturnType<typeof getIntermediateAchievements>>["halfYears"] = [];
+  let yearsChecked = 0;
+  for (let y = currentYear; y >= 2020; y -= 1) {
+    yearsChecked += 1;
+    const summary = await getYearSummary(userId, y);
+    const byMonth = new Map(summary.months.map((m) => [m.monthKey, m]));
+    const quarterMonths: [number, number][] = [
+      [1, 3],
+      [4, 6],
+      [7, 9],
+      [10, 12],
+    ];
+    quarterMonths.forEach(([start, end], qi) => {
+      const ms: (typeof summary.months)[number][] = [];
+      for (let m = start; m <= end; m += 1) {
+        const key = `${y}-${String(m).padStart(2, "0")}`;
+        const mm = byMonth.get(key);
+        if (mm) ms.push(mm);
+      }
+      // Trimestre completo: todos os meses contabilizados cumpriram a meta e há ao menos um mês com meta configurada
+      const metMonths = ms.filter((m) => m.met).length;
+      const published = ms.reduce((s, m) => s + m.publishedThisMonth, 0);
+      const annualGoal = ms.reduce((s, m) => s + m.goal, 0);
+      if (ms.length > 0 && ms.some((m) => m.goal > 0) && metMonths === ms.length) {
+        quarters.push({ year: y, quarter: (qi + 1) as 1 | 2 | 3 | 4, label: `${y} · ${["1º trimestre", "2º trimestre", "3º trimestre", "4º trimestre"][qi]}`, metMonths, published, annualGoal });
+      }
+    });
+    const halfMonths: [number, number][] = [
+      [1, 6],
+      [7, 12],
+    ];
+    halfMonths.forEach(([start, end], hi) => {
+      const ms: (typeof summary.months)[number][] = [];
+      for (let m = start; m <= end; m += 1) {
+        const key = `${y}-${String(m).padStart(2, "0")}`;
+        const mm = byMonth.get(key);
+        if (mm) ms.push(mm);
+      }
+      const metMonths = ms.filter((m) => m.met).length;
+      const published = ms.reduce((s, m) => s + m.publishedThisMonth, 0);
+      const annualGoal = ms.reduce((s, m) => s + m.goal, 0);
+      if (ms.length === 6 && metMonths === 6) {
+        halfYears.push({ year: y, half: (hi + 1) as 1 | 2, label: `${y} · ${hi === 0 ? "1º semestre" : "2º semestre"}`, metMonths, published, annualGoal });
+      }
+    });
+  }
+  return { quarters, halfYears, yearsChecked };
+}
+/** Aplicar a meta sugerida (média dos últimos 6 meses, arredondada para cima)
+ * na meta do mês corrente. Reutiliza a validação de setMonthlyGoal. Rodada 26. */
+export async function applySuggestedGoal(
+  userId: number,
+  suggestedGoal: number
+): Promise<{ monthKey: string; goal: number }> {
+  const currentKey = monthKeyOf(new Date());
+  const goal = clampGoal(suggestedGoal);
+  await setPinnedMonthlyGoal(userId, currentKey, goal);
+  return { monthKey: currentKey, goal };
+}
+function clampGoal(goal: number): number {
+  const parsed = parseInt(String(goal), 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return 1;
+  return parsed > 100 ? 100 : parsed;
 }
