@@ -357,6 +357,18 @@ function IdeaOfTheDayCard() {
     .filter((p) => p.archived === 0 && p.status === "gravando" && p.statusChangedAt)
     .filter((p) => Date.now() - new Date(p.statusChangedAt).getTime() > STAGNATION_DAYS * 24 * 60 * 60 * 1000);
 
+  const archivePublishedMutation = trpc.extended.archivePublishedIdeas.useMutation({
+    onSuccess: (data) => {
+      utils.extended.listPinnedIdeas.invalidate();
+      toast.success(`Arquivadas automaticamente: ${data.archived} ideia${data.archived === 1 ? "" : "s"} publicada${data.archived === 1 ? "" : "s"}.`);
+    },
+    onError: (err) => toast.error(err.message || "Falha ao arquivar as publicadas."),
+  });
+  const handleArchivePublished = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    archivePublishedMutation.mutate();
+  };
+
   const [outline, setOutline] = useState<{ niche: string; analysisId: string; suggestion: { title: string; viralityScore: number | null; hook?: string; angle?: string; targetLength?: string }; outline: { title: string; totalLength: string; acts: { act: string; label: string; duration: string; points: string[]; keyLine: string }[]; notes: string[] } } | null>(null);
   const [outlineDialogOpen, setOutlineDialogOpen] = useState(false);
   const outlineMutation = trpc.extended.generateIdeaOutline.useMutation({
@@ -382,9 +394,18 @@ function IdeaOfTheDayCard() {
           className="mb-4 flex w-full max-w-2xl items-center gap-2.5 rounded-lg border border-amber-500/50 bg-amber-500/10 px-4 py-2.5 text-left transition-colors hover:border-amber-500/70 hover:bg-amber-500/15"
         >
           <span className="animate-pulse text-amber-500">⏸</span>
-          <span className="text-xs sm:text-sm">
+          <span className="flex-1 text-xs sm:text-sm">
             <strong className="text-amber-600">{staleIdeas.length} ideia{staleIdeas.length === 1 ? "" : "s"} parada{staleIdeas.length === 1 ? "" : "s"}</strong> há mais de {STAGNATION_DAYS} dias em “Gravando” — abra o quadro Kanban para resolver.
           </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0 border-amber-500/40 bg-amber-500/15 px-2.5 py-1.5 text-[11px] font-medium text-amber-300 hover:bg-amber-500/25 hover:text-amber-400"
+            disabled={archivePublishedMutation.isPending}
+            onClick={handleArchivePublished}
+          >
+            {archivePublishedMutation.isPending ? "Arquivando..." : "Arquivar publicadas"}
+          </Button>
         </button>
       )}
       <Card className="w-full max-w-2xl border-primary/25 bg-gradient-to-br from-primary/10 via-card to-card shadow-2xl shadow-black/30">

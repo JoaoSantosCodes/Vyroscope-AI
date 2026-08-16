@@ -109,4 +109,39 @@ describe("buildIdeaHistoryCsv", () => {
     expect(csv[3]).toContain("\"Planejada\""); // status desconhecido cai no default
     expect(csv[4]).toContain("\"Planejada\""); // status ausente cai no default
   });
+
+  it("appends archived rows in a dedicated section with status and notes", () => {
+    const pinned = [{ date: "2026-08-14", niche: "fitness", suggestionTitle: "Ativa", viralityScore: 85, notes: null, status: "gravando" }];
+    const archived = [
+      { date: "2026-08-10", niche: "fitness", suggestionTitle: "Pub-1", viralityScore: 90, notes: "Ótima performance", status: "publicada" },
+      { date: "2026-08-05", niche: "fitness", suggestionTitle: "Pub-2", viralityScore: 70, notes: null, status: "publicada" },
+    ];
+    const csv = buildIdeaHistoryCsv(pinned, [], archived);
+    // Fixada + 2 Arquivadas (sem histórico)
+    expect(csv).toHaveLength(4);
+    expect(csv[0]).toContain("Status");
+    expect(csv[1]).toContain("\"Fixada\"");
+    expect(csv[2]).toContain("\"Arquivada\"");
+    expect(csv[2]).toContain("\"Pub-1\"");
+    expect(csv[2]).toContain("\"Publicada\"");
+    expect(csv[2]).toContain("\"Ótima performance\"");
+    expect(csv[3]).toContain("\"Pub-2\"");
+    expect(csv[3]).toContain("\"Publicada\"");
+    expect(csv[3]).toContain('""'); // anotação nula vira campo vazio
+  });
+
+  it("omits the archived section when the list is not provided", () => {
+    const csvWith = buildIdeaHistoryCsv(
+      [{ date: "2026-08-14", niche: "fitness", suggestionTitle: "A", viralityScore: 80, notes: null, status: "planejada" }],
+      [],
+      [{ date: "2026-08-10", niche: "fitness", suggestionTitle: "Arq", viralityScore: 70, notes: null, status: "publicada" }]
+    );
+    const csvWithout = buildIdeaHistoryCsv(
+      [{ date: "2026-08-14", niche: "fitness", suggestionTitle: "A", viralityScore: 80, notes: null, status: "planejada" }],
+      []
+    );
+    expect(csvWithout).toHaveLength(2);
+    expect(csvWith).toHaveLength(3);
+    expect(csvWith[2]).toContain("\"Arquivada\"");
+  });
 });

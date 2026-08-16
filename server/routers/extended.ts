@@ -459,6 +459,20 @@ export const extendedRouter = router({
       await unarchive(ctx.user.id, input.pinnedId);
       return { success: true } as const;
     }),
+  /** Arquiva em massa todas as ideias publicadas e não arquivadas do usuário.
+   *  Retorna o número de ideias arquivadas. */
+  archivePublishedIdeas: protectedProcedure
+    .mutation(async ({ ctx }) => {
+      const { archivePublishedIdeas: archiveAll } = await import("../db");
+      const count = await archiveAll(ctx.user.id);
+      return { archived: count } as const;
+    }),
+  /** Estatísticas de produção do quadro Kanban: publicadas no mês corrente e
+   *  tempo médio de produção (dias entre a fixação e a publicação). */
+  pinnedProductionStats: protectedProcedure.query(async ({ ctx }) => {
+    const { getPinnedProductionStats } = await import("../db");
+    return getPinnedProductionStats(ctx.user.id);
+  }),
   /** Remove definitivamente uma ideia (arquivada ou não) do histórico. */
   deletePinnedIdea: protectedProcedure
     .input(z.object({ pinnedId: z.number().int().positive() }))

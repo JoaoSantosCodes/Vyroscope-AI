@@ -286,6 +286,8 @@ vi.mock("./db", async (importOriginal) => {
     updateIdeaStatus: vi.fn(),
     archiveIdea: vi.fn(),
     unarchiveIdea: vi.fn(),
+    archivePublishedIdeas: vi.fn(),
+    getPinnedProductionStats: vi.fn(),
     deletePinnedIdea: vi.fn(),
   };
 });
@@ -308,6 +310,8 @@ const mockedReorderPinned = vi.mocked(db.reorderPinnedIdeas);
 const mockedUpdateStatus = vi.mocked(db.updateIdeaStatus);
 const mockedArchive = vi.mocked(db.archiveIdea);
 const mockedUnarchive = vi.mocked(db.unarchiveIdea);
+const mockedArchivePublished = vi.mocked(db.archivePublishedIdeas);
+const mockedStats = vi.mocked(db.getPinnedProductionStats);
 const mockedDeletePinned = vi.mocked(db.deletePinnedIdea);
 
 const folderUser = {
@@ -722,6 +726,33 @@ describe("extended idea pinning (pin/unpin/listPinned)", () => {
     const result = await caller.extended.unarchiveIdea({ pinnedId: 3 });
     expect(result.success).toBe(true);
     expect(mockedUnarchive).toHaveBeenCalledWith(2, 3);
+  });
+  it("archives all active published ideas in one bulk action", async () => {
+    mockedArchivePublished.mockResolvedValueOnce(2 as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.archivePublishedIdeas();
+    expect(result.archived).toBe(2);
+    expect(mockedArchivePublished).toHaveBeenCalledWith(2);
+  });
+  it("reports zero when there is no published idea to archive", async () => {
+    mockedArchivePublished.mockResolvedValueOnce(0 as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.archivePublishedIdeas();
+    expect(result.archived).toBe(0);
+  });
+  it("returns production statistics of the Kanban board", async () => {
+    mockedStats.mockResolvedValueOnce({ publishedThisMonth: 3, avgProductionDays: 4.5 });
+    const caller = appRouter.createCaller(createFolderCtx());
+    const stats = await caller.extended.pinnedProductionStats();
+    expect(stats.publishedThisMonth).toBe(3);
+    expect(stats.avgProductionDays).toBe(4.5);
+  });
+  it("returns zeroed statistics when the user has no pinned ideas", async () => {
+    mockedStats.mockResolvedValueOnce({ publishedThisMonth: 0, avgProductionDays: null });
+    const caller = appRouter.createCaller(createFolderCtx());
+    const stats = await caller.extended.pinnedProductionStats();
+    expect(stats.publishedThisMonth).toBe(0);
+    expect(stats.avgProductionDays).toBeNull();
   });
   it("permanently deletes a pinned idea", async () => {
     mockedDeletePinned.mockResolvedValueOnce(undefined as never);

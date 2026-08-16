@@ -514,6 +514,73 @@ export async function unarchiveIdea(userId: number, pinnedId: number) {
   await db.update(pinnedIdeaHistory).set({ archived: 0 }).where(eq(pinnedIdeaHistory.id, pinnedId));
 }
 
+/** Arquiva em massa todas as ideias publicadas e não arquivadas do usuário.
+ *  Retorna o número de ideias arquivadas (0 quando nenhuma estava publicada). */
+export async function archivePublishedIdeas(userId: number) {
+  const db = await getDb();
+  if (!db) return 0;
+  const published = await db
+    .select({ id: pinnedIdeaHistory.id })
+    .from(pinnedIdeaHistory)
+    .where(
+      and(
+        eq(pinnedIdeaHistory.userId, userId),
+        eq(pinnedIdeaHistory.status, "publicada"),
+        eq(pinnedIdeaHistory.archived, 0)
+      )
+    );
+  if (published.length === 0) return 0;
+  await db
+    .update(pinnedIdeaHistory)
+    .set({ archived: 1 })
+    .where(
+      and(
+        eq(pinnedIdeaHistory.userId, userId),
+        eq(pinnedIdeaHistory.status, "publicada"),
+        eq(pinnedIdeaHistory.archived, 0)
+      )
+    );
+  return published.length;
+}
+
+/** Estatísticas de produção do usuário: publicadas no mês corrente e tempo
+ *  médio (dias) de produção até a publicação (createdAt → statusChangedAt
+ *  quando status="publicada"). Ideias arquivadas entram na contagem do mês. */
+export async function getPinnedProductionStats(userId: number) {
+  const db = await getDb();
+  if (!db) return { publishedThisMonth: 0, avgProductionDays: null };
+  const rows = await db
+    .select({
+      status: pinnedIdeaHistory.status,
+      archived: pinnedIdeaHistory.archived,
+      createdAt: pinnedIdeaHistory.createdAt,
+      statusChangedAt: pinnedIdeaHistory.statusChangedAt,
+    })
+    .from(pinnedIdeaHistory)
+    .where(eq(pinnedIdeaHistory.userId, userId));
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  let publishedThisMonth = 0;
+  let publishedCount = 0;
+  let totalDays = 0;
+  for (const row of rows) {
+    if (row.status === "publicada") {
+      // Publicada no mês corrente = mudança de status para "publicada" dentro do mês
+      if (row.statusChangedAt instanceof Date && row.statusChangedAt >= monthStart) {
+        publishedThisMonth += 1;
+      }
+      if (row.statusChangedAt instanceof Date && row.createdAt instanceof Date) {
+        // fixação retroativa: statusChangedAt pode preceder createdAt — nesses casos a jornada conta como 0 dias
+        const days = Math.max(0, (row.statusChangedAt.getTime() - row.createdAt.getTime()) / 86400000);
+        totalDays += days;
+        publishedCount += 1;
+      }
+    }
+  }
+  const avgProductionDays = publishedCount > 0 ? Math.round((totalDays / publishedCount) * 10) / 10 : null;
+  return { publishedThisMonth, avgProductionDays };
+}
+
 /** Remove definitivamente uma ideia (arquivada ou não) do histórico. */
 export async function deletePinnedIdea(userId: number, pinnedId: number) {
   const db = await getDb();

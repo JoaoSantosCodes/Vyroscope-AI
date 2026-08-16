@@ -25,7 +25,7 @@ import { KANBAN_HIDE_PUBLISHED_KEY, KANBAN_OLDEST_FIRST_KEY, readSessionFlag, so
 import { quickNoteValue, shouldSaveQuickNote } from "@/lib/quickNote";
 import { formatDate, scoreColor, scoreLabel } from "@/lib/score";
 import { trpc } from "@/lib/trpc";
-import { Archive, ArrowUpDown, Edit3, FileText, Lightbulb, Loader2, Pin, PinOff, Radar, Search, StickyNote } from "lucide-react";
+import { Archive, ArrowUpDown, Clock, Edit3, FileText, Lightbulb, Loader2, Pin, PinOff, Radar, Search, StickyNote, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 
@@ -550,6 +550,33 @@ export default function IdeaHistory() {
   /** Quantas ideias ativas estão estagnadas em "Gravando" (>7 dias) */
   const staleIdeaCount = pinned.filter(isStagnant).length;
 
+  // ===== Estatísticas de produção do Kanban (rodada 18) =====
+  const statsQuery = trpc.extended.pinnedProductionStats.useQuery(undefined, {
+    refetchInterval: 5 * 60 * 1000,
+  });
+  const archivePublishedMutation = trpc.extended.archivePublishedIdeas.useMutation({
+    onMutate: () => {
+      // Otimista: marca as publicadas ativas como arquivadas antes da resposta
+      utils.extended.listPinnedIdeas.setData(undefined, (old) => {
+        if (!old) return old;
+        return {
+          ideas: old.ideas.map((p) =>
+            p.status === "publicada" && p.archived === 0 ? { ...p, archived: 1 } : p
+          ),
+        };
+      });
+    },
+    onSuccess: (data) => {
+      utils.extended.pinnedProductionStats.invalidate();
+      toast.success(`Arquivadas: ${data.archived} ideia${data.archived === 1 ? "" : "s"} publicada${data.archived === 1 ? "" : "s"}.`);
+    },
+    onError: (err) => {
+      utils.extended.listPinnedIdeas.invalidate();
+      toast.error(err.message || "Falha ao arquivar as publicadas.");
+    },
+  });
+  const hasPublishedActive = pinned.some((p) => p.status === "publicada" && p.archived === 0);
+
   const kanbanDragIndex = useRef<number | null>(null);
   const kanbanDragStatus = useRef<"planejada" | "gravando" | "publicada" | null>(null);
 
@@ -724,13 +751,21 @@ export default function IdeaHistory() {
                 notes: p.notes,
                 status: p.status,
               }));
+              const csvArchived = archived.map((p) => ({
+                date: p.date,
+                niche: p.niche,
+                suggestionTitle: p.suggestionTitle,
+                viralityScore: p.viralityScore,
+                notes: p.notes,
+                status: p.status,
+              }));
               const csvIdeas = ideas.map((idea) => ({
                 date: idea.date,
                 niche: idea.niche,
                 suggestion: idea.suggestion,
               }));
-              exportIdeaHistoryCsv(csvPinned, csvIdeas);
-              toast.success("CSV do histórico gerado.");
+              exportIdeaHistoryCsv(csvPinned, csvIdeas, csvArchived);
+              toast.success("CSV do histórico gerado (fixadas + arquivadas + histórico).");
             }}
           >
             Exportar CSV
@@ -740,11 +775,47 @@ export default function IdeaHistory() {
         {/* Ideias fixadas: quadro Kanban */}
         {pinned.length > 0 && (
           <div className="mb-8">
-            <h2 className="mb-3 flex items-center gap-2 font-display text-lg font-semibold">
-              <Pin className="h-4 w-4 text-primary" /> Fixadas no topo
-            </h2>
+            <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+              <h2 className="flex items-center gap-2 font-display text-lg font-semibold">
+                <Pin className="h-4 w-4 text-primary" /> Fixadas no topo
+              </h2>
+              {/* Painel de estatísticas de produção do Kanban (rodada 18) */}
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1.5 text-[11px] text-muted-foreground">
+                  <TrendingUp className="h-3 w-3 text-emerald-500" />
+                  <span className="font-medium text-foreground">
+                    {statsQuery.data?.publishedThisMonth ?? 0}
+                  </span>
+                  publicada{statsQuery.data?.publishedThisMonth === 1 ? "" : "s"} no mês
+                </span>
+                <span className="flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1.5 text-[11px] text-muted-foreground">
+                  <Clock className="h-3 w-3 text-primary" />
+                  média de <span className="font-medium text-foreground">
+                    {statsQuery.data?.avgProductionDays === null
+                      ? "—"
+                      : `${(statsQuery.data?.avgProductionDays ?? 0).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}d`}
+                  </span> de produção
+                </span>
+                {hasPublishedActive && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 border-amber-500/40 px-2 text-[11px] text-amber-500 hover:bg-amber-500/10 hover:text-amber-400"
+                    disabled={archivePublishedMutation.isPending}
+                    onClick={() => archivePublishedMutation.mutate()}
+                  >
+                    {archivePublishedMutation.isPending ? (
+                      <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                    ) : (
+                      <Archive className="mr-1.5 h-3 w-3" />
+                    )}
+                    Arquivar publicadas
+                  </Button>
+                )}
+              </div>
+            </div>
             <p className="mb-3 text-xs text-muted-foreground">
-              Arraste os cards para reordenar dentro da coluna ou movê-los entre as colunas de status. As fixadas aparecem primeiro no PDF exportado.
+              Arraste os cards para reordenar dentro da coluna ou movê-los entre as colunas de status. As fixadas aparecem primeiro no PDF exportado e as arquivadas entram nas exportações em uma seção dedicada.
             </p>
             <div className="mb-3 flex flex-wrap items-center gap-3">
               <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">

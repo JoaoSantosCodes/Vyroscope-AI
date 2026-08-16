@@ -165,20 +165,23 @@ export function buildFavoritesCsv(
  */
 export function exportIdeaHistoryCsv(
   pinned: { date: string; niche: string; suggestionTitle: string; viralityScore: number | null; notes: string | null; status?: string }[],
-  ideas: { date: string; niche: string; suggestion: { title: string; hook?: string; angle?: string; viralityScore: number | null }; notes?: string | null }[]
+  ideas: { date: string; niche: string; suggestion: { title: string; hook?: string; angle?: string; viralityScore: number | null }; notes?: string | null }[],
+  archived: { date: string; niche: string; suggestionTitle: string; viralityScore: number | null; notes: string | null; status?: string }[] = []
 ) {
-  const blob = new Blob(["\uFEFF" + buildIdeaHistoryCsv(pinned, ideas).join("\n")], { type: "text/csv;charset=utf-8;" });
+  const blob = new Blob(["\uFEFF" + buildIdeaHistoryCsv(pinned, ideas, archived).join("\n")], { type: "text/csv;charset=utf-8;" });
   downloadBlob(blob, "vyroscope-ideias.csv");
 }
 
 /**
  * Monta as linhas do CSV do histórico de ideias. Função pura para permitir
  * testes unitários no Vitest. Inclui a coluna Status (planejada/gravando/
- * publicada) para manter o quadro Kanban sincronizado offline.
+ * publicada) para manter o quadro Kanban sincronizado offline e, quando
+ * fornecida, a lista de ideias arquivadas na seção "Arquivada".
  */
 export function buildIdeaHistoryCsv(
   pinned: { date: string; niche: string; suggestionTitle: string; viralityScore: number | null; notes: string | null; status?: string }[],
-  ideas: { date: string; niche: string; suggestion: { title: string; hook?: string; angle?: string; viralityScore: number | null }; notes?: string | null }[]
+  ideas: { date: string; niche: string; suggestion: { title: string; hook?: string; angle?: string; viralityScore: number | null }; notes?: string | null }[],
+  archived: { date: string; niche: string; suggestionTitle: string; viralityScore: number | null; notes: string | null; status?: string }[] = []
 ): string[] {
   const esc = (v: unknown) => {
     const s = v === null || v === undefined ? "" : String(v);
@@ -204,6 +207,21 @@ export function buildIdeaHistoryCsv(
         esc(""),
         esc(p.notes),
         esc(STATUS_LABEL[p.status ?? ""] ?? "Planejada"),
+      ].join(",")
+    );
+  }
+  for (const a of archived) {
+    csvRows.push(
+      [
+        esc("Arquivada"),
+        esc(a.date),
+        esc(a.niche),
+        esc(a.viralityScore),
+        esc(a.suggestionTitle),
+        esc(""),
+        esc(""),
+        esc(a.notes),
+        esc(STATUS_LABEL[a.status ?? ""] ?? "Planejada"),
       ].join(",")
     );
   }

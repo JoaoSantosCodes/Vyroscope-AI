@@ -161,3 +161,11 @@
 - [x] Kanban: botão "Arquivar" em ideias publicadas — move para seção "Arquivadas" (oculta do quadro ativo), com opção de desarquivar e de excluir definitivamente; coluna archived(0/1) no banco (migração 0011) + helpers/procedures archiveIdea/unarchiveIdea/deletePinnedIdea (ownership-gated) + mutations com update otimista
 - [x] Home: banner âmbar clicável (navigate /ideia-do-dia) no IdeaOfTheDayCard quando houver ideias não arquivadas em "Gravando" >7d (listPinnedIdeas, refetch 15min, STAGNATION_DAYS=7); texto corrigido (sem template literal com $)
 - [x] PDF do histórico: frontend envia pinned+archived (schema zod opcional), exportPdf.ts renderiza seção "ARQUIVADAS" com status/notas e capa conta arquivadas; 2 testes novos (119 testes)
+
+## Melhorias solicitadas (rodada 18)
+- [x] Banner home: botão "Arquivar publicadas" que arquiva todas as publicadas ativas de uma só vez (procedure archivePublishedIdeas retorna a contagem; toast com plural pt-BR)
+- [x] Kanban: painel de estatísticas de produção no título do quadro — "N publicadas no mês" (statusChangedAt no mês corrente) + "média de Xd de produção" (getPinnedProductionStats; bug corrigido com Math.max(0, days) para fixação retroativa, "—" quando sem publicadas); botão "Arquivar publicadas" no header com update otimista
+- [x] CSV do histórico: buildIdeaHistoryCsv(pinned, history, archived?) adiciona seção "Arquivada" com Status/Notas (2 testes novos)
+- [x] Testes vitest das novas funcionalidades (archivePublishedIdeas x2, pinnedProductionStats x2, CSV arquivadas x2; 125 testes)
+- [x] Atualizar habilidade vyroscope-video-analyst com a rodada 18 (SKILL.md + features-roadmap.md; validada com quick_validate)
+- [x] Verificação visual (banner + stats + badge estagnação com dados de teste, depois limpos) e checkpoint
