@@ -288,6 +288,7 @@ vi.mock("./db", async (importOriginal) => {
     unarchiveIdea: vi.fn(),
     archivePublishedIdeas: vi.fn(),
     getPinnedProductionStats: vi.fn(),
+    setPinnedMonthlyGoal: vi.fn(),
     deletePinnedIdea: vi.fn(),
   };
 });
@@ -312,6 +313,7 @@ const mockedArchive = vi.mocked(db.archiveIdea);
 const mockedUnarchive = vi.mocked(db.unarchiveIdea);
 const mockedArchivePublished = vi.mocked(db.archivePublishedIdeas);
 const mockedStats = vi.mocked(db.getPinnedProductionStats);
+const mockedSetGoal = vi.mocked(db.setPinnedMonthlyGoal);
 const mockedDeletePinned = vi.mocked(db.deletePinnedIdea);
 
 const folderUser = {
@@ -753,6 +755,45 @@ describe("extended idea pinning (pin/unpin/listPinned)", () => {
     const stats = await caller.extended.pinnedProductionStats();
     expect(stats.publishedThisMonth).toBe(0);
     expect(stats.avgProductionDays).toBeNull();
+  });
+  it("passes the selected month filter (YYYY-MM) to the stats helper", async () => {
+    mockedStats.mockResolvedValueOnce({
+      publishedThisMonth: 2,
+      avgProductionDays: 6,
+      goal: 4,
+      monthKey: "2026-06",
+    } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const stats = await caller.extended.pinnedProductionStats({ monthKey: "2026-06" });
+    expect(mockedStats).toHaveBeenCalledWith(2, "2026-06");
+    expect(stats.monthKey).toBe("2026-06");
+    expect(stats.goal).toBe(4);
+  });
+  it("defaults to the current month when no filter is provided", async () => {
+    mockedStats.mockResolvedValueOnce({ publishedThisMonth: 0, avgProductionDays: null, goal: 4, monthKey: "2026-08" } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    await caller.extended.pinnedProductionStats(undefined);
+    expect(mockedStats).toHaveBeenCalledWith(2, undefined);
+  });
+  it("rejects a malformed month filter", async () => {
+    const caller = appRouter.createCaller(createFolderCtx());
+    await expect(caller.extended.pinnedProductionStats({ monthKey: "agosto-2026" as never })).rejects.toThrow();
+  });
+  it("stores the monthly goal for a month (upsert)", async () => {
+    mockedSetGoal.mockResolvedValueOnce(undefined as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.setMonthlyGoal({ monthKey: "2026-08", goal: 8 });
+    expect(result.success).toBe(true);
+    expect(mockedSetGoal).toHaveBeenCalledWith(2, "2026-08", 8);
+  });
+  it("rejects goal values outside the 1–100 range", async () => {
+    const caller = appRouter.createCaller(createFolderCtx());
+    await expect(caller.extended.setMonthlyGoal({ monthKey: "2026-08", goal: 0 })).rejects.toThrow();
+    await expect(caller.extended.setMonthlyGoal({ monthKey: "2026-08", goal: 101 })).rejects.toThrow();
+  });
+  it("rejects a malformed month key on goal setting", async () => {
+    const caller = appRouter.createCaller(createFolderCtx());
+    await expect(caller.extended.setMonthlyGoal({ monthKey: "26-08", goal: 5 })).rejects.toThrow();
   });
   it("permanently deletes a pinned idea", async () => {
     mockedDeletePinned.mockResolvedValueOnce(undefined as never);

@@ -371,4 +371,77 @@ describe("buildIdeaHistoryPdf", () => {
   it("rejeita entrada sem nenhuma ideia (ativas, arquivadas ou rotacionadas)", async () => {
     await expect(buildIdeaHistoryPdf({ pinned: [], archived: [], ideas: [] })).rejects.toThrow();
   });
+
+  it("inclui o resumo de estatísticas de produção do mês no cabeçalho quando productionStats é informado", async () => {
+    const buffer = await buildIdeaHistoryPdf({
+      productionStats: {
+        monthKey: "2026-08",
+        publishedThisMonth: 3,
+        avgProductionDays: 6.5,
+        goal: 4,
+      },
+      pinned: samplePinned,
+      ideas: sampleHistoryIdeas,
+    });
+    const { spawnSync } = await import("node:child_process");
+    const { writeFileSync, mkdtempSync } = await import("node:fs");
+    const tmp = mkdtempSync("/tmp/pdf-test-");
+    const file = `${tmp}/history-stats.pdf`;
+    writeFileSync(file, buffer);
+    const run = spawnSync(
+      process.execPath,
+      ["/home/ubuntu/vyroscope-ai/node_modules/pdf-parse/bin/cli.mjs", "text", file],
+      { encoding: "utf-8", cwd: "/home/ubuntu/vyroscope-ai" }
+    );
+    const text = run.stdout + run.stderr;
+    if (run.status !== 0) throw new Error(`pdf-parse CLI falhou: ${text}`);
+    const compact = text.replace(/[\s ]/g, "").toUpperCase();
+    expect(compact).toContain("RESUMODEPRODUÇÃO");
+    expect(compact).toContain("AGOSTODE2026");
+    expect(compact).toContain("3PUBLICADASNOMÊS");
+    expect(compact).toContain("METADE4(75%CONCLUÍDO)");
+    expect(compact).toContain("6,5DIAS");
+  });
+
+  it("exibe alternativa para média de produção quando não há publicadas", async () => {
+    const buffer = await buildIdeaHistoryPdf({
+      productionStats: { monthKey: "2026-07", publishedThisMonth: 0, avgProductionDays: null, goal: 5 },
+      pinned: samplePinned,
+      ideas: sampleHistoryIdeas,
+    });
+    const { spawnSync } = await import("node:child_process");
+    const { writeFileSync, mkdtempSync } = await import("node:fs");
+    const tmp = mkdtempSync("/tmp/pdf-test-");
+    const file = `${tmp}/history-stats-2.pdf`;
+    writeFileSync(file, buffer);
+    const run = spawnSync(
+      process.execPath,
+      ["/home/ubuntu/vyroscope-ai/node_modules/pdf-parse/bin/cli.mjs", "text", file],
+      { encoding: "utf-8", cwd: "/home/ubuntu/vyroscope-ai" }
+    );
+    const text = run.stdout + run.stderr;
+    if (run.status !== 0) throw new Error(`pdf-parse CLI falhou: ${text}`);
+    const compact = text.replace(/[\s ]/g, "").toUpperCase();
+    expect(compact).toContain("JULHODE2026");
+    expect(compact).toContain("0PUBLICADASNOMÊS");
+    expect(compact).toContain("METADE5(0%CONCLUÍDO)");
+    expect(compact).toContain("SEMDADOSAINDA");
+  });
+
+  it("não renderiza o bloco de resumo quando productionStats não é informado", async () => {
+    const buffer = await buildIdeaHistoryPdf({ pinned: samplePinned, ideas: sampleHistoryIdeas });
+    const { spawnSync } = await import("node:child_process");
+    const { writeFileSync, mkdtempSync } = await import("node:fs");
+    const tmp = mkdtempSync("/tmp/pdf-test-");
+    const file = `${tmp}/history-no-stats.pdf`;
+    writeFileSync(file, buffer);
+    const run = spawnSync(
+      process.execPath,
+      ["/home/ubuntu/vyroscope-ai/node_modules/pdf-parse/bin/cli.mjs", "text", file],
+      { encoding: "utf-8", cwd: "/home/ubuntu/vyroscope-ai" }
+    );
+    const text = run.stdout + run.stderr;
+    if (run.status !== 0) throw new Error(`pdf-parse CLI falhou: ${text}`);
+    expect(text.replace(/\s/g, "")).not.toContain("RESUMODEPRODUÇÃO");
+  });
 });

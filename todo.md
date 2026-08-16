@@ -169,3 +169,11 @@
 - [x] Testes vitest das novas funcionalidades (archivePublishedIdeas x2, pinnedProductionStats x2, CSV arquivadas x2; 125 testes)
 - [x] Atualizar habilidade vyroscope-video-analyst com a rodada 18 (SKILL.md + features-roadmap.md; validada com quick_validate)
 - [x] Verificação visual (banner + stats + badge estagnação com dados de teste, depois limpos) e checkpoint
+
+## Melhorias solicitadas (rodada 19)
+- [x] Estatísticas: barra de progresso da meta mensal no painel (Progress shadcn, visível no mês corrente), meta configurável via setMonthlyGoal (tabela pinned_monthly_goal; input numérico inline no badge Target com Enter salva, Escape cancela)
+- [x] PDF do histórico: buildIdeaHistoryPdf aceita productionStats opcional e renderiza card "RESUMO DE PRODUÇÃO · MÊS" na capa (publicadas, % da meta, média de dias)
+- [x] Estatísticas: seletor de mês no painel (formatMonthKey/buildMonthOptions: corrente + 11 anteriores) ligado a pinnedProductionStats({ monthKey }) — backend getPinnedProductionStats já aceita monthKey (publishedThisMonth pela mudança de status no intervalo do mês)
+- [x] Testes vitest das novas funcionalidades (134 testes: monthKey + validação no procedure x3, setMonthlyGoal x2, buildIdeaHistoryPdf com productionStats x3 no texto do PDF)
+- [x] Atualizar habilidade vyroscope-video-analyst com a rodada 19 (SKILL.md: seção "Monthly goal, month filter, progress bar and production stats in the PDF export"; features-roadmap.md: parágrafo Round 19 no stats do Kanban + tabela pinned_monthly_goal no schema; validada com quick_validate)
+- [x] Verificação visual (home/ideia-do-dia/monitorar sem dados do usuário — estados vazios OK; painel de stats renderiza quando há ideia fixada) e checkpoint

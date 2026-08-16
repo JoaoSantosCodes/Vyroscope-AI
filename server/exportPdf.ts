@@ -322,7 +322,16 @@ export type IdeaHistoryPdfIdea = {
  * Entrada do PDF do histórico de ideias: ideias fixadas sempre no topo,
  * seguidas das ideias rotacionadas do período.
  */
+export type IdeaHistoryPdfProductionStats = {
+  monthKey: string; // YYYY-MM
+  publishedThisMonth: number;
+  avgProductionDays: number | null;
+  goal: number;
+};
+
 export type IdeaHistoryPdfInput = {
+  /** Resumo opcional das estatísticas de produção do mês (rodada 19). */
+  productionStats?: IdeaHistoryPdfProductionStats | null;
   pinned: IdeaHistoryPdfIdea[];
   /** Ideias arquivadas fora do quadro Kanban (mantidas no histórico) */
   archived?: IdeaHistoryPdfIdea[];
@@ -346,6 +355,7 @@ export async function buildIdeaHistoryPdf(input: IdeaHistoryPdfInput): Promise<B
   if (pinned.length === 0 && archived.length === 0 && ideas.length === 0) {
     throw new Error("Nada para exportar: o histórico está vazio.");
   }
+  const stats = input?.productionStats ?? null;
   return new Promise<Buffer>((resolve, reject) => {
     try {
       const doc = new PDFDocument({ size: "A4", margin: 54 });
@@ -368,6 +378,21 @@ export async function buildIdeaHistoryPdf(input: IdeaHistoryPdfInput): Promise<B
         .fontSize(10)
         .text("Gerado em " + new Date().toLocaleString("pt-BR"), 54, 240);
       doc.fillColor(COLORS.light).fontSize(12).text(`${total} ideia${total === 1 ? "" : "s"} · ${pinned.length} fixada${pinned.length === 1 ? "" : "s"}${archived.length > 0 ? ` · ${archived.length} arquivada${archived.length === 1 ? "" : "s"}` : ""}`, 54, 265);
+
+      // Resumo das estatísticas de produção do mês (rodada 19)
+      if (stats) {
+        const monthLabel = (() => {
+          const MONTHS_PT = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+          const [y, m] = stats.monthKey.split("-");
+          return `${MONTHS_PT[(Number.parseInt(m, 10) - 1)] ?? m} de ${y}`;
+        })();
+        doc.fillColor(COLORS.cardBg).roundedRect(54, 305, doc.page.width - 108, 100, 6).fill();
+        doc.fillColor(COLORS.amber).fontSize(9).font("Helvetica-Bold").text("RESUMO DE PRODUÇÃO · " + monthLabel.toUpperCase(), 70, 322, { characterSpacing: 2 });
+        doc.fillColor(COLORS.light).fontSize(10.5).font("Helvetica");
+        const pct = stats.goal > 0 ? Math.min(100, Math.round((stats.publishedThisMonth / stats.goal) * 100)) : 0;
+        doc.text(`${stats.publishedThisMonth} ${stats.publishedThisMonth === 1 ? "publicada" : "publicadas"} no mês · meta de ${stats.goal} (${pct}% concluído)`, 70, 342, { width: doc.page.width - 140 });
+        doc.fillColor(COLORS.gray).fontSize(10).text(stats.avgProductionDays === null ? "Tempo médio de produção: sem dados ainda" : `Tempo médio de produção: ${stats.avgProductionDays.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} dia${stats.avgProductionDays === 1 ? "" : "s"}`, 70, 362, { width: doc.page.width - 140 });
+      }
 
       doc.addPage();
 

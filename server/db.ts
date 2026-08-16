@@ -217,6 +217,7 @@ import {
   InsertWatchedMetricsHistory,
   thumbnailFolders,
   pinnedIdeaHistory,
+  pinnedMonthlyGoal,
 } from "../drizzle/schema";
 
 export async function saveSuggestionThumbnail(row: InsertSuggestionThumbnail) {
@@ -543,12 +544,32 @@ export async function archivePublishedIdeas(userId: number) {
   return published.length;
 }
 
-/** Estatísticas de produção do usuário: publicadas no mês corrente e tempo
- *  médio (dias) de produção até a publicação (createdAt → statusChangedAt
- *  quando status="publicada"). Ideias arquivadas entram na contagem do mês. */
-export async function getPinnedProductionStats(userId: number) {
+/** Meta mensal de publicações padrão quando não há registro na tabela. */
+export const DEFAULT_MONTHLY_GOAL = 4;
+
+/** Chave YYYY-MM de uma data no fuso do usuário do servidor. */
+export function monthKeyOf(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+}
+
+/** Estatísticas de produção do usuário para o mês indicado (YYYY-MM; padrão: mês corrente):
+ *  publicadas no mês, tempo médio (dias) de produção até a publicação
+ *  (createdAt → statusChangedAt quando status="publicada") e a meta configurada
+ *  para o mês (DEFAULT_MONTHLY_GOAL quando não há registro). Ideias arquivadas
+ *  entram na contagem do mês. */
+export async function getPinnedProductionStats(userId: number, monthKey?: string) {
   const db = await getDb();
-  if (!db) return { publishedThisMonth: 0, avgProductionDays: null };
+  if (!db) return { publishedThisMonth: 0, avgProductionDays: null, goal: DEFAULT_MONTHLY_GOAL, monthKey: "" };
+  const now = new Date();
+  const key = monthKey && /^\d{4}-\d{2}$/.test(monthKey) ? monthKey : monthKeyOf(now);
+  const [year, month] = key.split("-").map(Number);
+  const monthStart = new Date(year, month - 1, 1);
+  const monthEnd = new Date(year, month, 1);
+  let publishedThisMonth = 0;
+  let publishedCount = 0;
+  let totalDays = 0;
   const rows = await db
     .select({
       status: pinnedIdeaHistory.status,
@@ -558,18 +579,13 @@ export async function getPinnedProductionStats(userId: number) {
     })
     .from(pinnedIdeaHistory)
     .where(eq(pinnedIdeaHistory.userId, userId));
-  const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  let publishedThisMonth = 0;
-  let publishedCount = 0;
-  let totalDays = 0;
   for (const row of rows) {
-    if (row.status === "publicada") {
-      // Publicada no mês corrente = mudança de status para "publicada" dentro do mês
-      if (row.statusChangedAt instanceof Date && row.statusChangedAt >= monthStart) {
+    if (row.status === "publicada" && row.statusChangedAt instanceof Date) {
+      // Publicada no mês = mudança de status para "publicada" dentro do intervalo do mês
+      if (row.statusChangedAt >= monthStart && row.statusChangedAt < monthEnd) {
         publishedThisMonth += 1;
       }
-      if (row.statusChangedAt instanceof Date && row.createdAt instanceof Date) {
+      if (row.createdAt instanceof Date) {
         // fixação retroativa: statusChangedAt pode preceder createdAt — nesses casos a jornada conta como 0 dias
         const days = Math.max(0, (row.statusChangedAt.getTime() - row.createdAt.getTime()) / 86400000);
         totalDays += days;
@@ -578,7 +594,31 @@ export async function getPinnedProductionStats(userId: number) {
     }
   }
   const avgProductionDays = publishedCount > 0 ? Math.round((totalDays / publishedCount) * 10) / 10 : null;
-  return { publishedThisMonth, avgProductionDays };
+  let goal = DEFAULT_MONTHLY_GOAL;
+  const [goalRow] = await db
+    .select({ goal: pinnedMonthlyGoal.goal })
+    .from(pinnedMonthlyGoal)
+    .where(and(eq(pinnedMonthlyGoal.userId, userId), eq(pinnedMonthlyGoal.monthKey, key)));
+  if (goalRow && goalRow.goal > 0) goal = goalRow.goal;
+  return { publishedThisMonth, avgProductionDays, goal, monthKey: key };
+}
+
+/** Define a meta de publicações de um mês (upsert: reescreve se já existir). */
+export async function setPinnedMonthlyGoal(userId: number, monthKey: string, goal: number) {
+  const db = await getDb();
+  if (!db) return;
+  const existing = await db
+    .select({ id: pinnedMonthlyGoal.id })
+    .from(pinnedMonthlyGoal)
+    .where(and(eq(pinnedMonthlyGoal.userId, userId), eq(pinnedMonthlyGoal.monthKey, monthKey)));
+  if (existing.length > 0) {
+    await db
+      .update(pinnedMonthlyGoal)
+      .set({ goal })
+      .where(and(eq(pinnedMonthlyGoal.userId, userId), eq(pinnedMonthlyGoal.monthKey, monthKey)));
+  } else {
+    await db.insert(pinnedMonthlyGoal).values({ userId, monthKey, goal });
+  }
 }
 
 /** Remove definitivamente uma ideia (arquivada ou não) do histórico. */

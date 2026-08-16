@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import SiteLayout from "@/components/SiteLayout";
 import {
   Accordion,
@@ -25,7 +25,7 @@ import { KANBAN_HIDE_PUBLISHED_KEY, KANBAN_OLDEST_FIRST_KEY, readSessionFlag, so
 import { quickNoteValue, shouldSaveQuickNote } from "@/lib/quickNote";
 import { formatDate, scoreColor, scoreLabel } from "@/lib/score";
 import { trpc } from "@/lib/trpc";
-import { Archive, ArrowUpDown, Clock, Edit3, FileText, Lightbulb, Loader2, Pin, PinOff, Radar, Search, StickyNote, TrendingUp } from "lucide-react";
+import { Archive, ArrowUpDown, CalendarDays, Check, Clock, Edit3, FileText, Lightbulb, Loader2, Pencil, Pin, PinOff, Radar, Search, StickyNote, Target, TrendingUp, X } from "lucide-react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 
@@ -35,6 +35,40 @@ type OutlineData = {
   suggestion: { title: string; viralityScore: number | null; hook?: string; angle?: string; targetLength?: string };
   outline: { title: string; totalLength: string; acts: { act: string; label: string; duration: string; points: string[]; keyLine: string }[]; notes: string[] };
 };
+
+const MONTHS_PT = [
+  "janeiro",
+  "fevereiro",
+  "março",
+  "abril",
+  "maio",
+  "junho",
+  "julho",
+  "agosto",
+  "setembro",
+  "outubro",
+  "novembro",
+  "dezembro",
+];
+
+/** Formata 'YYYY-MM' para exibição, ex.: 'agosto de 2026'. */
+function formatMonthKey(monthKey: string): string {
+  const [y, m] = monthKey.split("-");
+  const idx = Number.parseInt(m, 10) - 1;
+  return `${MONTHS_PT[idx] ?? m} de ${y}`;
+}
+
+/** Lista os meses visíveis no seletor: corrente + anteriores (recentes primeiro). */
+function buildMonthOptions(count = 12): string[] {
+  const now = new Date();
+  const options: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    options.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  }
+  return options;
+}
+const monthOptions = buildMonthOptions();
 
 type HistoryIdea = {
   date: string;
@@ -551,9 +585,44 @@ export default function IdeaHistory() {
   const staleIdeaCount = pinned.filter(isStagnant).length;
 
   // ===== Estatísticas de produção do Kanban (rodada 18) =====
-  const statsQuery = trpc.extended.pinnedProductionStats.useQuery(undefined, {
+  // Seletor de mês do painel (padrão: mês corrente; persiste por sessão).
+  const currentMonthKey = useMemo(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  }, []);
+  const [statsMonthKey, setStatsMonthKey] = useState<string>(currentMonthKey);
+  const statsInput = useMemo(() => ({ monthKey: statsMonthKey }), [statsMonthKey]);
+  const statsQuery = trpc.extended.pinnedProductionStats.useQuery(statsInput, {
     refetchInterval: 5 * 60 * 1000,
+    staleTime: 2 * 60 * 1000,
   });
+  const setGoalMutation = trpc.extended.setMonthlyGoal.useMutation({
+    onSettled: () => utils.extended.pinnedProductionStats.invalidate(),
+    onSuccess: () => toast.success("Meta mensal atualizada."),
+    onError: (err) => toast.error(err.message || "Falha ao atualizar a meta mensal."),
+  });
+  const [goalDraft, setGoalDraft] = useState<string>("");
+  const [editingGoal, setEditingGoal] = useState(false);
+  const goalDraftRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    setGoalDraft(String(statsQuery.data?.goal ?? 4));
+  }, [statsQuery.data?.goal]);
+  useEffect(() => {
+    if (editingGoal) goalDraftRef.current?.focus();
+  }, [editingGoal]);
+  const commitGoal = () => {
+    if (!editingGoal || setGoalMutation.isPending) return;
+    const goal = Math.min(100, Math.max(1, Number.parseInt(goalDraft, 10)));
+    if (Number.isNaN(goal)) {
+      setGoalDraft(String(statsQuery.data?.goal ?? 4));
+      setEditingGoal(false);
+      return;
+    }
+    setGoalDraft(String(goal));
+    setGoalMutation.mutate({ monthKey: statsMonthKey, goal });
+    setEditingGoal(false);
+  };
+  const isCurrentMonthView = statsMonthKey === currentMonthKey;
   const archivePublishedMutation = trpc.extended.archivePublishedIdeas.useMutation({
     onMutate: () => {
       // Otimista: marca as publicadas ativas como arquivadas antes da resposta
@@ -727,7 +796,22 @@ export default function IdeaHistory() {
                   notes: p.notes ?? undefined,
                   status: (p.status === "planejada" || p.status === "gravando" || p.status === "publicada") ? (p.status as "planejada" | "gravando" | "publicada") : undefined,
                 }));
-              exportMutation.mutate({ pinned: buildPinnedRows(pinned), archived: buildPinnedRows(archived), ideas: ideas.map(toPdfRow) });
+              const stats = statsQuery.data;
+              exportMutation.mutate({
+                pinned: buildPinnedRows(pinned),
+                archived: buildPinnedRows(archived),
+                ideas: ideas.map(toPdfRow),
+                ...(stats
+                  ? {
+                      productionStats: {
+                        monthKey: statsMonthKey,
+                        publishedThisMonth: stats.publishedThisMonth,
+                        avgProductionDays: stats.avgProductionDays,
+                        goal: stats.goal,
+                      },
+                    }
+                  : {}),
+              });
             }}
           >
             {exportMutation.isPending ? (
@@ -779,14 +863,30 @@ export default function IdeaHistory() {
               <h2 className="flex items-center gap-2 font-display text-lg font-semibold">
                 <Pin className="h-4 w-4 text-primary" /> Fixadas no topo
               </h2>
-              {/* Painel de estatísticas de produção do Kanban (rodada 18) */}
+              {/* Painel de estatísticas de produção do Kanban (rodada 19) */}
               <div className="flex flex-wrap items-center gap-2">
+                <Select value={statsMonthKey} onValueChange={setStatsMonthKey}>
+                  <SelectTrigger
+                    className="h-7 w-auto border-border bg-card px-2 text-[11px] text-muted-foreground"
+                    aria-label="Mês das estatísticas"
+                  >
+                    <CalendarDays className="mr-1 h-3 w-3" />
+                    {formatMonthKey(statsMonthKey)}
+                  </SelectTrigger>
+                  <SelectContent>
+                    {monthOptions.map((m) => (
+                      <SelectItem key={m} value={m} className="text-xs">
+                        {formatMonthKey(m)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <span className="flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1.5 text-[11px] text-muted-foreground">
                   <TrendingUp className="h-3 w-3 text-emerald-500" />
                   <span className="font-medium text-foreground">
                     {statsQuery.data?.publishedThisMonth ?? 0}
                   </span>
-                  publicada{statsQuery.data?.publishedThisMonth === 1 ? "" : "s"} no mês
+                  publicada{statsQuery.data?.publishedThisMonth === 1 ? "" : "s"} em {formatMonthKey(statsMonthKey).toLowerCase()}
                 </span>
                 <span className="flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1.5 text-[11px] text-muted-foreground">
                   <Clock className="h-3 w-3 text-primary" />

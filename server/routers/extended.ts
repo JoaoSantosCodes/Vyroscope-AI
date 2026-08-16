@@ -467,12 +467,29 @@ export const extendedRouter = router({
       const count = await archiveAll(ctx.user.id);
       return { archived: count } as const;
     }),
-  /** Estatísticas de produção do quadro Kanban: publicadas no mês corrente e
-   *  tempo médio de produção (dias entre a fixação e a publicação). */
-  pinnedProductionStats: protectedProcedure.query(async ({ ctx }) => {
-    const { getPinnedProductionStats } = await import("../db");
-    return getPinnedProductionStats(ctx.user.id);
-  }),
+  /** Estatísticas de produção do quadro Kanban para um mês (YYYY-MM;
+   *  padrão: mês corrente): publicadas no mês, tempo médio de produção
+   *  (dias entre a fixação e a publicação) e a meta configurada do mês. */
+  pinnedProductionStats: protectedProcedure
+    .input(z.object({ monthKey: z.string().regex(/^\d{4}-\d{2}$/).optional() }).optional())
+    .query(async ({ ctx, input }) => {
+      const { getPinnedProductionStats } = await import("../db");
+      return getPinnedProductionStats(ctx.user.id, input?.monthKey);
+    }),
+  /** Define a meta de publicações de um mês (upsert; meta padrão usada
+   *  quando não há registro). */
+  setMonthlyGoal: protectedProcedure
+    .input(
+      z.object({
+        monthKey: z.string().regex(/^\d{4}-\d{2}$/),
+        goal: z.number().int().min(1).max(100),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { setPinnedMonthlyGoal } = await import("../db");
+      await setPinnedMonthlyGoal(ctx.user.id, input.monthKey, input.goal);
+      return { success: true } as const;
+    }),
   /** Remove definitivamente uma ideia (arquivada ou não) do histórico. */
   deletePinnedIdea: protectedProcedure
     .input(z.object({ pinnedId: z.number().int().positive() }))
@@ -487,6 +504,15 @@ export const extendedRouter = router({
   exportIdeaHistoryPdf: protectedProcedure
     .input(
       z.object({
+        /** Resumo opcional das estatísticas de produção do mês para o cabeçalho do PDF (rodada 19). */
+        productionStats: z
+          .object({
+            monthKey: z.string().min(1).max(7),
+            publishedThisMonth: z.number().int().min(0),
+            avgProductionDays: z.number().nullable(),
+            goal: z.number().int().min(1).max(100),
+          })
+          .optional(),
         pinned: z.array(
           z.object({
             date: z.string().min(1).max(10),
@@ -534,6 +560,7 @@ export const extendedRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: "Não há ideias para exportar." });
       }
       const buffer = await buildIdeaHistoryPdf({
+        productionStats: input.productionStats,
         pinned: input.pinned,
         archived: input.archived,
         ideas: input.ideas,

@@ -181,3 +181,21 @@ export const pinnedIdeaHistory = mysqlTable("pinned_idea_history", {
 
 export type PinnedIdeaHistory = typeof pinnedIdeaHistory.$inferSelect;
 export type InsertPinnedIdeaHistory = typeof pinnedIdeaHistory.$inferInsert;
+
+/**
+ * Meta mensal de publicações por usuário. Uma meta por mês (YYYY-MM);
+ * quando não existe registro, a aplicação usa a meta padrão (DEFAULT_MONTHLY_GOAL).
+ */
+export const pinnedMonthlyGoal = mysqlTable("pinned_monthly_goal", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  /** Mês da meta no formato YYYY-MM */
+  monthKey: varchar("monthKey", { length: 7 }).notNull(),
+  /** Quantidade de publicações planejadas para o mês */
+  goal: int("goal").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type PinnedMonthlyGoal = typeof pinnedMonthlyGoal.$inferSelect;
+export type InsertPinnedMonthlyGoal = typeof pinnedMonthlyGoal.$inferInsert;
