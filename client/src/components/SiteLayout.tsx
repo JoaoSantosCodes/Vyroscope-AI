@@ -1,4 +1,12 @@
-import { startLogin } from "@/const";
+import { isLocalAuthProvider, startLogin } from "@/const";
+import { LocalLoginForm } from "@/components/LocalLoginForm";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -131,6 +139,20 @@ export default function SiteLayout({ children }: { children: React.ReactNode }) 
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+            ) : isLocalAuthProvider() ? (
+              <Dialog>
+                <DialogTrigger asChild>
+                  <Button size="sm">
+                    <LogIn className="mr-1.5 h-4 w-4" /> Entrar
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-sm">
+                  <DialogHeader>
+                    <DialogTitle>Acesso ao Vyroscope AI</DialogTitle>
+                  </DialogHeader>
+                  <LocalLoginForm />
+                </DialogContent>
+              </Dialog>
             ) : (
               <Button size="sm" onClick={() => startLogin()}>
                 <LogIn className="mr-1.5 h-4 w-4" /> Entrar

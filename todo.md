@@ -258,3 +258,19 @@
 - [x] Testes vitest das novas funcionalidades (mock getYearSummary → null; 182/182 passando)
 - [x] Atualizar habilidade vyroscope-video-analyst com a rodada 29 (SKILL.md + features-roadmap.md)
 - [x] Documentação da rodada 29 para o Obsidian (rodada-29-obsidian.md), verificação visual e checkpoint
+
+## Exportação GitHub e preparo Vercel
+- [ ] Push do histórico completo do projeto para JoaoSantosCodes/Vyroscope-AI (branch main)
+- [ ] Configuração de build para Vercel (vercel.json ou scripts, output de produção)
+- [ ] Documentar variáveis de ambiente necessárias no README de deploy
+- [ ] Validar repositório e entregar ao usuário
+
+## Autenticação modular e preparo Vercel (rodada 30)
+- [x] Backend: auth provider swappable (server/_core/authProvider.ts) com implementações Manus OAuth e local (nome + código), controlado por env AUTH_PROVIDER (default manus)
+- [x] Backend: login local por código único (AUTH_SECRET_CODE) sem serviço externo — POST /api/local-auth com comparação timing-safe, sessão via JWT/cookie app_session_id existente (loginMethod local, openId local_<nome>_<hash>)
+- [x] Frontend: tela de login modular — Manus OAuth quando disponível, fallback local (LocalLoginForm com nome + código) no DashboardLayout e SiteLayout, com guard no useAuth para não redirecionar em modo local
+- [x] Identidade local: loginMethod "local" reutilizando o schema existente (sem migração), appId vazio aceito em verifySession no modo local
+- [x] Testes vitest do fluxo local: server/authProvider.test.ts (14 testes — provider, enabled, registro de rotas, rota real via Express; 196/196 totais)
+- [x] Configuração Vercel (vercel.json — build + routes, scripts start + engine, env documentation no README)
+- [x] README de deploy atualizado com variáveis e providers (DEPLOY_VERCel.md + seção no README.md)
+- [x] Push das mudanças ao GitHub

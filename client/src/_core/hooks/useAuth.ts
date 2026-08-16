@@ -1,4 +1,4 @@
-import { startLogin } from "@/const";
+import { isLocalAuthProvider, startLogin } from "@/const";
 import { trpc } from "@/lib/trpc";
 import { TRPCClientError } from "@trpc/client";
 import { useCallback, useEffect, useMemo } from "react";
@@ -80,6 +80,9 @@ export function useAuth(options?: UseAuthOptions) {
     if (typeof window === "undefined") return;
     if (redirectPath && window.location.pathname === redirectPath) return;
 
+    // In local auth mode the user must type their access code manually
+    // (LocalLoginForm) — never auto-redirect to the Manus OAuth flow.
+    if (isLocalAuthProvider()) return;
     // Navigate at this moment only. startLogin() mints the nonce + cookie itself.
     if (redirectPath) {
       window.location.href = redirectPath;

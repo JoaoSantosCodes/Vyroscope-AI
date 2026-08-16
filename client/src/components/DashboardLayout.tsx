@@ -19,7 +19,8 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { startLogin } from "@/const";
+import { isLocalAuthProvider, startLogin } from "@/const";
+import { LocalLoginForm } from "@/components/LocalLoginForm";
 import { useIsMobile } from "@/hooks/useMobile";
 import { BarChart3, CalendarHeart, Flame, History as HistoryIcon, LayoutDashboard, LogOut, PanelLeft, Pin } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
@@ -79,13 +80,17 @@ export default function DashboardLayout({
               Access to this dashboard requires authentication. Continue to launch the login flow.
             </p>
           </div>
-          <Button
-            onClick={() => startLogin()}
-            size="lg"
-            className="w-full shadow-lg hover:shadow-xl transition-all"
-          >
-            Sign in
-          </Button>
+          {isLocalAuthProvider() ? (
+            <LocalLoginForm />
+          ) : (
+            <Button
+              onClick={() => startLogin()}
+              size="lg"
+              className="w-full shadow-lg hover:shadow-xl transition-all"
+            >
+              Sign in
+            </Button>
+          )}
         </div>
       </div>
     );

@@ -211,19 +211,23 @@ class SDKServer {
       });
       const { openId, appId, name } = payload as Record<string, unknown>;
 
-      if (
-        !isNonEmptyString(openId) ||
-        !isNonEmptyString(appId) ||
-        !isNonEmptyString(name)
-      ) {
+      // Em modo `local` (AUTH_PROVIDER=local), o appId do JWT é vazio
+      // — apenas openId + name são necessários para a sessão local.
+      const localMode =
+        (process.env.AUTH_PROVIDER ?? "manus").toLowerCase().trim() === "local";
+      const appIdRequired = localMode
+        ? isNonEmptyString(openId) && isNonEmptyString(name)
+        : isNonEmptyString(openId) && isNonEmptyString(appId) && isNonEmptyString(name);
+
+      if (!appIdRequired) {
         console.warn("[Auth] Session payload missing required fields");
         return null;
       }
 
       return {
-        openId,
-        appId,
-        name,
+        openId: String(openId ?? ""),
+        appId: typeof appId === "string" ? appId : "",
+        name: String(name ?? ""),
       };
     } catch (error) {
       console.warn("[Auth] Session verification failed", String(error));

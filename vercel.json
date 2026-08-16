@@ -1,0 +1,22 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "server/_core/index.ts",
+      "use": "@vercel/node",
+      "config": { "maxDuration": 60 }
+    },
+    {
+      "src": "package.json",
+      "use": "@vercel/static-build",
+      "config": { "buildCommand": "pnpm build", "outputDirectory": "dist/public" }
+    }
+  ],
+  "routes": [
+    { "src": "/api/(.*)", "dest": "server/_core/index.ts" },
+    { "src": "/(.*)", "dest": "dist/public/$1" }
+  ],
+  "env": {
+    "NODE_ENV": "production"
+  }
+}
