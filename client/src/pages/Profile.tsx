@@ -11,7 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { formatDate } from "@/lib/score";
 import { trpc } from "@/lib/trpc";
-import { BarChart3, Clapperboard, Loader2, Radar, Save, ShieldCheck, Settings2, UserRound } from "lucide-react";
+import { BarChart3, Clapperboard, Loader2, Radar, Save, ShieldCheck, Settings2, UserRound, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
@@ -80,6 +80,19 @@ export default function Profile() {
     onError: (err) => toast.error(err.message),
   });
 
+  // (Rodada 33) Teste de conexão com os providers antes de salvar
+  const testConnectionMutation = trpc.profile.testApiConnection.useMutation({
+    onSuccess: (res) => {
+      const latency = res.latencyMs != null ? ` (${res.latencyMs} ms)` : "";
+      if (res.status === "ok") {
+        toast.success(`Conexão validada${latency}: ${res.message}`);
+      } else {
+        toast.error(`Falha no teste de conexão${latency}: ${res.message}`);
+      }
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
   // Estado do dialog de provedores (presets: openai | groq | openrouter | custom)
   const [providerPreset, setProviderPreset] = useState("auto");
   const [llmApiBase, setLlmApiBase] = useState("");
@@ -88,6 +101,27 @@ export default function Profile() {
   const [imageApiKey, setImageApiKey] = useState("");
   const [imageModel, setImageModel] = useState("");
   const [providerDialogOpen, setProviderDialogOpen] = useState(false);
+
+  /** (Rodada 33) Testa a configuração de LLM sendo editada no dialog. */
+  const testDialogLlmConnection = () => {
+    // Só testa com dados completos; caso contrário testa a configuração em vigor
+    const base = providerPreset === "custom" ? llmApiBase.trim() : currentPreset?.base ?? "";
+    const key = llmApiKey.trim();
+    if (key && !base) {
+      toast.error("Informe a URL base do provedor antes de testar (modo personalizado) ou escolha um preset.");
+      return;
+    }
+    testConnectionMutation.mutate(
+      key && base
+        ? { target: "llm", llmApiBase: base, llmApiKey: key, llmModel: llmModel.trim() || undefined }
+        : { target: "llm" }
+    );
+  };
+
+  /** (Rodada 33) Testa a chave do YouTube Data API do servidor. */
+  const testYoutubeConnection = () => {
+    testConnectionMutation.mutate({ target: "youtube" });
+  };
 
   useEffect(() => {
     if (providerDialogOpen && providerQuery.data) {
@@ -433,6 +467,18 @@ export default function Profile() {
                   <Button variant="outline" onClick={() => setProviderDialogOpen(false)}>
                     Cancelar
                   </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={testDialogLlmConnection}
+                    disabled={testConnectionMutation.isPending || providerMutation.isPending}
+                  >
+                    {testConnectionMutation.isPending && (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    )}
+                    <Zap className="mr-2 h-4 w-4" />
+                    Testar conexão
+                  </Button>
                   <Button onClick={applyProvider} disabled={providerMutation.isPending}>
                     {providerMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     Aplicar configuração
@@ -476,6 +522,32 @@ export default function Profile() {
                   ela não pode ser definida por usuário. Se estiver usando o hub de dados
                   interno da Manus, a análise só funciona dentro da plataforma.
                 </p>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={testDialogLlmConnection}
+                    disabled={testConnectionMutation.isPending}
+                  >
+                    {testConnectionMutation.isPending && (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    )}
+                    <Zap className="mr-2 h-4 w-4" />
+                    Testar LLM
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={testYoutubeConnection}
+                    disabled={testConnectionMutation.isPending}
+                  >
+                    {testConnectionMutation.isPending && (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    )}
+                    <Zap className="mr-2 h-4 w-4" />
+                    Testar YouTube
+                  </Button>
+                </div>
               </>
             ) : (
               <p className="text-sm text-muted-foreground">

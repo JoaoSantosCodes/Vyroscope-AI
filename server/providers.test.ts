@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // vi.mock antes de qualquer import do módulo — padrão do projeto (authProvider.test.ts)
 vi.mock("./db", () => ({
@@ -212,5 +212,176 @@ describe("validateApiBase", () => {
     expect(validateApiBase("https://openrouter.ai/api/v1")).toBe(
       "https://openrouter.ai/api/v1"
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (Rodada 33) Teste de conexão com os providers antes de salvar
+// ---------------------------------------------------------------------------
+const makeFetchMock = (overrides: {
+  ok?: boolean;
+  status?: number;
+  body?: unknown;
+  text?: string;
+  throws?: boolean;
+}) => {
+  const res = {
+    ok: overrides.ok ?? true,
+    status: overrides.status ?? 200,
+    statusText: "OK",
+    json: async () => overrides.body ?? { choices: [] },
+    text: async () => overrides.text ?? "",
+    headers: { get: () => null },
+  };
+  return vi.fn().mockResolvedValue(res);
+};
+
+describe("testLlmConnection", () => {
+  let fetchSpy: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchSpy = makeFetchMock({});
+    vi.stubGlobal("fetch", fetchSpy);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("reporta conexão bem-sucedida quando o endpoint responde 200", async () => {
+    const { testLlmConnection } = await import("./providers");
+    const result = await testLlmConnection({
+      apiUrl: "https://api.openai.com/v1/chat/completions",
+      apiKey: "sk-test",
+      model: "gpt-4o-mini",
+    });
+    expect(result.status).toBe("ok");
+    expect(result.latencyMs).not.toBeNull();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const call = fetchSpy.mock.calls[0];
+    expect((call[1] as RequestInit).body).toContain("gpt-4o-mini");
+    expect((call[1] as RequestInit).headers?.authorization).toBe("Bearer sk-test");
+  });
+
+  it("usa gpt-4o-mini como modelo padrão quando nenhum é informado", async () => {
+    const { testLlmConnection } = await import("./providers");
+    await testLlmConnection({
+      apiUrl: "https://api.openai.com/v1/chat/completions",
+      apiKey: "sk-test",
+      model: undefined,
+    });
+    expect((fetchSpy.mock.calls[0][1] as RequestInit).body).toContain("gpt-4o-mini");
+  });
+
+  it("reconhece chave inválida em HTTP 401", async () => {
+    const { testLlmConnection } = await import("./providers");
+    const unauthorized = makeFetchMock({ ok: false, status: 401, text: "Invalid API key" });
+    vi.stubGlobal("fetch", unauthorized);
+    const result = await testLlmConnection({
+      apiUrl: "https://api.openai.com/v1/chat/completions",
+      apiKey: "sk-bad",
+      model: undefined,
+    });
+    expect(result.status).toBe("invalid_key");
+    expect(result.message).toContain("401");
+  });
+
+  it("reconhece endpoint inexistente em HTTP 404", async () => {
+    const { testLlmConnection } = await import("./providers");
+    const notFound = makeFetchMock({ ok: false, status: 404 });
+    vi.stubGlobal("fetch", notFound);
+    const result = await testLlmConnection({
+      apiUrl: "https://api.openai.com/v1/chat/completions",
+      apiKey: "sk-test",
+      model: undefined,
+    });
+    expect(result.status).toBe("error");
+    expect(result.message).toContain("404");
+  });
+
+  it("reconhece timeout quando o fetch demora demais", async () => {
+    const { testLlmConnection } = await import("./providers");
+    // Simula um fetch que jamais responde: intercepta o signal do
+    // testLlmConnection e rejeita a promessa com um AbortError assim que o
+    // AbortController interno dispara, reproduzindo o comportamento real do
+    // fetch com timeout expirado.
+    const hanging = vi.fn().mockImplementation(
+      (_url: unknown, options?: { signal?: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          const onAbort = () =>
+            reject(new DOMException("timeout reached", "AbortError"));
+          if (options?.signal?.aborted) {
+            onAbort();
+          } else {
+            options?.signal?.addEventListener("abort", onAbort, { once: true });
+          }
+        })
+    );
+    vi.stubGlobal("fetch", hanging);
+    const result = await testLlmConnection({
+      apiUrl: "https://api.openai.com/v1/chat/completions",
+      apiKey: "sk-test",
+      model: undefined,
+    });
+    expect(result.status).toBe("timeout");
+    vi.unstubAllGlobals();
+  }, 30_000);
+
+  it("reconhece erro de rede (unreachable)", async () => {
+    const { testLlmConnection } = await import("./providers");
+    const broken = vi.fn().mockRejectedValue(new TypeError("fetch failed"));
+    vi.stubGlobal("fetch", broken);
+    const result = await testLlmConnection({
+      apiUrl: "https://api.openai.com/v1/chat/completions",
+      apiKey: "sk-test",
+      model: undefined,
+    });
+    expect(result.status).toBe("unreachable");
+  });
+});
+
+describe("testYoutubeConnection", () => {
+  let fetchSpy: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchSpy = makeFetchMock({});
+    vi.stubGlobal("fetch", fetchSpy);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    resetEnv();
+  });
+
+  it("reporta ausência de chave quando YOUTUBE_DATA_API_KEY não está definida", async () => {
+    resetEnv();
+    const { testYoutubeConnection } = await import("./providers");
+    const result = await testYoutubeConnection();
+    expect(result.status).toBe("invalid_key");
+    expect(result.message.toLowerCase()).toContain("nenhuma chave");
+  });
+
+  it("reporta conexão bem-sucedida com chave válida", async () => {
+    resetEnv();
+    setEnv({ youtubeApiKey: "AIza-valid" });
+    const { testYoutubeConnection } = await import("./providers");
+    const result = await testYoutubeConnection();
+    expect(result.status).toBe("ok");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const url = fetchSpy.mock.calls[0][0] as string;
+    expect(url).toContain("youtube/v3/search");
+    expect(url).toContain("AIza-valid");
+    expect(url).toContain("maxResults=1");
+  });
+
+  it("reporta chave recusada quando o YouTube responde 403", async () => {
+    resetEnv();
+    setEnv({ youtubeApiKey: "AIza-bad" });
+    const { testYoutubeConnection } = await import("./providers");
+    const forbidden = makeFetchMock({ ok: false, status: 403 });
+    vi.stubGlobal("fetch", forbidden);
+    const result = await testYoutubeConnection();
+    expect(result.status).toBe("invalid_key");
+    expect(result.message).toContain("403");
   });
 });

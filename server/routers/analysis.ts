@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import {
+  appendRetryEvent,
   createAnalysis,
   deleteAnalysis as dbDeleteAnalysis,
   getAnalysisById,
@@ -112,11 +113,25 @@ export const analysisRouter = router({
     } catch {
       result = null;
     }
+    let retryLog: Array<{
+      attempt: number;
+      at: number;
+      type: "retrying" | "giving_up" | "succeeded";
+      message: string;
+      reason?: string;
+      waitSeconds?: number;
+    }> | null = null;
+    try {
+      retryLog = row.retryLog ? (JSON.parse(row.retryLog) as typeof retryLog) : null;
+    } catch {
+      retryLog = null;
+    }
     return {
       id: row.id,
       niche: row.niche,
       status: row.status,
       errorMessage: row.errorMessage,
+      retryLog,
       createdAt: row.createdAt.getTime(),
       videos: videos.map((v) => ({
         ...v,
@@ -175,7 +190,16 @@ async function runAnalysisAsync(
 ) {
   try {
     await updateAnalysisProgress(analysisId, 15);
-    const videos = await fetchTrendingVideosForNiche(niche, 12);
+    const videos = await fetchTrendingVideosForNiche(niche, 12, (event) => {
+      appendRetryEvent(analysisId, {
+        attempt: event.attempt,
+        at: event.at,
+        type: event.type,
+        message: event.message,
+        reason: event.reason,
+        waitSeconds: event.waitSeconds,
+      }).catch(() => undefined);
+    });
     await updateAnalysisProgress(analysisId, 45);
     await saveVideos(
       analysisId,

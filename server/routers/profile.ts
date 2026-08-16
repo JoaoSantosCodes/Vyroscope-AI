@@ -5,6 +5,8 @@ import {
   resolveImageConfig,
   resolveLlmConfig,
   resolveYoutubeConfig,
+  testLlmConnection,
+  testYoutubeConnection,
   validateApiBase,
 } from "../providers";
 import { hashSecretCode } from "../_core/authProvider";
@@ -136,5 +138,44 @@ export const profileRouter = router({
           message: "Não foi possível salvar as configurações.",
         });
       }
+    }),
+
+  /**
+   * (Rodada 33) Teste de conexão com os providers ANTES de salvar.
+   * - `target = "llm"` (padrão): testa LLM. Se o usuário enviar uma chave
+   *   personalizada no teste (sem salvar), ela é usada no lugar do override;
+   * - `target = "youtube"`: testa a chave YOUTUBE_DATA_API_KEY do servidor.
+   */
+  testApiConnection: protectedProcedure
+    .input(
+      z.object({
+        target: z.enum(["llm", "youtube"]).default("llm"),
+        llmApiBase: z.string().trim().max(500).optional(),
+        llmApiKey: z.string().trim().max(2000).optional(),
+        llmModel: z.string().trim().max(120).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      if (input.target === "youtube") {
+        return testYoutubeConnection();
+      }
+      // Configuração em teste: usuário > override do banco > envs/forge
+      let llmConfig;
+      if (input.llmApiKey && input.llmApiBase) {
+        const baseError = validateApiBase(input.llmApiBase);
+        if (baseError) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: baseError });
+        }
+        llmConfig = await Promise.resolve({
+          apiUrl: `${input.llmApiBase.replace(/\/$/, "")}/chat/completions`,
+          apiKey: input.llmApiKey,
+          model: input.llmModel?.trim() || undefined,
+          provider: "custom",
+          active: true,
+        });
+      } else {
+        llmConfig = await resolveLlmConfig(ctx.user.id);
+      }
+      return testLlmConnection(llmConfig);
     }),
 });

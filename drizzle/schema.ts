@@ -1,5 +1,8 @@
 import { index, int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
 
+// Nota: o banco usa text() no modelo (máx. ~64KB) — suficiente para o log de
+// retentativas; a coluna real no banco é MEDIUMTEXT via migração SQL manual.
+
 /**
  * Core user table backing auth flow.
  * Extend this file with additional tables as your product grows.
@@ -67,6 +70,8 @@ export const analyses = mysqlTable("analyses", {
   /** Resultado estruturado da análise (JSON): vídeos, padrões, sugestões */
   result: text("result"),
   errorMessage: text("errorMessage"),
+  /** (Rodada 33) Log JSON das retentativas do YouTube durante a coleta */
+  retryLog: text("retryLog"),
   /** Etapa atual de progresso da análise (0-100) */
   progressStep: int("progressStep").default(0).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),

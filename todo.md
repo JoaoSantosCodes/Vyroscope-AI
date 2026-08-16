@@ -287,10 +287,18 @@
 - [x] Documentação da rodada 31 para o Obsidian (rodada-31-obsidian.md) e checkpoint (6ad5d114)
 
 ## Status de APIs e provedores alternativos (rodada 32)
-- [ ] Backend: procedure getApiProviderStatus que inspeciona as envs (OPENAI_API_KEY, YOUTUBE_DATA_API_KEY, OPENAI_API_BASE) e informa provider/ativo/model em uso
-- [ ] Backend: tabela user_settings (key/value por usuário) para persistir provider alternativo por usuário (llm base/model, image model, override de base)
-- [ ] Backend: providers (llm.ts/imageGeneration.ts/youtube.ts) respeitam o override por usuário via getProviderConfig(userId) com fallback para envs
-- [ ] Frontend: card "Status das APIs" no perfil (tabela com provider/model/ativo por LLM, imagem, YouTube) + Dialog de configuração de provedor alternativo com presets Groq/OpenRouter/custom
-- [ ] Análise: botão "Tentar Novamente" no resultado de falha (quota/rede) com retry e mensagens diferenciadas; contagem de tentativas por análise no frontend
-- [ ] Testes vitest (status, overrides por usuário, retry), docs (DEPLOY_VERCEL.md/README.md), push GitHub, skill atualizada, doc Obsidian rodada-32
-- [ ] Checkpoint final
+- [x] Backend: procedure getApiProviderStatus que inspeciona as envs (OPENAI_API_KEY, YOUTUBE_DATA_API_KEY, OPENAI_API_BASE) e informa provider/ativo/model em uso
+- [x] Backend: tabela user_settings (key/value por usuário) para persistir provider alternativo por usuário (llm base/model, image model, override de base)
+- [x] Backend: providers (llm.ts/imageGeneration.ts/youtube.ts) respeitam o override por usuário via getProviderConfig(userId) com fallback para envs
+- [x] Frontend: card "Status das APIs" no perfil (tabela com provider/model/ativo por LLM, imagem, YouTube) + Dialog de configuração de provedor alternativo com presets Groq/OpenRouter/custom
+- [x] Análise: botão "Tentar Novamente" no resultado de falha (quota/rede) com retry e mensagens diferenciadas; contagem de tentativas por análise no frontend
+- [x] Testes vitest (status, overrides por usuário, retry), docs (DEPLOY_VERCEL.md/README.md), push GitHub (commit 2f84695), skill atualizada e validada, doc Obsidian rodada-32 (rodada-32-obsidian.md)
+- [x] Checkpoint final (0de5a117, auto-publicado)
+
+## Melhorias solicitadas (rodada 33)
+- [x] Backend: procedure testApiConnection — testa a chave/endpoint configurados (auto/OpenAI/Groq/OpenRouter/custom) para LLM (chat simples de smoke test) e YouTube (channels.get/miniatura), com status detalhado (ok, chave inválida, timeout, indisponível)
+- [x] Backend: youtube.ts emite retry events (onRetryEvent: tentativa N, motivo, waitSeconds, sucesso) e persiste em analyses.retryLog (JSON, MEDIUMTEXT via migração 0016); analysis.get retorna retryLog parseado com as retentativas
+- [x] Frontend: botões "Testar LLM" e "Testar YouTube" no card Status das APIs + "Testar conexão" no dialog de provedor (testa a configuração em edição; toasts com status e latência)
+- [x] Frontend: tela de erro da análise (FailedState) com botão "Configurar provedor" ao lado de "Tentar Novamente" (navega para /perfil)
+- [x] Frontend: RetryLogPanel no Result (durante running e na tela de erro) mostrando eventos de retry com horário, mensagem e cor âmbar/vermelho; polling do analysis.get atualiza o log em tempo real
+- [x] Testes vitest (9 novos em providers.test.ts: testLlmConnection com ok/401/404/timeout/unreachable/modelo padrão; testYoutubeConnection com sem-chave/ok/403; 224/224 passando), docs e skill atualizados, Obsidian rodada-33 gerada e checkpoint final

@@ -25,6 +25,7 @@ import {
   Radar,
   Loader2,
   RotateCcw,
+  Settings2,
   Sparkles,
   Trash2,
   ThumbsUp,
@@ -104,6 +105,16 @@ export default function Result() {
 
   const isRunning = data.status === "running";
   const isFailed = data.status === "failed";
+  // Rodada 33: normaliza o tipo do retryLog (inferido como nunca quando superjson
+  // não consegue tipar arrays do router interno) para uso na tela.
+  const retryLog: Array<{
+    attempt: number;
+    at: number;
+    type: "retrying" | "giving_up" | "succeeded";
+    message: string;
+    reason?: string;
+    waitSeconds?: number;
+  }> = Array.isArray(data.retryLog) ? data.retryLog : [];
 
   return (
     <SiteLayout>
@@ -128,9 +139,23 @@ export default function Result() {
           </div>
         </div>
 
-        {isRunning && <StillRunning />}
+        {isRunning && (
+          <div className="space-y-4">
+            <StillRunning />
+            {retryLog.length > 0 && (
+              <div className="mx-auto max-w-lg">
+                <RetryLogPanel events={retryLog} />
+              </div>
+            )}
+          </div>
+        )}
         {isFailed && (
-          <FailedState analysisId={data.id} message={data.errorMessage ?? "Erro desconhecido"} niche={data.niche} />
+          <FailedState
+            analysisId={data.id}
+            message={data.errorMessage ?? "Erro desconhecido"}
+            niche={data.niche}
+            retryLog={retryLog}
+          />
         )}
         {!isRunning && !isFailed && data.result && (
           <Dashboard result={data.result} videos={data.videos} analysisId={data.id} thumbnails={data.thumbnails ?? []} />
@@ -234,10 +259,19 @@ function FailedState({
   analysisId,
   message,
   niche,
+  retryLog,
 }: {
   analysisId: string;
   message: string;
   niche: string;
+  retryLog?: Array<{
+    attempt: number;
+    at: number;
+    type: "retrying" | "giving_up" | "succeeded";
+    message: string;
+    reason?: string;
+    waitSeconds?: number;
+  }> | null;
 }) {
   const [, navigate] = useLocation();
   const utils = trpc.useUtils();
@@ -249,11 +283,15 @@ function FailedState({
     },
     onError: (err) => toast.error(err.message),
   });
+  const hasRetries = retryLog && retryLog.length > 0;
   return (
     <div className="flex min-h-[40vh] flex-col items-center justify-center gap-4 text-center">
       <Radar className="h-10 w-10 text-destructive/70" />
       <h2 className="font-display text-2xl font-semibold">A análise não pôde ser concluída</h2>
       <p className="max-w-md text-sm text-muted-foreground">{message}</p>
+      {hasRetries && (
+        <RetryLogPanel events={retryLog} />
+      )}
       <div className="flex flex-wrap items-center justify-center gap-2">
         <Button
           onClick={() => retryMutation.mutate({ analysisId })}
@@ -263,6 +301,10 @@ function FailedState({
           <RotateCcw className="mr-2 h-4 w-4" />
           {retryMutation.isPending ? "Iniciando…" : "Tentar novamente (mesma análise)"}
         </Button>
+        <Button variant="outline" onClick={() => navigate("/perfil")}>
+          <Settings2 className="mr-2 h-4 w-4" />
+          Configurar provedor
+        </Button>
         <Button
           variant="outline"
           onClick={() => navigate(`/analise?niche=${encodeURIComponent(niche)}`)}
@@ -271,6 +313,47 @@ function FailedState({
           Nova análise
         </Button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * (Rodada 33) Painel com o log de retentativas do YouTube: mostra cada
+ * tentativa, o motivo da falha e o tempo de espera antes de tentar de novo.
+ */
+function RetryLogPanel({
+  events,
+}: {
+  events: Array<{
+    attempt: number;
+    at: number;
+    type: "retrying" | "giving_up" | "succeeded";
+    message: string;
+    reason?: string;
+    waitSeconds?: number;
+  }>;
+}) {
+  return (
+    <div className="w-full max-w-lg rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 text-left">
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-amber-400">
+        Tentativas realizadas na coleta do YouTube
+      </p>
+      <ul className="space-y-1.5">
+        {events.map((event, i) => (
+          <li key={i} className="flex items-start gap-2 text-xs text-muted-foreground">
+            <span
+              className={
+                event.type === "giving_up"
+                  ? "mt-0.5 h-2 w-2 shrink-0 rounded-full bg-destructive"
+                  : "mt-0.5 h-2 w-2 shrink-0 rounded-full bg-amber-400"
+              }
+            />
+            <span>
+              {new Date(event.at).toLocaleTimeString()} — {event.message}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

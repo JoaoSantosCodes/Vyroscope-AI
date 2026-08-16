@@ -14,28 +14,61 @@ const DIRECT_BASE = "https://www.googleapis.com/youtube/v3";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * (Rodada 32) Busca com retry para erros transitórios:
+ * (Rodada 33) Evento de retentativa reportado pelo caller.
+ * `onRetryEvent` recebe o evento para exibir log de progresso na UI e
+ * persistir na coluna retryLog da análise.
+ */
+export type RetryEventPayload = {
+  attempt: number;
+  at: number;
+  type: "retrying" | "giving_up" | "succeeded";
+  message: string;
+  reason?: string;
+  waitSeconds?: number;
+};
+
+/**
+ * (Rodada 32/33) Busca com retry para erros transitórios:
  *   - 429: respeita o Retry-After (ou backoff de 10s);
  *   - 5xx: backoff exponencial (1s, 2s, 4s);
  *   - erros de rede (fetch lançando): mesma estratégia.
  * Erros permanentes (400/401/403) propagam imediatamente.
+ * `onRetryEvent` notifica cada retentativa (Rodada 33).
  */
-async function fetchJson(url: string): Promise<unknown> {
-  const RETRY_MAX = 3;
+async function fetchJson(
+  url: string,
+  onRetryEvent?: (event: RetryEventPayload) => void,
+  maxRetries = 3
+): Promise<unknown> {
   let lastError: Error | null = null;
-  for (let attempt = 0; attempt <= RETRY_MAX; attempt += 1) {
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     let response: Response;
     try {
       response = await fetch(url, { headers: { accept: "application/json" } });
     } catch (err) {
       // Erro de rede — transitório se ainda houver tentativas
-      lastError = new Error(
-        `youtube_network_error (${err instanceof Error ? err.message : "unknown"})`
-      );
-      if (attempt < RETRY_MAX) {
-        await sleep(1000 * Math.pow(2, attempt));
+      const errMessage = err instanceof Error ? err.message : "unknown";
+      lastError = new Error(`youtube_network_error (${errMessage})`);
+      if (attempt < maxRetries) {
+        const waitMs = 1000 * Math.pow(2, attempt);
+        onRetryEvent?.({
+          attempt: attempt + 1,
+          at: Date.now(),
+          type: "retrying",
+          message: `Tentativa ${attempt + 1} falhou (rede). Nova tentativa em ~${Math.round(waitMs / 1000)}s…`,
+          reason: "network",
+          waitSeconds: Math.round(waitMs / 1000),
+        });
+        await sleep(waitMs);
         continue;
       }
+      onRetryEvent?.({
+        attempt: attempt + 1,
+        at: Date.now(),
+        type: "giving_up",
+        message: `Falha definitiva após ${maxRetries + 1} tentativas: erro de rede (${errMessage}).`,
+        reason: "network",
+      });
       throw lastError;
     }
     if (response.ok) {
@@ -57,7 +90,16 @@ async function fetchJson(url: string): Promise<unknown> {
     // Transitórios: 429 (quota diária momentânea) e 5xx
     const retryAfter = Number(response.headers.get("retry-after") || 0);
     const wait = status === 429 ? Math.max(2, retryAfter || 10) : Math.pow(2, attempt) * 1000;
-    if (attempt < RETRY_MAX) {
+    if (attempt < maxRetries) {
+      const label = status === 429 ? "cota excedida (429)" : `erro do servidor (${status})`;
+      onRetryEvent?.({
+        attempt: attempt + 1,
+        at: Date.now(),
+        type: "retrying",
+        message: `Tentativa ${attempt + 1} falhou: ${label}. Nova tentativa em ~${Math.round(Math.min(wait, 30_000) / 1000)}s…`,
+        reason: status === 429 ? "quota_429" : `http_${status}`,
+        waitSeconds: Math.round(Math.min(wait, 30_000) / 1000),
+      });
       await sleep(Math.min(wait, 30_000));
       continue;
     }
@@ -122,7 +164,8 @@ type VideoDetail = {
  */
 export async function fetchTrendingVideosForNiche(
   niche: string,
-  maxResults = 12
+  maxResults = 12,
+  onRetryEvent?: (event: RetryEventPayload) => void
 ): Promise<VideoItem[]> {
   const searchQuery = {
     part: "snippet",
@@ -136,10 +179,13 @@ export async function fetchTrendingVideosForNiche(
   };
 
   const searchRes = useDirectProvider()
-    ? ((await fetchJson(buildDirectUrl("search", {
-        ...searchQuery,
-        maxResults: String(searchQuery.maxResults),
-      } as unknown as Record<string, string>))) as {
+    ? ((await fetchJson(
+        buildDirectUrl("search", {
+          ...searchQuery,
+          maxResults: String(searchQuery.maxResults),
+        } as unknown as Record<string, string>),
+        onRetryEvent
+      )) as {
         items?: { id?: string | { videoId?: string }; snippet?: SearchSnippet }[];
       })
     : ((await callDataApi("Youtube/search", { query: searchQuery })) as {
@@ -159,7 +205,10 @@ export async function fetchTrendingVideosForNiche(
     id: videoIds.slice(0, 20).join(","),
   };
   const detailsRes = useDirectProvider()
-    ? ((await fetchJson(buildDirectUrl("videos", detailsQuery as Record<string, string>))) as {
+    ? ((await fetchJson(
+        buildDirectUrl("videos", detailsQuery as Record<string, string>),
+        onRetryEvent
+      )) as {
         items?: VideoDetail[];
       })
     : ((await callDataApi("Youtube/videos", { query: detailsQuery })) as {

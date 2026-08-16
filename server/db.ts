@@ -183,6 +183,56 @@ export async function updateAnalysisProgress(id: string, step: number) {
   await db.update(analyses).set({ progressStep: Math.min(100, Math.max(0, step)) }).where(eq(analyses.id, id));
 }
 
+/**
+ * (Rodada 33) Evento de retentativa do YouTube durante a coleta de vídeos.
+ * Os eventos são acumulados em um JSON na coluna retryLog da análise.
+ */
+export type RetryEvent = {
+  /** Tentativa em andamento (1 = primeira tentativa, 2+ = retentativas) */
+  attempt: number;
+  /** Momento do evento em ms desde o epoch (UTC) */
+  at: number;
+  /** Tipo de evento: "retrying" (vai tentar de novo) | "giving_up" (falha definitiva) */
+  type: "retrying" | "giving_up" | "succeeded";
+  /** Descrição legível em pt-BR */
+  message: string;
+  /** Código do erro ou motivo (ex.: "quota_429", "network", "http_503") */
+  reason?: string;
+  /** Segundos de espera antes da próxima tentativa (quando type = "retrying") */
+  waitSeconds?: number;
+};
+
+export async function appendRetryEvent(id: string, event: RetryEvent) {
+  const db = await getDb();
+  if (!db) return;
+  try {
+    const rows = await db
+      .select({ retryLog: analyses.retryLog })
+      .from(analyses)
+      .where(eq(analyses.id, id))
+      .limit(1);
+    const existing = rows[0]?.retryLog;
+    let events: RetryEvent[] = [];
+    if (existing) {
+      try {
+        const parsed = JSON.parse(existing);
+        events = Array.isArray(parsed) ? parsed : [];
+      } catch {
+        events = [];
+      }
+    }
+    events.push(event);
+    // Limita o log às últimas 40 entradas para não crescer indefinidamente
+    const trimmed = events.slice(-40);
+    await db
+      .update(analyses)
+      .set({ retryLog: JSON.stringify(trimmed) })
+      .where(eq(analyses.id, id));
+  } catch {
+    // Log de retentativa é observável — nunca deve falhar a análise
+  }
+}
+
 export async function getUserStats(userId: number) {
   const db = await getDb();
   if (!db) return { total: 0, completed: 0 };
