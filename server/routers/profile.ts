@@ -178,4 +178,32 @@ export const profileRouter = router({
       }
       return testLlmConnection(llmConfig);
     }),
+
+  /**
+   * (Rodada 34) Verificação em lote de todos os provedores configurados:
+   * testa LLM (configuração em vigor) e YouTube em paralelo, retornando
+   * o resultado de cada um mais um status geral consolidado.
+   */
+  testAllConnections: protectedProcedure.mutation(async ({ ctx }) => {
+    const [llmConfig, llm, youtubeTest] = await Promise.all([
+      resolveLlmConfig(ctx.user.id),
+      resolveLlmConfig(ctx.user.id).then((cfg) => testLlmConnection(cfg)),
+      testYoutubeConnection(),
+    ]);
+    const youtube = resolveYoutubeConfig();
+    const ok = llm.status === "ok" && youtubeTest.status === "ok";
+    const allConfigured = llmConfig.active && youtube.keyConfigured;
+    return {
+      ok,
+      allConfigured,
+      llm,
+      youtube: youtubeTest,
+      youtubeConfigured: youtube.keyConfigured,
+      summary: allConfigured
+        ? ok
+          ? "Todos os provedores verificados com sucesso."
+          : "Um ou mais provedores falharam na verificação."
+        : "Existem provedores sem configuração — a análise usará o provedor interno (Manus) como fallback.",
+    };
+  }),
 });

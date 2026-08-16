@@ -10,6 +10,7 @@ import {
   getThumbnailsByAnalysis,
   getVideosByAnalysis,
   listAnalysesByUser,
+  parseRetrySummary,
   saveVideos,
   updateAnalysis,
   updateAnalysisProgress,
@@ -91,7 +92,10 @@ export const analysisRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {
     const rows = await listAnalysesByUser(ctx.user.id);
     return rows.map((r) => ({
-      ...r,
+      id: r.id,
+      niche: r.niche,
+      status: r.status,
+      retrySummary: parseRetrySummary(r.retryLog),
       createdAt: r.createdAt.getTime(),
     }));
   }),

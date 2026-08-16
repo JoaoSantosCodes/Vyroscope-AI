@@ -14,6 +14,7 @@ const db = vi.hoisted(() => ({
   deleteAnalysis: vi.fn().mockResolvedValue(undefined),
   updateAnalysisProgress: vi.fn().mockResolvedValue(undefined),
   getUserStats: vi.fn().mockResolvedValue({ total: 3, completed: 2 }),
+  parseRetrySummary: vi.fn().mockReturnValue(null),
   updateUserProfile: vi.fn().mockImplementation(async (_id: number, patch: { name?: string | null; email?: string | null }) =>
     Promise.resolve({
       id: 1,
@@ -254,13 +255,34 @@ describe("analysis.list", () => {
 
   it("lista análises do próprio usuário", async () => {
     db.listAnalysesByUser.mockResolvedValueOnce([
-      { id: "a1", niche: "fitness", status: "completed", createdAt: new Date() },
+      { id: "a1", niche: "fitness", status: "completed", retryLog: null, createdAt: new Date() },
     ]);
     const caller = appRouter.createCaller(createContext(sampleUser()));
     const rows = await caller.analysis.list();
     expect(rows).toHaveLength(1);
     expect(typeof rows[0]?.createdAt).toBe("number");
+    expect(rows[0]?.retrySummary).toBeNull();
     expect(db.listAnalysesByUser).toHaveBeenCalledWith(1);
+  });
+
+  it("inclui o resumo de retentativas quando o retryLog existe", async () => {
+    const retryLog = JSON.stringify([
+      { attempt: 1, at: 1000, type: "retrying", message: "quota" },
+      { attempt: 2, at: 6000, type: "succeeded", message: "ok" },
+    ]);
+    db.listAnalysesByUser.mockResolvedValueOnce([
+      { id: "a2", niche: "finanças", status: "completed", retryLog, createdAt: new Date() },
+    ]);
+    // parseRetrySummary real do módulo (o mock global retorna null)
+    db.parseRetrySummary.mockImplementationOnce((raw: string | null) => {
+      const events = raw ? JSON.parse(raw) : [];
+      const attempts = events.reduce((max: number, e: { attempt: number }) => Math.max(max, e.attempt), 0);
+      const failures = events.filter((e: { type: string }) => e.type === "retrying" || e.type === "giving_up").length;
+      return { attempts, failures, gaveUp: false };
+    });
+    const caller = appRouter.createCaller(createContext(sampleUser()));
+    const rows = await caller.analysis.list();
+    expect(rows[0]?.retrySummary).toEqual({ attempts: 2, failures: 1, gaveUp: false });
   });
 });
 

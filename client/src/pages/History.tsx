@@ -3,11 +3,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { startLogin } from "@/const";
 import { formatDate } from "@/lib/score";
 import { trpc } from "@/lib/trpc";
-import { Clock, Radar, Trash2 } from "lucide-react";
+import { Clock, Radar, RefreshCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 
@@ -116,6 +117,37 @@ export default function History() {
                           ? "Falhou"
                           : "Em execução"}
                     </Badge>
+                    {row.retrySummary ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span
+                            className={`flex cursor-default items-center gap-1 text-xs ${
+                              row.retrySummary.gaveUp
+                                ? "text-destructive"
+                                : row.retrySummary.attempts > 1
+                                  ? "text-amber-400"
+                                  : "text-muted-foreground"
+                            }`}
+                          >
+                            <RefreshCcw className="h-3.5 w-3.5" />
+                            {row.retrySummary.attempts}x
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="max-w-xs">
+                          <p className="text-xs">
+                            {row.retrySummary.attempts} tentativa{row.retrySummary.attempts > 1 ? "s" : ""} de coleta{" "}
+                            {row.retrySummary.failures > 0
+                              ? `(${row.retrySummary.failures} falha${row.retrySummary.failures > 1 ? "s" : ""})`
+                              : "sem falhas"}
+                            {row.retrySummary.gaveUp
+                              ? " — desistiu após as retentativas"
+                              : row.retrySummary.attempts > 1
+                                ? " — concluiu com retentativas"
+                                : ""}
+                          </p>
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : null}
                     <button
                       onClick={(e) => {
                         e.stopPropagation();

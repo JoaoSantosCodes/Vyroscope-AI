@@ -128,6 +128,7 @@ export async function listAnalysesByUser(userId: number) {
       niche: analyses.niche,
       status: analyses.status,
       result: analyses.result,
+      retryLog: analyses.retryLog,
       createdAt: analyses.createdAt,
     })
     .from(analyses)
@@ -201,6 +202,38 @@ export type RetryEvent = {
   /** Segundos de espera antes da próxima tentativa (quando type = "retrying") */
   waitSeconds?: number;
 };
+
+/**
+ * (Rodada 34) Parseia o retryLog bruto de uma análise em um resumo compacto
+ * para o histórico: {attempts, failures, gaveUp, firstRetryAt?}.
+ * Analisa o JSON com tolerância a falhas; sem eventos retorna null.
+ */
+export function parseRetrySummary(raw: string | null): {
+  attempts: number;
+  failures: number;
+  gaveUp: boolean;
+  firstRetryAt?: number;
+} | null {
+  let events: RetryEvent[] = [];
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      events = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return null;
+    }
+  }
+  if (events.length === 0) return null;
+  // Tolerância: ignora entradas que não são eventos válidos
+  const valid = events.filter((e) => typeof e?.attempt === "number");
+  if (valid.length === 0) return null;
+  const attempts = valid.reduce<number>((max, e) => Math.max(max, e.attempt), 0);
+  const gaveUp = valid.some((e) => e.type === "giving_up");
+  const failures = valid.filter((e) => e.type === "retrying" || e.type === "giving_up").length;
+  const retries = valid.filter((e) => e.attempt > 1);
+  const firstRetryAt = retries.length > 0 ? retries[0]!.at : undefined;
+  return { attempts, failures, gaveUp, firstRetryAt };
+}
 
 export async function appendRetryEvent(id: string, event: RetryEvent) {
   const db = await getDb();

@@ -385,3 +385,91 @@ describe("testYoutubeConnection", () => {
     expect(result.message).toContain("403");
   });
 });
+
+// ---------------------------------------------------------------------------
+// (Rodada 34) Verificação em lote de todos os provedores
+// ---------------------------------------------------------------------------
+describe("testAllConnections (lógica consolidada de testAllConnections do router)", () => {
+  let fetchSpy: ReturnType<typeof vi.fn>;
+
+  const makeLlmFetchMock = (overrides: { ok?: boolean; status?: number }) => {
+    const res = {
+      ok: overrides.ok ?? true,
+      status: overrides.status ?? 200,
+      statusText: "OK",
+      json: async () => ({ choices: [] }),
+      text: async () => "",
+      headers: { get: () => null },
+    };
+    return vi.fn().mockResolvedValue(res);
+  };
+
+  beforeEach(() => {
+    fetchSpy = makeLlmFetchMock({});
+    vi.stubGlobal("fetch", fetchSpy);
+    resetEnv();
+    mockUserSettings.mockReturnValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("verifica LLM e YouTube em paralelo e consolida o resultado", async () => {
+    const { testLlmConnection, testYoutubeConnection, resolveLlmConfig } = await import("./providers");
+    setEnv({ openaiApiKey: "sk-env", youtubeApiKey: "AIza-real" });
+    const [llmConfig, llm, youtubeTest] = await Promise.all([
+      resolveLlmConfig(undefined),
+      resolveLlmConfig(undefined).then((cfg) => testLlmConnection(cfg)),
+      testYoutubeConnection(),
+    ]);
+    // Mesma lógica do router: ok = ambos respondem bem; allConfigured = LLM ativo + chave YT
+    const allConfigured = llmConfig.active && resolveYoutubeConfig().keyConfigured;
+    const ok = llm.status === "ok" && youtubeTest.status === "ok";
+    expect(allConfigured).toBe(true);
+    expect(ok).toBe(true);
+    expect(llm.status).toBe("ok");
+    expect(youtubeTest.status).toBe("ok");
+    // Uma chamada por provedor (LLM test + YouTube test)
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("allConfigured é falso quando o YouTube não tem chave (fallback Manus)", async () => {
+    const { testLlmConnection, testYoutubeConnection, resolveLlmConfig } = await import("./providers");
+    setEnv({ openaiApiKey: "sk-env" });
+    const [llmConfig, llm, youtubeTest] = await Promise.all([
+      resolveLlmConfig(undefined),
+      resolveLlmConfig(undefined).then((cfg) => testLlmConnection(cfg)),
+      testYoutubeConnection(),
+    ]);
+    const allConfigured = llmConfig.active && resolveYoutubeConfig().keyConfigured;
+    const ok = llm.status === "ok" && youtubeTest.status === "ok";
+    expect(allConfigured).toBe(false);
+    expect(ok).toBe(false);
+    expect(youtubeTest.status).toBe("invalid_key");
+  });
+
+  it("detecta falha parcial: LLM responde 401 enquanto YouTube está ok", async () => {
+    const { testLlmConnection, testYoutubeConnection, resolveLlmConfig } = await import("./providers");
+    setEnv({ openaiApiKey: "sk-bad", youtubeApiKey: "AIza-real" });
+    // LLM responde 401; YouTube responde 200 — mock roteado por endpoint
+    const partial = vi.fn().mockImplementation((url: string) => {
+      const res = String(url).includes("youtube")
+        ? { ok: true, status: 200, statusText: "OK", json: async () => ({ items: [] }), text: async () => "", headers: { get: () => null } }
+        : { ok: false, status: 401, statusText: "Unauthorized", json: async () => ({}), text: async () => "Invalid API key", headers: { get: () => null } };
+      return Promise.resolve(res);
+    });
+    vi.stubGlobal("fetch", partial);
+    const [llmConfig, llm, youtubeTest] = await Promise.all([
+      resolveLlmConfig(undefined),
+      resolveLlmConfig(undefined).then((cfg) => testLlmConnection(cfg)),
+      testYoutubeConnection(),
+    ]);
+    const ok = llm.status === "ok" && youtubeTest.status === "ok";
+    // LLM 401 → invalid_key; YouTube responde 200 → ok; resultado consolidado falso
+    expect(llm.status).toBe("invalid_key");
+    expect(youtubeTest.status).toBe("ok");
+    expect(ok).toBe(false);
+    expect(partial).toHaveBeenCalledTimes(2);
+  });
+});

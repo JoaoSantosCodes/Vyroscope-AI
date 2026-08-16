@@ -302,3 +302,12 @@
 - [x] Frontend: tela de erro da análise (FailedState) com botão "Configurar provedor" ao lado de "Tentar Novamente" (navega para /perfil)
 - [x] Frontend: RetryLogPanel no Result (durante running e na tela de erro) mostrando eventos de retry com horário, mensagem e cor âmbar/vermelho; polling do analysis.get atualiza o log em tempo real
 - [x] Testes vitest (9 novos em providers.test.ts: testLlmConnection com ok/401/404/timeout/unreachable/modelo padrão; testYoutubeConnection com sem-chave/ok/403; 224/224 passando), docs e skill atualizados, Obsidian rodada-33 gerada e checkpoint final
+
+## Melhorias solicitadas (rodada 34)
+- [x] Backend: procedure testAllApiConnections — testa todos os provedores configurados (LLM padrão + YouTube) em paralelo e retorna resultado agregado
+- [x] Backend: history/list retorna resumo compacto de retentativas por análise (retry summary: total de tentativas, falhas e resultado final)
+- [x] Frontend: botão "Verificar tudo" no card Status das APIs com painel de resultados por provedor (ok/falha + latência)
+- [x] Frontend: histórico de análises (/historico) exibe badge/tooltip compacto com o resumo das retentativas de cada análise
+- [x] Testes vitest (testAllConnections, retry summary no history), docs, skill atualizada, Obsidian rodada-34
+- [ ] Deploy Vercel: confirmar/ajustar documentação DEPLOY_VERCEL.md, garantir build compatível e entregar instruções + push GitHub
+- [ ] Checkpoint final

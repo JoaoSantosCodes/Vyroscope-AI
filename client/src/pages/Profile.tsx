@@ -81,6 +81,11 @@ export default function Profile() {
   });
 
   // (Rodada 33) Teste de conexão com os providers antes de salvar
+  const [testResults, setTestResults] = useState<{
+    llm?: { status: string; message: string; latencyMs: number | null };
+    youtube?: { status: string; message: string; latencyMs: number | null };
+    summary?: string;
+  } | null>(null);
   const testConnectionMutation = trpc.profile.testApiConnection.useMutation({
     onSuccess: (res) => {
       const latency = res.latencyMs != null ? ` (${res.latencyMs} ms)` : "";
@@ -122,6 +127,15 @@ export default function Profile() {
   const testYoutubeConnection = () => {
     testConnectionMutation.mutate({ target: "youtube" });
   };
+
+  // (Rodada 34) Verificação em lote de todos os provedores
+  const testAllMutation = trpc.profile.testAllConnections.useMutation({
+    onSuccess: (res) => {
+      setTestResults({ llm: res.llm, youtube: res.youtube, summary: res.summary });
+      toast[res.ok ? "success" : "warning"](res.summary);
+    },
+    onError: (err) => toast.error(err.message),
+  });
 
   useEffect(() => {
     if (providerDialogOpen && providerQuery.data) {
@@ -522,12 +536,24 @@ export default function Profile() {
                   ela não pode ser definida por usuário. Se estiver usando o hub de dados
                   interno da Manus, a análise só funciona dentro da plataforma.
                 </p>
-                <div className="flex flex-wrap gap-2 pt-1">
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={() => testAllMutation.mutate()}
+                    disabled={testAllMutation.isPending || testConnectionMutation.isPending}
+                  >
+                    {testAllMutation.isPending && (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    )}
+                    <Zap className="mr-2 h-4 w-4" />
+                    Verificar tudo
+                  </Button>
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={testDialogLlmConnection}
-                    disabled={testConnectionMutation.isPending}
+                    disabled={testConnectionMutation.isPending || testAllMutation.isPending}
                   >
                     {testConnectionMutation.isPending && (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -539,7 +565,7 @@ export default function Profile() {
                     variant="outline"
                     size="sm"
                     onClick={testYoutubeConnection}
-                    disabled={testConnectionMutation.isPending}
+                    disabled={testConnectionMutation.isPending || testAllMutation.isPending}
                   >
                     {testConnectionMutation.isPending && (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -548,6 +574,29 @@ export default function Profile() {
                     Testar YouTube
                   </Button>
                 </div>
+                {(testAllMutation.isPending || testResults) && (
+                  <div className="space-y-2 pt-1">
+                    {(testResults?.llm || testAllMutation.isPending) && (
+                      <TestResultLine
+                        label="LLM"
+                        status={testResults?.llm?.status}
+                        message={testAllMutation.isPending ? "Testando..." : testResults?.llm?.message}
+                        latencyMs={testResults?.llm?.latencyMs ?? null}
+                      />
+                    )}
+                    {(testResults?.youtube || testAllMutation.isPending) && (
+                      <TestResultLine
+                        label="YouTube"
+                        status={testResults?.youtube?.status}
+                        message={testAllMutation.isPending ? "Testando..." : testResults?.youtube?.message}
+                        latencyMs={testResults?.youtube?.latencyMs ?? null}
+                      />
+                    )}
+                    {testResults?.summary && (
+                      <p className="text-xs text-muted-foreground">{testResults.summary}</p>
+                    )}
+                  </div>
+                )}
               </>
             ) : (
               <p className="text-sm text-muted-foreground">
@@ -593,6 +642,45 @@ export default function Profile() {
         </Card>
       </div>
     </SiteLayout>
+  );
+}
+
+/** Linha de resultado do teste em lote (Rodada 34). */
+function TestResultLine(props: {
+  label: string;
+  status?: string;
+  message?: string;
+  latencyMs: number | null;
+}) {
+  const { label, status, message, latencyMs } = props;
+  const pending = status === undefined;
+  const ok = !pending && status === "ok";
+  return (
+    <div
+      className={`flex items-center gap-2 rounded-md border p-2 text-xs ${
+        pending
+          ? "border-border/60 bg-muted/40"
+          : ok
+            ? "border-emerald-500/40 bg-emerald-500/10"
+            : "border-destructive/40 bg-destructive/10"
+      }`}
+    >
+      {pending ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+      ) : (
+        <span
+          className={`h-2 w-2 rounded-full ${ok ? "bg-emerald-500" : "bg-destructive"}`}
+          aria-hidden
+        />
+      )}
+      <span className="font-medium">{label}</span>
+      <span className={ok ? "text-emerald-400" : pending ? "text-muted-foreground" : "text-destructive"}>
+        {message ?? "aguardando..."}
+      </span>
+      {!pending && latencyMs != null && (
+        <span className="ml-auto shrink-0 text-muted-foreground">{latencyMs} ms</span>
+      )}
+    </div>
   );
 }
 
