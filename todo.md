@@ -276,12 +276,12 @@
 - [x] Push das mudanças ao GitHub
 
 ## Autenticação modular: providers próprios e UX (rodada 31)
-- [ ] Backend: provider próprio de LLM — env OPENAI_API_KEY (+ OPENAI_MODEL opcional); fallback para o Forge interno quando a chave não estiver definida; interface interna comum usada por todos os fluxos (análise, roteiros, títulos, ideias, metas)
-- [ ] Backend: provider próprio de imagem — env OPENAI_API_KEY reutilizada (dall-e-3); fallback para o Forge interno quando ausente
-- [ ] Frontend/backend: diagnóstico claro da chave de YouTube — YOUTUBE_DATA_API_KEY configurável via env; mensagem de erro diferenciada quando a chave está ausente/inválida (além da mensagem genérica de conexão)
-- [ ] Perfil: página/seção de configuração do código secreto (trocar AUTH_SECRET_CODE via UI) — procedure setSecretCode e UI no /perfil com campo de novo código + confirmação
-- [ ] Login: feedback visual do método de auth ativo (badge/pill "Autenticação local" ou "Manus OAuth" na tela de login, baseado em VITE_AUTH_PROVIDER)
-- [ ] Testes vitest das novas funcionalidades (LLM provider x3, imagem x2, setSecretCode x2, diagnóstico YouTube x2)
-- [ ] Atualizar DEPLOY_VERCEL.md/README.md com OPENAI_API_KEY e YOUTUBE_DATA_API_KEY
-- [ ] Push ao GitHub, skill vyroscope-video-analyst atualizada e validada
-- [ ] Documentação da rodada 31 para o Obsidian e checkpoint
+- [x] Backend: provider próprio de LLM — env OPENAI_API_KEY (+ OPENAI_MODEL opcional); fallback para o Forge interno quando a chave não estiver definida; interface interna comum usada por todos os fluxos (análise, roteiros, títulos, ideias, metas)
+- [x] Backend: provider próprio de imagem — env OPENAI_API_KEY reutilizada (dall-e-3); fallback para o Forge interno quando ausente
+- [x] Frontend/backend: diagnóstico claro da chave de YouTube — YOUTUBE_DATA_API_KEY configurável via env; mensagem de erro diferenciada quando a chave está ausente/inválida (além da mensagem genérica de conexão)
+- [x] Perfil: página/seção de configuração do código secreto (trocar AUTH_SECRET_CODE via UI) — procedure setSecretCode e UI no /perfil com campo de novo código + confirmação (código pessoal por usuário com AUTH_ALLOW_PERSONAL_CODES)
+- [x] Login: feedback visual do método de auth ativo (pill "Autenticação local ativa" no LocalLoginForm; badge "Acesso local"/"Login via conta" no SiteLayout e DashboardLayout, baseado em VITE_AUTH_PROVIDER)
+- [x] Testes vitest das novas funcionalidades — authProvider.test.ts com 18 testes (códigos pessoais via vi.mock("./db") com testUser em memória); suíte completa 200/200
+- [x] Atualizar DEPLOY_VERCEL.md/README.md com OPENAI_API_KEY e YOUTUBE_DATA_API_KEY (tabela de envs + tabela de providers + seção código pessoal)
+- [x] Push ao GitHub (commit 6ad5d11 na branch main), skill vyroscope-video-analyst atualizada (SKILL.md + features-roadmap.md) e validada
+- [x] Documentação da rodada 31 para o Obsidian (rodada-31-obsidian.md) e checkpoint (6ad5d114)
