@@ -309,5 +309,5 @@
 - [x] Frontend: botão "Verificar tudo" no card Status das APIs com painel de resultados por provedor (ok/falha + latência)
 - [x] Frontend: histórico de análises (/historico) exibe badge/tooltip compacto com o resumo das retentativas de cada análise
 - [x] Testes vitest (testAllConnections, retry summary no history), docs, skill atualizada, Obsidian rodada-34
-- [ ] Deploy Vercel: confirmar/ajustar documentação DEPLOY_VERCEL.md, garantir build compatível e entregar instruções + push GitHub
-- [ ] Checkpoint final
+- [x] Deploy Vercel: confirmar/ajustar documentação DEPLOY_VERCEL.md, garantir build compatível e entregar instruções + push GitHub
+- [x] Checkpoint final
