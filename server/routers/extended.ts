@@ -520,6 +520,31 @@ export const extendedRouter = router({
       }
       return getYearComparison(ctx.user.id, years);
     }),
+  /** Galeria de conquistas: anos completos (todos os meses contabilizados
+   *  cumpriram a meta) como selos acumulados. Rodada 25. */
+  achievements: protectedProcedure.query(async ({ ctx }) => {
+    const { getUserAchievements } = await import("../db");
+    return getUserAchievements(ctx.user.id);
+  }),
+  /** Feedback de início de mês: se a meta do mês anterior não foi atingida,
+   *  sugere ajustes com base na média recente de publicações. Rodada 25. */
+  missedGoalFeedback: protectedProcedure.query(async ({ ctx }) => {
+    const { getMissedGoalFeedback } = await import("../db");
+    return getMissedGoalFeedback(ctx.user.id);
+  }),
+  /** Comparativo mês a mês entre dois anos (barras agrupadas lado a lado).
+   *  Rodada 25. */
+  yearComparisonByMonth: protectedProcedure
+    .input(z.object({ years: z.tuple([z.number().int().min(2020).max(2100), z.number().int().min(2020).max(2100)]).optional() }))
+    .query(async ({ ctx, input }) => {
+      const { getYearComparisonByMonth } = await import("../db");
+      const now = new Date().getFullYear();
+      const years = input?.years ?? ([now - 1, now] as [number, number]);
+      if (years[0] >= years[1]) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "O primeiro ano deve ser anterior ao segundo." });
+      }
+      return getYearComparisonByMonth(ctx.user.id, years);
+    }),
   /** Streak de meses consecutivos com a meta de publicações cumprida
    *  (retrocedendo do mês corrente, exclusive). Rodada 20. */
   pinnedGoalStreak: protectedProcedure.query(async ({ ctx }) => {
@@ -857,10 +882,10 @@ export const extendedRouter = router({
    *  publicados/meta/%/cumprida + agregados (total, metas cumpridas, média
    *  de dias, melhor mês). Rodada 23. */
   yearSummary: protectedProcedure
-    .input(z.object({ year: z.number().int().min(2020).max(2100).optional() }))
+    .input(z.object({ year: z.number().int().min(2020).max(2100).optional() }).optional())
     .query(async ({ ctx, input }) => {
       const { getYearSummary } = await import("../db");
-      return getYearSummary(ctx.user.id, input.year);
+      return getYearSummary(ctx.user.id, input?.year);
     }),
   /** Exporta o PDF consolidado do "Ano em números". Rodada 23. */
   exportYearPdf: protectedProcedure

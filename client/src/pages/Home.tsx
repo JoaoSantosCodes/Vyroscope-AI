@@ -392,6 +392,20 @@ function IdeaOfTheDayCard() {
     endAlert.reachable &&
     endAlert.needsN > 0;
 
+  // ===== Feedback de início de mês (rodada 25) =====
+  // Mostra nos primeiros 5 dias quando a meta do mês anterior não foi atingida,
+  // sugerindo ajustes com base na média recente de publicações.
+  const missedGoalQuery = trpc.extended.missedGoalFeedback.useQuery(undefined, {
+    refetchInterval: 15 * 60 * 1000,
+    enabled: !showGoalAlert && !showEndOfMonthAlert,
+  });
+  const missedAlert = missedGoalQuery.data;
+  const showMissedGoalFeedback =
+    missedGoalQuery.isSuccess &&
+    !!missedAlert &&
+    missedAlert.isMonthStart &&
+    missedAlert.missed;
+
   const archivePublishedMutation = trpc.extended.archivePublishedIdeas.useMutation({
     onSuccess: (data) => {
       utils.extended.listPinnedIdeas.invalidate();
@@ -443,6 +457,19 @@ function IdeaOfTheDayCard() {
           <span className="animate-pulse text-emerald-500">●</span>
           <span className="flex-1 text-xs sm:text-sm">
             <strong className="text-emerald-500">Fim do mês</strong>: faltam <strong className="text-emerald-500">{endAlert.needsN} publicação{endAlert.needsN === 1 ? "" : "s"}</strong> para atingir a meta de {endAlert.goal} até o dia {endAlert.remainingDays === 0 ? "último" : `${endAlert.remainingDays} do mês`} — ainda dá tempo, continue no ritmo!
+          </span>
+        </button>
+      )}
+      {/* Feedback de meta não atingida no mês anterior (rodada 25) */}
+      {showMissedGoalFeedback && missedAlert && (
+        <button
+          type="button"
+          onClick={() => navigate("/ideia-do-dia")}
+          className="mb-4 flex w-full max-w-2xl items-center gap-2.5 rounded-lg border border-sky-500/50 bg-sky-500/10 px-4 py-2.5 text-left transition-colors hover:border-sky-500/70 hover:bg-sky-500/15"
+        >
+          <span className="animate-pulse text-sky-500">●</span>
+          <span className="flex-1 text-xs sm:text-sm">
+            <strong className="text-sky-500">Meta de {missedAlert.previousMonthKey} não atingida</strong>: {missedAlert.published} de {missedAlert.goal} publicações — {missedAlert.suggestion}
           </span>
         </button>
       )}

@@ -975,3 +975,96 @@ export async function getYearComparison(userId: number, years: [number, number])
   const deltaAnnualGoal = current.annualGoal - previous.annualGoal;
   return { current, previous, deltaPublished, deltaMetMonths, deltaAnnualGoal, currentBetter: current.published > previous.published };
 }
+/* ==================== Rodada 25: galeria de conquistas, feedback de início de mês e comparativo mês a mês ==================== */
+/** Galeria de conquistas: retorna os anos completos do usuário (todos os meses
+ * contabilizados cumpriram a meta) como selos, do mais recente para o mais
+ * antigo, mais o total de anos analisados. Rodada 25. */
+export async function getUserAchievements(userId: number): Promise<{
+  badges: { year: number; published: number; annualGoal: number; metMonths: number }[];
+  totalYearsChecked: number;
+}> {
+  const db = await getDb();
+  if (!db) return { badges: [], totalYearsChecked: 0 };
+  const now = new Date();
+  // Verifica do ano anterior até 2020 (anos futuros parciais não contam como selo)
+  const badges: Awaited<ReturnType<typeof getUserAchievements>>["badges"] = [];
+  let totalYearsChecked = 0;
+  for (let y = now.getFullYear() - 1; y >= 2020; y -= 1) {
+    totalYearsChecked += 1;
+    const agg = await getAnnualGoal(userId, y);
+    if (agg.monthsCounted > 0 && agg.yearComplete) {
+      badges.push({ year: y, published: agg.published, annualGoal: agg.annualGoal, metMonths: agg.metMonths });
+    }
+  }
+  return { badges, totalYearsChecked };
+}
+/** Feedback de início de mês: avalia o mês anterior — se a meta não foi
+ * atingida, devolve o contexto e uma sugestão de ajuste (reduzir a meta para o
+ * ritmo histórico ou manter com plano de ação). Rodada 25. */
+export async function getMissedGoalFeedback(userId: number): Promise<{
+  isMonthStart: boolean;
+  previousMonthKey: string;
+  published: number;
+  goal: number;
+  missed: boolean;
+  suggestion: string;
+  avgPublishedPerMonth: number | null;
+}> {
+  const db = await getDb();
+  const now = new Date();
+  const dayNow = now.getDate();
+  const isMonthStart = dayNow <= 5;
+  const prev = new Date(now.getFullYear(), now.getMonth(), 0);
+  const prevKey = monthKeyOf(prev);
+  const stats = await getPinnedProductionStats(userId, prevKey);
+  const { goal, publishedThisMonth } = stats;
+  const missed = publishedThisMonth < goal;
+  // Média de publicações por mês nos últimos 6 meses (excluindo o anterior já incluso via histórico? inclui)
+  const history = await getMonthlyHistory(userId, 6);
+  const avgPublishedPerMonth =
+    history.length > 0 ? Math.round((history.reduce((s, m) => s + m.publishedThisMonth, 0) / history.length) * 10) / 10 : null;
+  let suggestion = "";
+  if (!missed) {
+    suggestion = "A meta do mês anterior foi atingida — continue nesse ritmo e avalie elevar a meta gradualmente.";
+  } else if (avgPublishedPerMonth !== null && avgPublishedPerMonth > 0 && goal > Math.ceil(avgPublishedPerMonth)) {
+    suggestion = `No mês anterior, ${publishedThisMonth} de ${goal} publicações (${goal - publishedThisMonth} a menos). Sua média recente é de ${avgPublishedPerMonth} publicações/mês — considere ajustar a meta para ${Math.ceil(avgPublishedPerMonth)} ou planejar as faltantes no início deste mês.`;
+  } else if (avgPublishedPerMonth !== null && avgPublishedPerMonth === 0) {
+    suggestion = `O mês anterior terminou com 0 de ${goal} publicações. Comece o mês com pelo menos uma ideia fixada no quadro Kanban para retomar o ritmo.`;
+  } else {
+    suggestion = `O mês anterior terminou com ${publishedThisMonth} de ${goal} publicações (${goal - publishedThisMonth} a menos). Use o quadro Kanban para planejar as pendências logo no início do mês.`;
+  }
+  return { isMonthStart, previousMonthKey: prevKey, published: publishedThisMonth, goal, missed, suggestion, avgPublishedPerMonth };
+}
+/** Comparativo mês a mês entre dois anos: para cada mês (1..12) devolve as
+ * publicações e metas de cada ano, permitindo barras agrupadas lado a lado.
+ * Rodada 25. */
+export async function getYearComparisonByMonth(userId: number, years: [number, number]): Promise<{
+  previousYear: number;
+  currentYear: number;
+  months: {
+    monthKey: string;
+    label: string;
+    previous: { published: number; goal: number; met: boolean };
+    current: { published: number; goal: number; met: boolean };
+  }[];
+}> {
+  const [prevSummary, currSummary] = await Promise.all([getYearSummary(userId, years[0]), getYearSummary(userId, years[1])]);
+  const months: Awaited<ReturnType<typeof getYearComparisonByMonth>>["months"] = [];
+  // 12 meses (mês corrente de curr em diante fica fora em getYearSummary; alinhamos pelo número do mês)
+  for (let m = 1; m <= 12; m += 1) {
+    const key = `${years[1]}-${String(m).padStart(2, "0")}`;
+    const label = new Date(years[1], m - 1, 1).toLocaleDateString("pt-BR", { month: "short" });
+    const pmKey = `${years[0]}-${String(m).padStart(2, "0")}`;
+    const prev: (Awaited<ReturnType<typeof getYearSummary>>["months"])[number] | undefined = prevSummary.months.find((pm) => pm.monthKey === pmKey);
+    const curr: (Awaited<ReturnType<typeof getYearSummary>>["months"])[number] | undefined = currSummary.months.find((cm) => cm.monthKey === key);
+    // Só inclui meses que existam em pelo menos um dos anos
+    if (!prev && !curr) break;
+    months.push({
+      monthKey: key,
+      label,
+      previous: prev ? { published: prev.publishedThisMonth, goal: prev.goal, met: prev.met } : { published: 0, goal: 0, met: false },
+      current: curr ? { published: curr.publishedThisMonth, goal: curr.goal, met: curr.met } : { published: 0, goal: 0, met: false },
+    });
+  }
+  return { previousYear: years[0], currentYear: years[1], months };
+}

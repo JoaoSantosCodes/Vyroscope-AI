@@ -1,4 +1,3 @@
-import { useAuth } from "@/_core/hooks/useAuth";
 import { useLocation } from "wouter";
 import { useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -28,7 +27,6 @@ import {
 } from "lucide-react";
 
 export default function Streaks() {
-  const { isAuthenticated } = useAuth();
   const [, navigate] = useLocation();
   const streakQuery = trpc.extended.pinnedGoalStreak.useQuery(undefined, {
     refetchInterval: 15 * 60 * 1000,
@@ -52,7 +50,7 @@ export default function Streaks() {
   });
 
   // ===== Ano em números (rodada 23) =====
-  const yearSummaryQuery = trpc.extended.yearSummary.useQuery({}, {
+  const yearSummaryQuery = trpc.extended.yearSummary.useQuery(undefined, {
     refetchOnWindowFocus: false,
     staleTime: 5 * 60 * 1000,
   });
@@ -80,6 +78,18 @@ export default function Streaks() {
   );
   const ag = annualGoalQuery.data;
 
+  // ===== Galeria de conquistas (rodada 25): selos de "Ano Completo" =====
+  const achievementsQuery = trpc.extended.achievements.useQuery(undefined, {
+    refetchOnWindowFocus: false,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // ===== Comparativo mês a mês (rodada 25): barras lado a lado =====
+  const compareByMonthQuery = trpc.extended.yearComparisonByMonth.useQuery(
+    { years: [compareYear ?? year - 1, year] as [number, number] },
+    { refetchOnWindowFocus: false, staleTime: 5 * 60 * 1000, enabled: compareYear !== null }
+  );
+
   // ===== Persistência da celebração (rodada 23): rever confetes =====
   const celebrationsQuery = trpc.extended.listGoalCelebrations.useQuery(undefined, {
     refetchOnWindowFocus: false,
@@ -89,8 +99,6 @@ export default function Streaks() {
     onError: (err) => toast.error(err.message || "Falha ao registrar a celebração."),
   });
   const [replayCount, setReplayCount] = useState<number>(0);
-
-  if (!isAuthenticated) return null;
 
   return (
     <DashboardLayout>
@@ -463,20 +471,84 @@ export default function Streaks() {
                       {tile.delta !== 0 ? " vs ano anterior" : " sem variação"}
                     </div>
                   ) : null}
+                                </div>
+              ))}
+            </div>
+            {/* Gráfico mês a mês (rodada 25): barras lado a lado de {compareYear} vs {year} */}
+            {compareByMonthQuery.data && compareByMonthQuery.data.months.length > 0 && (
+              <div className="mt-4">
+                <div className="mb-2 flex items-center gap-3 text-[10px] uppercase tracking-wide text-muted-foreground">
+                  <span className="flex items-center gap-1">
+                    <span className="inline-block h-2 w-2 rounded-full bg-purple-500/70" />
+                    {compareByMonthQuery.data.previousYear}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="inline-block h-2 w-2 rounded-full bg-primary/80" />
+                    {compareByMonthQuery.data.currentYear}
+                  </span>
+                </div>
+                <ResponsiveContainer width="100%" height={180}>
+                  <BarChart data={compareByMonthQuery.data.months} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
+                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: "var(--text-muted)" }} axisLine={false} tickLine={false} />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: "var(--text-muted)" }} axisLine={false} tickLine={false} width={22} />
+                    <ChartTooltip
+                      cursor={{ fill: "rgba(255,255,255,0.05)" }}
+                      contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", fontSize: 11, borderRadius: 6 }}
+                      formatter={(value: number, name: string) => [
+                        value,
+                        name === "previous" ? String(compareByMonthQuery.data!.previousYear) : String(compareByMonthQuery.data!.currentYear),
+                      ]}
+                    />
+                    <Bar dataKey={(d: { previous: { published: number } }) => d.previous.published} name="previous" fill="rgba(168,85,247,0.7)" radius={[2, 2, 0, 0]} maxBarSize={14} />
+                    <Bar dataKey={(d: { current: { published: number } }) => d.current.published} name="current" fill="hsl(38 92% 50%)" radius={[2, 2, 0, 0]} maxBarSize={14} />
+                  </BarChart>
+                </ResponsiveContainer>
+                <div className="mt-1 text-center text-[10px] text-muted-foreground">Publicações por mês · {compareYear ?? year - 1} vs {year}</div>
+              </div>
+            )}
+          </div>
+        )}
+        {/* Galeria de conquistas (rodada 25): selos de "Ano Completo" acumulados */}
+        {(achievementsQuery.data?.badges.length ?? 0) > 0 && (
+          <div className="mt-6">
+            <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold text-foreground">
+              <Trophy className="h-4 w-4 text-amber-500" />
+              Galeria de conquistas
+            </h2>
+            <p className="mb-3 text-[11px] text-muted-foreground">
+              {achievementsQuery.data ? `${achievementsQuery.data.badges.length} de ${achievementsQuery.data.totalYearsChecked} anos analisados terminaram com a meta cumprida em todos os meses.` : ""}
+            </p>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {(achievementsQuery.data?.badges ?? []).map((b) => (
+                <div
+                  key={b.year}
+                  className="flex items-center gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3"
+                >
+                  <Award className="h-7 w-7 shrink-0 text-amber-500" />
+                  <div>
+                    <div className="text-[12px] font-bold text-amber-500">SELO · ANO COMPLETO {b.year}</div>
+                    <div className="text-[10px] text-muted-foreground">
+                      {b.metMonths} de {b.metMonths} metas cumpridas · {b.published}/{b.annualGoal} publicações
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
           </div>
         )}
-
-        {/* Persistência da celebração (rodada 23): rever os confetes de metas atingidas */}
+        {/* Persistência da celebração (rodada 23): rever os confetes de metas atingidas.
+            O GoalCelebrationView usa hooks internos, então deve ser renderizado SEMPRE
+            (nunca dentro de bloco condicional) — a visibilidade é controlada pela prop show. */}
+        <GoalCelebrationView
+          triggerKey={replayCount}
+          show={(celebrationsQuery.data?.length ?? 0) > 0}
+        />
         {(celebrationsQuery.data?.length ?? 0) > 0 && (
           <div className="mt-6">
             <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold text-foreground">
               <PartyPopper className="h-4 w-4 text-emerald-500" />
               Metas celebradas
             </h2>
-            <GoalCelebrationView triggerKey={replayCount} />
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <Button
                 variant="outline"

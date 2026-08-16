@@ -47,17 +47,24 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const [sidebarWidth, setSidebarWidth] = useState(() => {
-    const saved = localStorage.getItem(SIDEBAR_WIDTH_KEY);
+    let saved: string | null = null;
+    try {
+      saved = localStorage.getItem(SIDEBAR_WIDTH_KEY);
+    } catch {
+      // Storage unavailable/blocked — non-fatal.
+    }
     return saved ? parseInt(saved, 10) : DEFAULT_WIDTH;
   });
   const { loading, user } = useAuth();
-
   useEffect(() => {
-    localStorage.setItem(SIDEBAR_WIDTH_KEY, sidebarWidth.toString());
+    try {
+      localStorage.setItem(SIDEBAR_WIDTH_KEY, sidebarWidth.toString());
+    } catch {
+      // Storage unavailable/blocked — non-fatal.
+    }
   }, [sidebarWidth]);
-
   if (loading) {
-    return <DashboardLayoutSkeleton />
+    return <DashboardLayoutSkeleton />;
   }
 
   if (!user) {

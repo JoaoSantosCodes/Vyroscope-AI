@@ -301,6 +301,9 @@ vi.mock("./db", async (importOriginal) => {
     getEndOfMonthGoalAlert: vi.fn(),
     getAnnualGoal: vi.fn(),
     getYearComparison: vi.fn(),
+    getUserAchievements: vi.fn(),
+    getMissedGoalFeedback: vi.fn(),
+    getYearComparisonByMonth: vi.fn(),
   };
 });
 
@@ -337,6 +340,9 @@ const mockedInsertSuggestion = vi.mocked(db.insertGoalSuggestion);
 const mockedEndOfMonthAlert = vi.mocked(db.getEndOfMonthGoalAlert);
 const mockedAnnualGoal = vi.mocked(db.getAnnualGoal);
 const mockedYearComparison = vi.mocked(db.getYearComparison);
+const mockedUserAchievements = vi.mocked(db.getUserAchievements);
+const mockedMissedGoalFeedback = vi.mocked(db.getMissedGoalFeedback);
+const mockedYearComparisonByMonth = vi.mocked(db.getYearComparisonByMonth);
 
 const folderUser = {
   id: 2,
@@ -1313,5 +1319,71 @@ describe("rodada 24: endOfMonthGoalAlert / annualGoal / yearComparison", () => {
   it("yearComparison rejeita quando o primeiro ano não é anterior ao segundo", async () => {
     const caller = appRouter.createCaller(createFolderCtx());
     await expect(caller.extended.yearComparison({ years: [2026, 2026] })).rejects.toThrow();
+  });
+});
+
+describe("rodada 25", () => {
+  it("achievements lista os anos completos como selos acumulados", async () => {
+    mockedUserAchievements.mockResolvedValueOnce({
+      badges: [
+        { year: 2025, published: 48, annualGoal: 48, metMonths: 12 },
+        { year: 2024, published: 36, annualGoal: 36, metMonths: 12 },
+      ],
+      totalYearsChecked: 6,
+    } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.achievements();
+    expect(result.badges).toHaveLength(2);
+    expect(result.badges[0].year).toBe(2025);
+    expect(result.totalYearsChecked).toBe(6);
+    expect(mockedUserAchievements).toHaveBeenCalledWith(2);
+  });
+
+  it("missedGoalFeedback devolve o feedback do mês anterior quando a meta falhou", async () => {
+    mockedMissedGoalFeedback.mockResolvedValueOnce({
+      isMonthStart: true,
+      previousMonthKey: "2026-07",
+      published: 2,
+      goal: 4,
+      missed: true,
+      suggestion: "ajuste sugerido",
+      avgPublishedPerMonth: 2.5,
+    } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.missedGoalFeedback();
+    expect(result.missed).toBe(true);
+    expect(result.previousMonthKey).toBe("2026-07");
+    expect(result.suggestion).toBeTruthy();
+    expect(mockedMissedGoalFeedback).toHaveBeenCalledWith(2);
+  });
+
+  it("yearComparisonByMonth devolve as séries mensais alinhadas", async () => {
+    mockedYearComparisonByMonth.mockResolvedValueOnce({
+      previousYear: 2025,
+      currentYear: 2026,
+      months: [
+        { monthKey: "2026-01", label: "jan", previous: { published: 3, goal: 4, met: false }, current: { published: 4, goal: 4, met: true } },
+        { monthKey: "2026-02", label: "fev", previous: { published: 4, goal: 4, met: true }, current: { published: 2, goal: 4, met: false } },
+      ],
+    } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.yearComparisonByMonth({ years: [2025, 2026] });
+    expect(result.months).toHaveLength(2);
+    expect(result.months[0].previous.published).toBe(3);
+    expect(result.currentYear).toBe(2026);
+    expect(mockedYearComparisonByMonth).toHaveBeenCalledWith(2, [2025, 2026]);
+  });
+
+  it("yearComparisonByMonth usa [ano-1, ano] como padrão e rejeita ordem invertida", async () => {
+    mockedYearComparisonByMonth.mockResolvedValueOnce({
+      previousYear: 2025,
+      currentYear: 2026,
+      months: [],
+    } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.yearComparisonByMonth({});
+    expect(mockedYearComparisonByMonth).toHaveBeenCalledWith(2, [2025, 2026]);
+    expect(result.previousYear).toBe(2025);
+    await expect(caller.extended.yearComparisonByMonth({ years: [2026, 2026] })).rejects.toThrow();
   });
 });

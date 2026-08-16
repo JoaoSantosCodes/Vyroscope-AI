@@ -10,6 +10,9 @@ const celebratedKey = (monthKey: string) => `vyroscope-goal-celebrated-${monthKe
 export type GoalCelebrationProps = {
   /** Chave arbitrária: mudar o valor dispara a animação (rodada 23). */
   triggerKey?: number;
+  /** Quando false, o componente nunca exibe a celebração (permite montá-lo
+   *  fora de blocos condicionais, respeitando as regras de hooks do React). */
+  show?: boolean;
 };
 
 /** Partículas simples de confete que caem a partir do topo da faixa.
@@ -25,7 +28,7 @@ export default function GoalCelebrationView(props: GoalCelebrationProps = {}) {
     if (typeof window === "undefined") return false;
     return window.sessionStorage.getItem(celebratedKey(currentMonthKey)) === "1";
   });
-  const [visible, setVisible] = useState<boolean>(() => !celebrated);
+  const [visible, setVisible] = useState<boolean>(() => (props.show ?? true) && !celebrated);
   // Rodada 23: `triggerKey` aumenta a cada "rever confetes" (servidor ou botão),
   // reexibindo o canhão mesmo quando a celebração do mês já foi registrada.
   const [triggerKey, setTriggerKey] = useState<number>(props.triggerKey ?? 0);

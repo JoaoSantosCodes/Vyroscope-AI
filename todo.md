@@ -218,3 +218,11 @@
 - [x] Atualizar habilidade vyroscope-video-analyst com a rodada 24 (SKILL.md: seção "End-of-month goal alert, year comparison and annual goal seal (round 24)" + quick reference passo 7; features-roadmap.md: parágrafo Round 24 + helpers getEndOfMonthGoalAlert/getAnnualGoal/getYearComparison)
 - [x] Gerar documentação da rodada 24 em Markdown para o vault Obsidian do usuário (entrega de arquivo em /home/ubuntu/rodada-24-obsidian.md; o vault local G:\Obsidian não é acessível a partir deste ambiente)
 - [x] Verificação visual (/streaks com toggles e meta anual, home intacta, 168 testes) e checkpoint da rodada 24 (publicado via auto-publish)
+
+## Melhorias solicitadas (rodada 25)
+- [x] Galeria de conquistas na página /streaks: listar os selos de "Ano Completo" acumulados pelo usuário (getUserAchievements deriva de getAnnualGoal por ano; procedure achievements com badges { year, published, annualGoal, metMonths } + totalYearsChecked)
+- [x] Notificação de feedback no início do mês: banner na Home (dias 1–5) quando o mês anterior não atingiu a meta (getMissedGoalFeedback: isMonthStart && missed), sugerindo ajustes com base na média dos últimos 6 meses
+- [x] Gráfico de barras lado a lado no comparativo de anos: barras agrupadas por mês (2025 vs 2026) no painel Ano em números quando a comparação está ativa (getYearComparisonByMonth + BarChart com 2 séries purple/âmbar)
+- [x] Testes vitest das novas funcionalidades (172 testes: achievements x1, missedGoalFeedback x1, yearComparisonByMonth x2 + mocks no db)
+- [x] Atualizar habilidade vyroscope-video-analyst com a rodada 25
+- [x] Verificação visual e checkpoint da rodada 25
