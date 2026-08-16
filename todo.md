@@ -139,4 +139,12 @@
 - [x] Kanban: filtro "Ocultar publicadas" — checkbox que esconde a coluna Publicada, persistido na sessão via sessionStorage (vyroscope-kanban-hide-published)
 - [x] Kanban: alerta visual de estagnação — badge âmbar "Estagnada há Xd" (tooltip) para ideias em "Gravando" há mais de 7 dias (limiar em STAGNATION_DAYS)
 - [x] Testes vitest das novas funcionalidades (92 testes: buildIdeaHistoryCsv com Status x4, listPinnedIdeas com status/statusChangedAt, updateIdeaStatus com timestamp)
+- [x] Verificação visual (screenshots desktop e mobile) e checkpoint fe0bd07c salvo (auto-publicado)
+
+## Melhorias solicitadas (rodada 16)
+- [ ] Kanban: opção de ordenação das colunas pelo tempo no status atual (toggle "Mais antigas primeiro" — ideias com statusChangedAt mais antigo no topo), estado persistente na sessão
+- [ ] Kanban: animação de transição suave + destaque visual temporário (pulse/brilho âmbar) ao mover card entre colunas
+- [ ] Kanban: botão de edição rápida de notas no card (modal/popover inline com salvar rápido, sem abrir o detalhe completo)
+- [ ] Testes vitest das novas funcionalidades
+- [ ] Atualizar habilidade vyroscope-video-analyst com a rodada 16
 - [ ] Verificação visual e checkpoint

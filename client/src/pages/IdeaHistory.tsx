@@ -23,7 +23,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { buildIdeaHistoryCsv, exportIdeaHistoryCsv } from "@/lib/export";
 import { formatDate, scoreColor, scoreLabel } from "@/lib/score";
 import { trpc } from "@/lib/trpc";
-import { FileText, Lightbulb, Loader2, Pin, PinOff, Radar, Search, StickyNote } from "lucide-react";
+import { ArrowUpDown, Edit3, FileText, Lightbulb, Loader2, Pin, PinOff, Radar, Search, StickyNote } from "lucide-react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 
@@ -334,6 +334,16 @@ export default function IdeaHistory() {
 
   const ideas: HistoryIdea[] = historyQuery.data?.ideas ?? [];
   const pinned: PinnedIdea[] = pinnedQuery.data?.ideas ?? [];
+
+  // ===== Edição rápida de notas no card (modal compacto) =====
+  const [quickNoteId, setQuickNoteId] = useState<number | null>(null);
+  const quickNoteDraft = useRef<string>("");
+  const [quickNoteOpen, setQuickNoteOpen] = useState(false);
+  const openQuickNote = (pinnedId: number) => {
+    quickNoteDraft.current = pinned.find((p) => p.id === pinnedId)?.notes ?? "";
+    setQuickNoteId(pinnedId);
+    setQuickNoteOpen(true);
+  };
   const niches = historyQuery.data?.filters?.niches ?? [];
   const today = new Date().toISOString().slice(0, 10);
 
@@ -420,6 +430,36 @@ export default function IdeaHistory() {
     { key: "publicada", label: "Publicada", accent: "border-emerald-500/50" },
   ] as const;
 
+  // ===== Ordenação das colunas pelo tempo no status atual =====
+  const [oldestFirst, setOldestFirst] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem("vyroscope-kanban-oldest-first") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleOldestFirst = (value: boolean) => {
+    setOldestFirst(value);
+    try {
+      sessionStorage.setItem("vyroscope-kanban-oldest-first", value ? "1" : "0");
+    } catch {
+      // sessionStorage indisponível: segue só em memória
+    }
+  };
+  const columnSortKey = (p: PinnedIdea) => new Date(p.statusChangedAt ?? p.createdAt).getTime();
+
+  // ===== Destaque temporário ao mover card entre colunas =====
+  const [highlightedId, setHighlightedId] = useState<number | null>(null);
+  const highlightRef = useRef<number | null>(null);
+  const moveCard = (pinnedId: number) => {
+    setHighlightedId(pinnedId);
+    if (highlightRef.current) window.clearTimeout(highlightRef.current);
+    highlightRef.current = window.setTimeout(() => {
+      highlightRef.current = null;
+      setHighlightedId((current) => (current === pinnedId ? null : current));
+    }, 1500);
+  };
+
   // ===== Filtro: ocultar publicadas (persistido na sessão via sessionStorage) =====
   const [hidePublished, setHidePublished] = useState<boolean>(() => {
     try {
@@ -474,6 +514,7 @@ export default function IdeaHistory() {
     if (!moved) return;
     if (statusMutation.isPending) return;
     statusMutation.mutate({ pinnedId: moved.id, status: status as "planejada" | "gravando" | "publicada" });
+    moveCard(moved.id);
   };
 
   // ===== Anotações pessoais =====
@@ -652,11 +693,26 @@ export default function IdeaHistory() {
               {hidePublished && (
                 <span className="text-[11px] text-muted-foreground/70">A coluna "Publicada" fica oculta apenas nesta sessão.</span>
               )}
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 accent-primary"
+                  checked={oldestFirst}
+                  onChange={(e) => toggleOldestFirst(e.target.checked)}
+                />
+                <ArrowUpDown className="h-3 w-3" /> Mais antigas no status primeiro
+              </label>
+              {oldestFirst && (
+                <span className="text-[11px] text-muted-foreground/70">Ideias com mais tempo no status atual ficam no topo da coluna.</span>
+              )}
             </div>
             <div className="grid gap-4 md:grid-cols-3">
               {STATUS_LIST.map(({ key, label, accent }) => {
                 if (hidePublished && key === "publicada") return null;
-                const column = pinned.filter((p) => p.status === key);
+                let column = pinned.filter((p) => p.status === key);
+                if (oldestFirst) {
+                  column = [...column].sort((a, b) => columnSortKey(a) - columnSortKey(b));
+                }
                 return (
                   <div key={key} className="flex flex-col rounded-lg border border-border bg-card/50">
                     <div className={`flex items-center justify-between border-b-2 px-3 py-2 ${accent}`}>
@@ -670,7 +726,7 @@ export default function IdeaHistory() {
                           <Card
                             key={p.id}
                             draggable
-                            className="flex flex-col cursor-grab border-primary/30 bg-primary/5 active:cursor-grabbing"
+                            className={`flex flex-col cursor-grab border-primary/30 bg-primary/5 active:cursor-grabbing ${highlightedId === p.id ? "vy-kanban-moved" : ""}`}
                             onDragStart={() => handleKanbanDragStart(key, idx)}
                             onDragOver={(e) => e.preventDefault()}
                             onDrop={() => handleKanbanDrop(key, idx)}
@@ -695,7 +751,7 @@ export default function IdeaHistory() {
                                   <PinOff className="h-3.5 w-3.5" />
                                 </Button>
                               </div>
-                              <h3 className="mt-1 font-display text-base font-semibold leading-snug">{p.suggestionTitle}</h3>
+                              <h3 className={`mt-1 font-display text-base font-semibold leading-snug ${highlightedId === p.id ? "text-amber-400" : ""}`}>{p.suggestionTitle}</h3>
                               <div className="mt-auto flex flex-wrap items-center gap-1.5 pt-3">
                                 <Select
                                   value={p.status}
@@ -746,9 +802,19 @@ export default function IdeaHistory() {
                                 {p.viralityScore != null ? ` · score ${p.viralityScore}` : ""}
                               </p>
                               <div className="mt-3">
-                                <Label htmlFor={`note-${p.id}`} className="mb-1 flex items-center gap-1 text-[11px] font-medium">
-                                  <StickyNote className="h-3 w-3" /> Anotações
-                                </Label>
+                                <div className="mb-1 flex items-center justify-between">
+                                  <span className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
+                                    <StickyNote className="h-3 w-3" /> Anotações
+                                  </span>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-5 gap-1 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+                                    onClick={() => openQuickNote(p.id)}
+                                  >
+                                    <Edit3 className="h-2.5 w-2.5" /> Editar rápida
+                                  </Button>
+                                </div>
                                 <textarea
                                   id={`note-${p.id}`}
                                   rows={2}
@@ -913,6 +979,56 @@ export default function IdeaHistory() {
       </div>
 
       <OutlineDialog outline={outline} onOpenChange={(open) => !open && setOutline(null)} />
+
+      {/* Edição rápida de notas: modal compacto sem abrir o detalhe completo */}
+      <Dialog open={quickNoteOpen} onOpenChange={setQuickNoteOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-sm">Editar anotação</DialogTitle>
+          </DialogHeader>
+          {quickNoteId != null && (
+            <div className="space-y-3">
+              <p className="text-xs font-medium text-muted-foreground">
+                {pinned.find((p) => p.id === quickNoteId)?.suggestionTitle}
+              </p>
+              <textarea
+                autoFocus
+                rows={4}
+                maxLength={2000}
+                placeholder="Rascunhos ou observações sobre essa ideia…"
+                defaultValue={quickNoteDraft.current}
+                onChange={(e) => {
+                  quickNoteDraft.current = e.target.value;
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                    e.preventDefault();
+                    commitNote(quickNoteId, quickNoteDraft.current);
+                    setQuickNoteOpen(false);
+                    toast.success("Anotação salva.");
+                  }
+                }}
+                className="w-full resize-y rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-foreground placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+              <DialogFooter className="gap-2">
+                <Button variant="outline" size="sm" onClick={() => setQuickNoteOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    commitNote(quickNoteId, quickNoteDraft.current);
+                    setQuickNoteOpen(false);
+                    toast.success("Anotação salva.");
+                  }}
+                >
+                  Salvar
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </SiteLayout>
   );
 }

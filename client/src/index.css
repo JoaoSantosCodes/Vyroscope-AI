@@ -212,3 +212,24 @@
     }
   }
 }
+
+/* Destaque temporário ao mover um card do Kanban entre colunas */
+@keyframes vy-move-highlight {
+  0% {
+    box-shadow: 0 0 0 0 oklch(0.78 0.13 75 / 0%);
+    transform: scale(0.98);
+  }
+  25% {
+    box-shadow: 0 0 0 3px oklch(0.78 0.13 75 / 45%);
+    transform: scale(1.015);
+  }
+  100% {
+    box-shadow: 0 0 0 0 oklch(0.78 0.13 75 / 0%);
+    transform: scale(1);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .vy-kanban-moved {
+    animation: vy-move-highlight 1.4s cubic-bezier(0.23, 1, 0.32, 1) both;
+  }
+}
