@@ -6,6 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Badge as GoalBadge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import GoalCelebrationView from "@/components/GoalCelebration";
 import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis, Tooltip as ChartTooltip } from "recharts";
 import { trpc } from "@/lib/trpc";
@@ -65,11 +67,13 @@ export default function Streaks() {
   const year = yearSummaryQuery.data?.year ?? new Date().getFullYear();
   const sy = yearSummaryQuery.data;
 
-  // ===== PDF dedicado da galeria de conquistas (rodada 28) =====
+  // ===== PDF dedicado da galeria de conquistas (rodada 28; filtro por ano — rodada 29) =====
+  const [achievementsYear, setAchievementsYear] = useState<number | null>(null);
+  const [achievementsExportOpen, setAchievementsExportOpen] = useState(false);
   const exportAchievementsMutation = trpc.extended.exportAchievementsPdf.useMutation({
     onSuccess: (data) => {
       window.open(data.downloadUrl, "_blank");
-      toast.success("PDF da galeria de conquistas gerado.");
+      toast.success(achievementsYear ? `PDF de conquistas de ${achievementsYear} gerado.` : "PDF da galeria de conquistas gerado.");
     },
     onError: (err) => toast.error(err.message || "Falha ao gerar o PDF de conquistas."),
   });
@@ -155,6 +159,34 @@ export default function Streaks() {
             )}
             Exportar streaks em PDF
           </Button>
+        </div>
+
+        {/* KPI de destaque: total acumulado de selos (rodada 29) */}
+        <div className="mt-5 flex items-center gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-500/20">
+            <Trophy className="h-5 w-5 text-amber-500" />
+          </div>
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-amber-500/80">Total acumulado de selos</div>
+            <div className="mt-0.5 flex items-baseline gap-1.5">
+              <span className="text-2xl font-bold text-amber-500">
+                {(achievementsQuery.data?.badges.length ?? 0) +
+                  (intermediateQuery.data?.quarters.length ?? 0) +
+                  (intermediateQuery.data?.halfYears.length ?? 0)}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {(achievementsQuery.data?.badges.length ?? 0) +
+                  (intermediateQuery.data?.quarters.length ?? 0) +
+                  (intermediateQuery.data?.halfYears.length ?? 0) ===
+                1
+                  ? "selo conquistado"
+                  : "selos conquistados"}
+              </span>
+            </div>
+            <p className="mt-0.5 text-[10px] text-muted-foreground">
+              {(achievementsQuery.data?.badges.length ?? 0)} ano{(achievementsQuery.data?.badges.length ?? 0) === 1 ? "" : "s"} completo{(achievementsQuery.data?.badges.length ?? 0) === 1 ? "" : "s"} · {(intermediateQuery.data?.quarters.length ?? 0) + (intermediateQuery.data?.halfYears.length ?? 0)} intermediário{(intermediateQuery.data?.quarters.length ?? 0) + (intermediateQuery.data?.halfYears.length ?? 0) === 1 ? "" : "s"} (trimestres e semestres)
+            </p>
+          </div>
         </div>
 
         <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -572,21 +604,92 @@ export default function Streaks() {
                 <Trophy className="h-4 w-4 text-amber-500" />
                 Galeria de conquistas
               </h2>
-              {/* Botão de exportação do PDF dedicado de conquistas (rodada 28): anuais + intermediárias. */}
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-xs"
-                disabled={exportAchievementsMutation.isPending}
-                onClick={() => exportAchievementsMutation.mutate()}
+              {/* Exportação do PDF dedicado de conquistas (rodada 28; seletor de ano — rodada 29) */}
+              <Dialog
+                open={achievementsExportOpen}
+                onOpenChange={(open) => {
+                  setAchievementsExportOpen(open);
+                  if (!open) setAchievementsYear(null);
+                }}
               >
-                {exportAchievementsMutation.isPending ? (
-                  <FileDown className="mr-1.5 h-3.5 w-3.5 animate-spin opacity-70" />
-                ) : (
-                  <FileDown className="mr-1.5 h-3.5 w-3.5" />
-                )}
-                Exportar conquistas em PDF
-              </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="text-xs"
+                  disabled={exportAchievementsMutation.isPending}
+                  onClick={() => setAchievementsExportOpen(true)}
+                >
+                  {exportAchievementsMutation.isPending ? (
+                    <FileDown className="mr-1.5 h-3.5 w-3.5 animate-spin opacity-70" />
+                  ) : (
+                    <FileDown className="mr-1.5 h-3.5 w-3.5" />
+                  )}
+                  Exportar conquistas em PDF
+                </Button>
+                <DialogContent className="max-w-sm">
+                  <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                      <Trophy className="h-4 w-4 text-amber-500" />
+                      Exportar conquistas em PDF
+                    </DialogTitle>
+                    <DialogDescription>
+                      Escolha um ano para exportar apenas as conquistas daquele período ou deixe "Todos os anos" para o consolidado completo.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-3 py-1">
+                    <div>
+                      <label className="mb-1.5 block text-[11px] font-medium text-muted-foreground">Ano</label>
+                      <Select
+                        value={achievementsYear === null ? "all" : String(achievementsYear)}
+                        onValueChange={(v) => setAchievementsYear(v === "all" ? null : Number(v))}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Todos os anos (consolidado)</SelectItem>
+                          {(achievementsQuery.data?.badges ?? []).map((b) => (
+                            <SelectItem key={b.year} value={String(b.year)}>
+                              {b.year} ({b.metMonths} metas)
+                            </SelectItem>
+                          ))}
+                          {(intermediateQuery.data?.quarters ?? []).map((q) => (
+                            <SelectItem key={`q-${q.year}`} value={String(q.year)}>
+                              {q.year} ({q.label})
+                            </SelectItem>
+                          ))}
+                          {(intermediateQuery.data?.halfYears ?? []).map((h) => (
+                            <SelectItem key={`h-${h.year}`} value={String(h.year)}>
+                              {h.year} ({h.label})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      O PDF inclui os selos anuais e intermediários do período selecionado e o calendário de metas mês a mês.
+                    </p>
+                  </div>
+                  <DialogFooter>
+                    <Button
+                      size="sm"
+                      disabled={exportAchievementsMutation.isPending}
+                      onClick={() => {
+                        exportAchievementsMutation.mutate(achievementsYear === null ? {} : { year: achievementsYear });
+                        setAchievementsExportOpen(false);
+                      }}
+                    >
+                      {exportAchievementsMutation.isPending ? (
+                        <FileDown className="mr-1.5 h-3.5 w-3.5 animate-spin opacity-70" />
+                      ) : (
+                        <FileDown className="mr-1.5 h-3.5 w-3.5" />
+                      )}
+                      Gerar PDF
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             </div>
             <p className="mb-3 text-[11px] text-muted-foreground">
               {achievementsQuery.data ? `${achievementsQuery.data.badges.length} de ${achievementsQuery.data.totalYearsChecked} anos analisados terminaram com a meta cumprida em todos os meses.` : ""}

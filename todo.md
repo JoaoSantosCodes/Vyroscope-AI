@@ -250,3 +250,11 @@
 - [x] Testes vitest das novas funcionalidades (+4: buildAchievementsPdf ×3, exportAchievementsPdf ×1 → 182 passando)
 - [x] Atualizar habilidade vyroscope-video-analyst com a rodada 28 (SKILL.md + features-roadmap.md)
 - [x] Documentação da rodada 28 para o Obsidian (rodada-28-obsidian.md), verificação visual e checkpoint
+
+## Melhorias solicitadas (rodada 29)
+- [x] PDF de conquistas: calendário visual do ano marcando os meses com metas cumpridas (grid 4x3 por ano com mês colorido esmeralda se met / âmbar se não / cinza se corrente; yearlySummaries no buildAchievementsPdf + busca getYearSummary na exportAchievementsPdf)
+- [x] KPI no topo da página /streaks: total acumulado de selos (anuais + intermediários) em card âmbar de destaque com Trophy e detalhamento
+- [x] Seletor de ano na exportação do PDF de conquistas: Dialog com Select de ano (todos / específico) antes de gerar (input {year?} no exportAchievementsPdf com filtragem e nome de arquivo por ano)
+- [x] Testes vitest das novas funcionalidades (mock getYearSummary → null; 182/182 passando)
+- [x] Atualizar habilidade vyroscope-video-analyst com a rodada 29 (SKILL.md + features-roadmap.md)
+- [x] Documentação da rodada 29 para o Obsidian (rodada-29-obsidian.md), verificação visual e checkpoint

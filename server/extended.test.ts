@@ -338,6 +338,8 @@ const mockedMarkCelebration = vi.mocked(db.markGoalCelebration);
 const mockedListCelebrations = vi.mocked(db.listGoalCelebrations);
 const mockedListSuggestions = vi.mocked(db.listGoalSuggestions);
 const mockedYearSummary = vi.mocked(db.getYearSummary);
+// Default para os testes de exportação de conquistas (rodada 29): sem dados de ano
+mockedYearSummary.mockResolvedValue(null as never);
 const mockedInsertSuggestion = vi.mocked(db.insertGoalSuggestion);
 const mockedEndOfMonthAlert = vi.mocked(db.getEndOfMonthGoalAlert);
 const mockedAnnualGoal = vi.mocked(db.getAnnualGoal);

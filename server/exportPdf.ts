@@ -886,6 +886,8 @@ export type AchievementsPdfInput = {
   intermediate?: AchievementsPdfIntermediate | null;
   /** Nome do usuário para a capa (opcional). */
   userName?: string | null;
+  /** Resumo mensal por ano para o calendário visual (rodada 29: getYearSummary por ano). */
+  yearlySummaries?: { year: number; months: { monthKey: string; label: string; publishedThisMonth: number; goal: number; met: boolean; isCurrent: boolean }[] }[] | null;
 };
 
 /**
@@ -900,6 +902,7 @@ export async function buildAchievementsPdf(input: AchievementsPdfInput): Promise
   const userName = input?.userName?.trim();
   const totalSeals = badges.length + quarters.length + halfYears.length;
   const yearsCounted = Math.max(input?.intermediate?.yearsChecked ?? 0, badges.length);
+  const yearlySummaries = input?.yearlySummaries ?? [];
   return new Promise<Buffer>((resolve, reject) => {
     try {
       const doc = new PDFDocument({ size: "A4", margin: 54 });
@@ -980,6 +983,62 @@ export async function buildAchievementsPdf(input: AchievementsPdfInput): Promise
           };
           hSeals.forEach((h) => sealLine("MEDAL", h.label, h.published, h.annualGoal));
           qSeals.forEach((q) => sealLine("Q", q.label, q.published, q.annualGoal));
+        });
+      }
+      // ===== Página de calendário visual por ano (rodada 29) =====
+      if (yearlySummaries.length > 0) {
+        doc.addPage();
+        doc.rect(0, 0, doc.page.width, doc.page.height).fill(COLORS.dark);
+        doc.fillColor(COLORS.amber).fontSize(10).font("Helvetica-Bold").text("CALENDÁRIO DE METAS", 54, 72, { characterSpacing: 2 });
+        doc.fillColor(COLORS.gray).fontSize(9).text("Cada mês do ano marcado pela meta: verde quando cumprida, âmbar quando não cumprida, cinza quando ainda em aberto.", 54, 96);
+        y = 130;
+        const sortedSummaries = [...yearlySummaries].sort((a, b) => b.year - a.year);
+        const cellW = 70;
+        const cellH = 62;
+        const gap = 12;
+        const startX = 70;
+        const drawCell = (m: { monthKey: string; label: string; publishedThisMonth: number; goal: number; met: boolean; isCurrent: boolean }, cx: number, cy: number) => {
+          const cellColor = m.isCurrent ? COLORS.gray : m.met ? "#4C9F70" : "#A8622A";
+          doc.fillColor(COLORS.cardBg).roundedRect(cx, cy, cellW, cellH, 4).fill();
+          doc.fillColor(cellColor).roundedRect(cx, cy, cellW, 8, 4).fill();
+          doc.fillColor(m.isCurrent ? COLORS.gray : COLORS.light).fontSize(9).font("Helvetica-Bold").text(m.label.slice(0, 3).toUpperCase(), cx + 8, cy + 20);
+          doc.fillColor(COLORS.gray).fontSize(8).text(m.met ? "META CUMPRIDA" : m.isCurrent ? "EM ANDAMENTO" : "META NÃO CUMPRIDA", cx + 8, cy + 33, { width: cellW - 16, lineBreak: true });
+          doc.fillColor(m.isCurrent ? COLORS.gray : COLORS.amber).fontSize(8).text(`${m.publishedThisMonth}/${m.goal} pub.`, cx + 8, cy + cellH - 14);
+        };
+        sortedSummaries.forEach((sum, sIdx) => {
+          const months = [...(sum.months ?? [])].sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+          if (months.length === 0) return;
+          if (sIdx > 0) {
+            doc.addPage();
+            doc.rect(0, 0, doc.page.width, doc.page.height).fill(COLORS.dark);
+          }
+          y = sIdx > 0 ? 130 : y;
+          doc.fillColor(COLORS.light).fontSize(12).font("Helvetica-Bold").text(`${sum.year}`, 70, y, { characterSpacing: 1 });
+          y += 22;
+          months.forEach((m, mi) => {
+            const col = mi % 4;
+            const row = Math.floor(mi / 4);
+            const cx = startX + col * (cellW + gap);
+            const cy = y + row * (cellH + 10);
+            if (cy + cellH > doc.page.height - 34) {
+              doc.addPage();
+              doc.rect(0, 0, doc.page.width, doc.page.height).fill(COLORS.dark);
+              doc.fillColor(COLORS.light).fontSize(12).font("Helvetica-Bold").text(`${sum.year}`, 70, 130, { characterSpacing: 1 });
+              drawCell(m, startX + (mi % 4) * (cellW + gap), 152 + Math.floor(mi / 4) * (cellH + 10));
+              return;
+            }
+            drawCell(m, cx, cy);
+          });
+          const legendY = y + Math.ceil(months.length / 4) * (cellH + 10) + 8;
+          if (legendY < doc.page.height - 24) {
+            const drawDot = (lx: number, ly: number, color: string, text: string) => {
+              doc.fillColor(color).roundedRect(lx, ly, 10, 10, 2).fill();
+              doc.fillColor(COLORS.gray).fontSize(8).text(text, lx + 16, ly + 1);
+            };
+            drawDot(70, legendY, "#4C9F70", "Meta cumprida");
+            drawDot(180, legendY, "#A8622A", "Meta não cumprida");
+            drawDot(300, legendY, COLORS.gray, "Em andamento");
+          }
         });
       }
       doc.fillColor(COLORS.gray).fontSize(8).text(`Total acumulado: ${totalSeals} selo${totalSeals === 1 ? "" : "s"} · ${badges.length} ano${badges.length === 1 ? "" : "s"} completo${badges.length === 1 ? "" : "s"} · ${quarters.length + halfYears.length} intermediário${quarters.length + halfYears.length === 1 ? "" : "s"}`, 54, doc.page.height - 40, { width: doc.page.width - 108 });

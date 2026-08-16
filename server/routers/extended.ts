@@ -919,20 +919,43 @@ export const extendedRouter = router({
       const { url } = await storagePut(key, buffer, "application/pdf");
       return { downloadUrl: url, fileName: `ano-em-numeros-${summary.year}.pdf` } as const;
     }),
-  /** Exporta o PDF dedicado da galeria de conquistas (anuais + intermediárias). Rodada 28. */
-  exportAchievementsPdf: protectedProcedure.mutation(async ({ ctx }) => {
-    const { getUserAchievements, getIntermediateAchievements } = await import("../db");
-    const [achievements, intermediate] = await Promise.all([
-      getUserAchievements(ctx.user.id),
-      getIntermediateAchievements(ctx.user.id),
-    ]);
-    const { buildAchievementsPdf } = await import("../exportPdf");
-    const buffer = await buildAchievementsPdf({ badges: achievements.badges, intermediate, userName: ctx.user.name });
-    const key = `exports/galeria-de-conquistas-${Date.now()}-${ctx.user.id}.pdf`;
-    const { storagePut } = await import("../storage");
-    const { url } = await storagePut(key, buffer, "application/pdf");
-    return { downloadUrl: url, fileName: "galeria-de-conquistas.pdf" } as const;
-  }),
+  /** Exporta o PDF dedicado da galeria de conquistas (anuais + intermediárias). Rodada 28; ano opcional (rodada 29). */
+  exportAchievementsPdf: protectedProcedure
+    .input(z.object({ year: z.number().int().min(2000).max(2200).optional() }).optional())
+    .mutation(async ({ ctx, input }) => {
+      const { getUserAchievements, getIntermediateAchievements, getYearSummary } = await import("../db");
+      const [achievements, intermediate] = await Promise.all([
+        getUserAchievements(ctx.user.id),
+        getIntermediateAchievements(ctx.user.id),
+      ]);
+      const targetYear = input?.year ?? null;
+      const badges = targetYear ? achievements.badges.filter((b) => b.year === targetYear) : achievements.badges;
+      const intermediateFiltered = targetYear
+        ? {
+            quarters: intermediate.quarters.filter((q) => q.year === targetYear),
+            halfYears: intermediate.halfYears.filter((h) => h.year === targetYear),
+            yearsChecked: intermediate.yearsChecked,
+          }
+        : intermediate;
+      // Calendário visual por ano (rodada 29): ano específico ou últimos anos com dados
+      const calendarYears = targetYear ? [targetYear] : [new Date().getFullYear(), new Date().getFullYear() - 1];
+      const yearlySummaries = await Promise.all(
+        calendarYears.map((yr) => getYearSummary(ctx.user.id, yr).catch(() => null))
+      );
+      const summaries = yearlySummaries.filter((s): s is NonNullable<typeof s> => s !== null && s.months.length > 0);
+      const { buildAchievementsPdf } = await import("../exportPdf");
+      const buffer = await buildAchievementsPdf({
+        badges,
+        intermediate: intermediateFiltered,
+        userName: ctx.user.name,
+        yearlySummaries: summaries,
+      });
+      const key = `exports/galeria-de-conquistas-${Date.now()}-${ctx.user.id}.pdf`;
+      const { storagePut } = await import("../storage");
+      const { url } = await storagePut(key, buffer, "application/pdf");
+      const fileName = targetYear ? `galeria-de-conquistas-${targetYear}.pdf` : "galeria-de-conquistas.pdf";
+      return { downloadUrl: url, fileName } as const;
+    }),
 
   /** Gera agenda de conteúdo de 4 semanas a partir das sugestões de uma análise. */
   generateAgenda: protectedProcedure.input(agendaInput).mutation(async ({ ctx, input }) => {
