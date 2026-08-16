@@ -19,13 +19,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { buildIdeaHistoryCsv, exportIdeaHistoryCsv } from "@/lib/export";
 import { KANBAN_HIDE_PUBLISHED_KEY, KANBAN_OLDEST_FIRST_KEY, readSessionFlag, sortColumnOldestFirst, writeSessionFlag } from "@/lib/kanbanSort";
 import { quickNoteValue, shouldSaveQuickNote } from "@/lib/quickNote";
 import { formatDate, scoreColor, scoreLabel } from "@/lib/score";
 import { trpc } from "@/lib/trpc";
-import { Archive, ArrowUpDown, CalendarDays, Check, Clock, Edit3, FileText, Lightbulb, Loader2, Pencil, Pin, PinOff, Radar, Search, StickyNote, Target, TrendingUp, X } from "lucide-react";
+import { Archive, ArrowUpDown, CalendarDays, Clock, Edit3, FileDown, FileText, Flame, Lightbulb, Loader2, Pin, PinOff, Radar, Search, StickyNote, Target, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 
@@ -623,6 +624,21 @@ export default function IdeaHistory() {
     setEditingGoal(false);
   };
   const isCurrentMonthView = statsMonthKey === currentMonthKey;
+
+  // ===== Streak de meses consecutivos com a meta cumprida (rodada 20) =====
+  const streakQuery = trpc.extended.pinnedGoalStreak.useQuery(undefined, {
+    refetchInterval: 15 * 60 * 1000,
+  });
+
+  // ===== Exportação mensal em PDF (rodada 20) =====
+  const exportMonthMutation = trpc.extended.exportMonthlyPdf.useMutation({
+    onSuccess: (data) => {
+      window.open(data.downloadUrl, "_blank");
+      toast.success(`PDF do resumo de ${formatMonthKey(statsMonthKey).toLowerCase()} gerado.`);
+    },
+    onError: (err) => toast.error(err.message || "Falha ao gerar o resumo mensal."),
+  });
+
   const archivePublishedMutation = trpc.extended.archivePublishedIdeas.useMutation({
     onMutate: () => {
       // Otimista: marca as publicadas ativas como arquivadas antes da resposta
@@ -888,6 +904,38 @@ export default function IdeaHistory() {
                   </span>
                   publicada{statsQuery.data?.publishedThisMonth === 1 ? "" : "s"} em {formatMonthKey(statsMonthKey).toLowerCase()}
                 </span>
+                <button
+                  type="button"
+                  className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/50 hover:bg-primary/10 hover:text-foreground ${editingGoal ? "border-primary/50 bg-primary/10" : "border-border bg-card"}`}
+                  title="Clique para editar a meta do mês"
+                  onClick={() => setEditingGoal((v) => !v)}
+                >
+                  <Target className="h-3 w-3 text-amber-500" />
+                  {editingGoal ? (
+                    <input
+                      ref={goalDraftRef}
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={goalDraft}
+                      onChange={(e) => setGoalDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") commitGoal();
+                        if (e.key === "Escape") {
+                          setGoalDraft(String(statsQuery.data?.goal ?? 4));
+                          setEditingGoal(false);
+                        }
+                      }}
+                      onBlur={() => commitGoal()}
+                      className="w-12 rounded border border-border bg-background px-1 py-px text-foreground outline-none focus:border-primary/60"
+                    />
+                  ) : (
+                    <span>
+                      meta <span className="font-medium text-foreground">{statsQuery.data?.goal ?? "—"}</span>
+                      {setGoalMutation.isPending && <Loader2 className="ml-1 inline h-3 w-3 animate-spin" />}
+                    </span>
+                  )}
+                </button>
                 <span className="flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1.5 text-[11px] text-muted-foreground">
                   <Clock className="h-3 w-3 text-primary" />
                   média de <span className="font-medium text-foreground">
@@ -912,8 +960,44 @@ export default function IdeaHistory() {
                     Arquivar publicadas
                   </Button>
                 )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 border-border bg-card px-2 text-[11px]"
+                  disabled={exportMonthMutation.isPending}
+                  onClick={() => exportMonthMutation.mutate({ monthKey: statsMonthKey })}
+                >
+                  {exportMonthMutation.isPending ? (
+                    <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                  ) : (
+                    <FileDown className="mr-1.5 h-3 w-3" />
+                  )}
+                  Exportar mês
+                </Button>
               </div>
             </div>
+            {/* Meta e barra de progresso do mês (rodada 19, visível no mês corrente; rodada 20: streak) */}
+            {isCurrentMonthView && statsQuery.data && statsQuery.data.goal > 0 && (
+              <div className="mt-3 flex flex-wrap items-center gap-2.5 rounded-lg border border-border bg-card/50 px-3 py-2.5">
+                <Progress
+                  value={Math.min(100, Math.round((statsQuery.data.publishedThisMonth / statsQuery.data.goal) * 100))}
+                  className="h-2 w-full max-w-xs"
+                  aria-label="Progresso da meta mensal"
+                />
+                <span className="text-[11px] text-muted-foreground">
+                  {statsQuery.data.publishedThisMonth}/{statsQuery.data.goal} publicada{statsQuery.data.publishedThisMonth === 1 ? "" : "s"} ·{" "}
+                  {Math.min(100, Math.round((statsQuery.data.publishedThisMonth / statsQuery.data.goal) * 100))}% concluído em {formatMonthKey(currentMonthKey).toLowerCase()}
+                </span>
+                {streakQuery.data?.streak ? (
+                  <span className="ml-auto inline-flex items-center gap-1 rounded-full border border-amber-500/50 bg-amber-500/15 px-2 py-px text-[10px] font-semibold text-amber-600" title={`Sequência de ${streakQuery.data.streak} ${streakQuery.data.streak === 1 ? "mês" : "meses"} seguidos com a meta cumprida`}>
+                    <Flame className="h-3 w-3" />
+                    {streakQuery.data.streak} {streakQuery.data.streak === 1 ? "mês" : "meses"} seguidos com a meta cumprida
+                  </span>
+                ) : (
+                  <span className="ml-auto text-[10px] text-muted-foreground/60">Comece sua sequência de metas cumpridas</span>
+                )}
+              </div>
+            )}
             <p className="mb-3 text-xs text-muted-foreground">
               Arraste os cards para reordenar dentro da coluna ou movê-los entre as colunas de status. As fixadas aparecem primeiro no PDF exportado e as arquivadas entram nas exportações em uma seção dedicada.
             </p>

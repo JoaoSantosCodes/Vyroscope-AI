@@ -445,3 +445,71 @@ describe("buildIdeaHistoryPdf", () => {
     expect(text.replace(/\s/g, "")).not.toContain("RESUMODEPRODUÇÃO");
   });
 });
+
+describe("buildMonthlyPdf (resumo de produção mensal, rodada 20)", () => {
+  it("rejects empty or malformed month keys", async () => {
+    const { buildMonthlyPdf } = await import("./exportPdf");
+    await expect(
+      buildMonthlyPdf({ monthKey: "", publishedThisMonth: 0, avgProductionDays: null, goal: 4 })
+    ).rejects.toThrow("Dados inválidos");
+    await expect(
+      buildMonthlyPdf({ monthKey: "2026/08", publishedThisMonth: 0, avgProductionDays: null, goal: 4 } as never)
+    ).rejects.toThrow("Dados inválidos");
+  });
+  it("renders the monthly production summary in the PDF text", async () => {
+    const { buildMonthlyPdf } = await import("./exportPdf");
+    const buffer = await buildMonthlyPdf({
+      monthKey: "2026-08",
+      publishedThisMonth: 2,
+      avgProductionDays: 6.5,
+      goal: 4,
+      streak: 0,
+      dayOfMonth: 16,
+    });
+    const { spawnSync } = await import("node:child_process");
+    const { writeFileSync, mkdtempSync } = await import("node:fs");
+    const tmp = mkdtempSync("/tmp/pdf-test-");
+    const file = `${tmp}/month.pdf`;
+    writeFileSync(file, buffer);
+    const run = spawnSync(
+      process.execPath,
+      ["/home/ubuntu/vyroscope-ai/node_modules/pdf-parse/bin/cli.mjs", "text", file],
+      { encoding: "utf-8", cwd: "/home/ubuntu/vyroscope-ai" }
+    );
+    const text = run.stdout + run.stderr;
+    if (run.status !== 0) throw new Error(`pdf-parse CLI falhou: ${text}`);
+    const compact = text.replace(/[\s ]/g, "").toUpperCase();
+    expect(compact).toContain("RESUMODEPRODUÇÃO");
+    expect(compact).toContain("PRODUÇÃODOMÊS");
+    expect(compact).toContain("AGOSTODE2026");
+    expect(compact).toContain("2PUBLICADAS·METADE4(50%CONCLUÍDO)");
+    expect(compact).toContain("6,5");
+    expect(compact).toContain("DIA16DOMÊS");
+    expect(text).toContain("comece a sequência");
+  });
+  it("renders the streak seal when consecutive months met the goal", async () => {
+    const { buildMonthlyPdf } = await import("./exportPdf");
+    const buffer = await buildMonthlyPdf({
+      monthKey: "2026-08",
+      publishedThisMonth: 5,
+      avgProductionDays: null,
+      goal: 4,
+      streak: 3,
+      dayOfMonth: 10,
+    });
+    const { spawnSync } = await import("node:child_process");
+    const { writeFileSync, mkdtempSync } = await import("node:fs");
+    const tmp = mkdtempSync("/tmp/pdf-test-");
+    const file = `${tmp}/month-streak.pdf`;
+    writeFileSync(file, buffer);
+    const run = spawnSync(
+      process.execPath,
+      ["/home/ubuntu/vyroscope-ai/node_modules/pdf-parse/bin/cli.mjs", "text", file],
+      { encoding: "utf-8", cwd: "/home/ubuntu/vyroscope-ai" }
+    );
+    const text = run.stdout + run.stderr;
+    if (run.status !== 0) throw new Error(`pdf-parse CLI falhou: ${text}`);
+    const compact = text.replace(/[\s ]/g, "").toUpperCase();
+    expect(compact).toContain("SELODECONSECUTIVIDADE:3MESESSEGUIDOSCOMAMETACUMPRIDA");
+  });
+});

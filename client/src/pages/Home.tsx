@@ -15,6 +15,7 @@ import {
   Radar,
   RefreshCcw,
   Sparkles,
+  Target,
   TrendingUp,
   Video,
 } from "lucide-react";
@@ -357,6 +358,23 @@ function IdeaOfTheDayCard() {
     .filter((p) => p.archived === 0 && p.status === "gravando" && p.statusChangedAt)
     .filter((p) => Date.now() - new Date(p.statusChangedAt).getTime() > STAGNATION_DAYS * 24 * 60 * 60 * 1000);
 
+  // ===== Alerta de progresso da meta mensal (rodada 20) =====
+  // Mostra quando o mês está avançando e a meta ainda não foi alcançada:
+  // "Dia X do mês: N/M publicadas (Y% concluído)".
+  const statsQuery = trpc.extended.pinnedProductionStats.useQuery(undefined, {
+    refetchInterval: 15 * 60 * 1000,
+  });
+  const monthProgressDay = new Date().getDate();
+  const monthProgressStats = statsQuery.data;
+  const showGoalAlert =
+    statsQuery.isSuccess &&
+    monthProgressStats &&
+    monthProgressStats.publishedThisMonth < monthProgressStats.goal &&
+    (monthProgressDay >= 10 || monthProgressStats.publishedThisMonth > 0);
+  const monthProgressPct = monthProgressStats && monthProgressStats.goal > 0
+    ? Math.min(100, Math.round((monthProgressStats.publishedThisMonth / monthProgressStats.goal) * 100))
+    : 0;
+
   const archivePublishedMutation = trpc.extended.archivePublishedIdeas.useMutation({
     onSuccess: (data) => {
       utils.extended.listPinnedIdeas.invalidate();
@@ -387,6 +405,18 @@ function IdeaOfTheDayCard() {
 
   return (
     <>
+      {showGoalAlert && (
+        <button
+          type="button"
+          onClick={() => navigate("/ideia-do-dia")}
+          className="mb-4 flex w-full max-w-2xl items-center gap-2.5 rounded-lg border border-amber-500/50 bg-amber-500/10 px-4 py-2.5 text-left transition-colors hover:border-amber-500/70 hover:bg-amber-500/15"
+        >
+          <span className="animate-pulse text-amber-500">●</span>
+          <span className="flex-1 text-xs sm:text-sm">
+            <strong className="text-amber-600">Dia {monthProgressDay} do mês</strong>: <strong className="text-amber-600">{monthProgressStats.publishedThisMonth}/{monthProgressStats.goal} publicada{monthProgressStats.publishedThisMonth === 1 ? "" : "s"}</strong> ({monthProgressPct}% concluído) — a meta de publicações ainda não foi alcançada. Abra o quadro Kanban para avançar.
+          </span>
+        </button>
+      )}
       {staleQuery.isSuccess && staleIdeas.length > 0 && (
         <button
           type="button"

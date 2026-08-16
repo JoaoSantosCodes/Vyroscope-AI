@@ -490,6 +490,35 @@ export const extendedRouter = router({
       await setPinnedMonthlyGoal(ctx.user.id, input.monthKey, input.goal);
       return { success: true } as const;
     }),
+  /** Streak de meses consecutivos com a meta de publicações cumprida
+   *  (retrocedendo do mês corrente, exclusive). Rodada 20. */
+  pinnedGoalStreak: protectedProcedure.query(async ({ ctx }) => {
+    const { getMonthlyGoalStreak } = await import("../db");
+    return getMonthlyGoalStreak(ctx.user.id);
+  }),
+  /** Exporta um resumo mensal de produção em PDF curto (página única)
+   *  com o resumo do mês selecionado, dia do mês e selo de streak. Rodada 20. */
+  exportMonthlyPdf: protectedProcedure
+    .input(z.object({ monthKey: z.string().regex(/^\d{4}-\d{2}$/) }))
+    .mutation(async ({ ctx, input }) => {
+      const { getPinnedProductionStats, getMonthlyGoalStreak, dayOfMonth } = await import("../db");
+      const stats = await getPinnedProductionStats(ctx.user.id, input.monthKey);
+      const { streak } = await getMonthlyGoalStreak(ctx.user.id);
+      const { buildMonthlyPdf } = await import("../exportPdf");
+      const buffer = await buildMonthlyPdf({
+        monthKey: stats.monthKey,
+        publishedThisMonth: stats.publishedThisMonth,
+        avgProductionDays: stats.avgProductionDays,
+        goal: stats.goal,
+        streak,
+        dayOfMonth: dayOfMonth(),
+        userName: ctx.user.name,
+      });
+      const key = `exports/resumo-producao-${input.monthKey}-${Date.now()}-${ctx.user.id}.pdf`;
+      const { storagePut } = await import("../storage");
+      const { url } = await storagePut(key, buffer, "application/pdf");
+      return { downloadUrl: url, fileName: `resumo-producao-${input.monthKey}.pdf` } as const;
+    }),
   /** Remove definitivamente uma ideia (arquivada ou não) do histórico. */
   deletePinnedIdea: protectedProcedure
     .input(z.object({ pinnedId: z.number().int().positive() }))

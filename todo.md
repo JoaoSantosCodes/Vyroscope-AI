@@ -177,3 +177,11 @@
 - [x] Testes vitest das novas funcionalidades (134 testes: monthKey + validação no procedure x3, setMonthlyGoal x2, buildIdeaHistoryPdf com productionStats x3 no texto do PDF)
 - [x] Atualizar habilidade vyroscope-video-analyst com a rodada 19 (SKILL.md: seção "Monthly goal, month filter, progress bar and production stats in the PDF export"; features-roadmap.md: parágrafo Round 19 no stats do Kanban + tabela pinned_monthly_goal no schema; validada com quick_validate)
 - [x] Verificação visual (home/ideia-do-dia/monitorar sem dados do usuário — estados vazios OK; painel de stats renderiza quando há ideia fixada) e checkpoint
+
+## Melhorias solicitadas (rodada 20)
+- [ ] Home: alerta no banner (ideia do dia) quando o mês está avançando e a meta do mês ainda não foi alcançada (progresso vs. dias decorridos, ex.: "Dia 20: 2/4 publicadas")
+- [ ] Kanban: painel de streaks — contar meses consecutivos (retrocedendo a partir do mês corrente) com meta cumprida e exibir selo motivacional no quadro
+- [ ] Estatísticas: botão "Exportar mês" que gera PDF curto apenas com o resumo de produção do mês selecionado (nova procedure exportMonthlyPdf + builder buildMonthlyPdf)
+- [x] Testes vitest das novas funcionalidades (141 testes: pinnedGoalStreak x2, exportMonthlyPdf x2, buildMonthlyPdf x3 no texto do PDF — padrão compacto, doMock("./storage") removido após interferência)
+- [x] Atualizar habilidade vyroscope-video-analyst com a rodada 20 (SKILL.md: seção "Monthly goal alert, goal streak and monthly PDF export (round 20)" + quick reference; features-roadmap.md: parágrafo Round 20 no stats + procedures pinnedGoalStreak/exportMonthlyPdf + padrão pdf-parse; validada com quick_validate)
+- [ ] Verificação visual e checkpoint

@@ -491,3 +491,75 @@ export async function buildIdeaHistoryPdf(input: IdeaHistoryPdfInput): Promise<B
     }
   });
 }
+
+/** Input do builder do resumo de produção mensal (rodada 20). */
+export type MonthlyPdfInput = {
+  monthKey: string; // YYYY-MM
+  publishedThisMonth: number;
+  avgProductionDays: number | null;
+  goal: number;
+  /** Streak de meses consecutivos com meta cumprida (selo quando > 0). */
+  streak?: number;
+  /** Dia do mês corrente usado no texto de progresso (ex.: "Dia 20 do mês"). */
+  dayOfMonth?: number;
+  /** Nome do usuário para a capa (opcional). */
+  userName?: string | null;
+};
+
+/** Rótulo pt-BR de uma chave YYYY-MM (ex.: "agosto de 2026"). */
+export function monthLabelPt(monthKey: string): string {
+  const MONTHS_PT = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+  const [y, m] = monthKey.split("-");
+  return `${MONTHS_PT[(Number.parseInt(m ?? "0", 10) - 1)] ?? m} de ${y}`;
+}
+
+/**
+ * PDF de página única com o resumo de produção de um mês específico
+ * (rodada 20): meta, publicadas, percentual concluído, tempo médio de
+ * produção, linha do dia do mês e selo motivacional de streak quando há.
+ */
+export async function buildMonthlyPdf(input: MonthlyPdfInput): Promise<Buffer> {
+  if (!input || !/^\d{4}-\d{2}$/.test(input.monthKey ?? "")) {
+    throw new Error("Dados inválidos para exportação do resumo mensal.");
+  }
+  const { monthKey, publishedThisMonth, avgProductionDays, goal } = input;
+  const streak = input.streak ?? 0;
+  const day = input.dayOfMonth ?? new Date().getDate();
+  const userName = input.userName?.trim();
+  return new Promise<Buffer>((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ size: "A4", margin: 54 });
+      const chunks: Buffer[] = [];
+      doc.on("data", (c) => chunks.push(c));
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("error", reject);
+
+      // ===== Capa única =====
+      doc.rect(0, 0, doc.page.width, doc.page.height).fill(COLORS.dark);
+      doc.fillColor(COLORS.amber).fontSize(11).text("VYROSCOPE AI", 54, 72, { characterSpacing: 4 });
+      doc.moveTo(54, 96).lineTo(150, 96).strokeColor(COLORS.amber).lineWidth(1.5).stroke();
+      doc.fillColor(COLORS.light).fontSize(24).font("Helvetica-Bold").text("Resumo de produção", 54, 150);
+      doc.fillColor(COLORS.gray).fontSize(16).text(monthLabelPt(monthKey), 54, 200);
+      doc.fillColor(COLORS.gray).fontSize(10).text("Gerado em " + new Date().toLocaleString("pt-BR") + (userName ? ` · ${userName}` : ""), 54, 240);
+
+      // Card central com os números do mês
+      doc.fillColor(COLORS.cardBg).roundedRect(54, 305, doc.page.width - 108, 120, 6).fill();
+      doc.fillColor(COLORS.amber).fontSize(9).font("Helvetica-Bold").text("PRODUÇÃO DO MÊS", 70, 322, { characterSpacing: 2 });
+      doc.fillColor(COLORS.light).fontSize(10.5).font("Helvetica");
+      const pct = goal > 0 ? Math.min(100, Math.round((publishedThisMonth / goal) * 100)) : 0;
+      doc.text(`${publishedThisMonth} ${publishedThisMonth === 1 ? "publicada" : "publicadas"} · meta de ${goal} (${pct}% concluído)`, 70, 342, { width: doc.page.width - 140 });
+      doc.fillColor(COLORS.gray).fontSize(10).text(avgProductionDays === null ? "Tempo médio de produção: sem dados ainda" : `Tempo médio de produção: ${avgProductionDays.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} dia${avgProductionDays === 1 ? "" : "s"}`, 70, 362, { width: doc.page.width - 140 });
+      doc.fillColor(COLORS.gray).fontSize(10).text(`Dia ${day} do mês · acompanhamento contínuo no quadro Kanban`, 70, 382, { width: doc.page.width - 140 });
+
+      // Selo motivacional de streak (rodada 20)
+      if (streak > 0) {
+        doc.fillColor(COLORS.amber).font("Helvetica-Bold").fontSize(12).text(`SELO DE CONSECUTIVIDADE: ${streak} ${streak === 1 ? "mês" : "meses"} seguido${streak === 1 ? "" : "s"} com a meta cumprida`, 70, 460, { width: doc.page.width - 140 });
+      } else {
+        doc.fillColor(COLORS.gray).fontSize(10).text("Streak atual: nenhum mês consecutivo com a meta cumprida ainda — comece a sequência!", 70, 460, { width: doc.page.width - 140 });
+      }
+      doc.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}

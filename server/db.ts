@@ -603,6 +603,42 @@ export async function getPinnedProductionStats(userId: number, monthKey?: string
   return { publishedThisMonth, avgProductionDays, goal, monthKey: key };
 }
 
+/** Dia do mês corrente (1–31) no fuso do servidor — usado para avaliar o
+ * progresso da meta conforme o mês avança (rodada 20). */
+export function dayOfMonth(date: Date = new Date()): number {
+  return date.getDate();
+}
+
+/** Quantos meses consecutivos (retrocedendo do mês corrente, exclusive, sem
+ * pular meses) tiveram a meta cumprida (publicadas >= goal do mês).
+ * Meses sem nenhum registro de ideia publicada interrompem o streak. */
+export async function getMonthlyGoalStreak(userId: number): Promise<{ streak: number; lastMetKey: string | null }> {
+  const db = await getDb();
+  if (!db) return { streak: 0, lastMetKey: null };
+  const now = new Date();
+  let year = now.getFullYear();
+  let month = now.getMonth(); // 0-based: o mês anterior ao corrente é a primeira casa
+  let streak = 0;
+  let lastMetKey: string | null = null;
+  while (streak < 24) {
+    // mês anterior na iteração
+    month -= 1;
+    if (month < 0) {
+      month = 11;
+      year -= 1;
+    }
+    const key = `${year}-${String(month + 1).padStart(2, "0")}`;
+    const stats = await getPinnedProductionStats(userId, key);
+    if (stats.publishedThisMonth >= stats.goal) {
+      streak += 1;
+      lastMetKey = key;
+    } else {
+      break;
+    }
+  }
+  return { streak, lastMetKey };
+}
+
 /** Define a meta de publicações de um mês (upsert: reescreve se já existir). */
 export async function setPinnedMonthlyGoal(userId: number, monthKey: string, goal: number) {
   const db = await getDb();

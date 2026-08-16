@@ -289,6 +289,7 @@ vi.mock("./db", async (importOriginal) => {
     archivePublishedIdeas: vi.fn(),
     getPinnedProductionStats: vi.fn(),
     setPinnedMonthlyGoal: vi.fn(),
+    getMonthlyGoalStreak: vi.fn(),
     deletePinnedIdea: vi.fn(),
   };
 });
@@ -314,6 +315,7 @@ const mockedUnarchive = vi.mocked(db.unarchiveIdea);
 const mockedArchivePublished = vi.mocked(db.archivePublishedIdeas);
 const mockedStats = vi.mocked(db.getPinnedProductionStats);
 const mockedSetGoal = vi.mocked(db.setPinnedMonthlyGoal);
+const mockedStreak = vi.mocked(db.getMonthlyGoalStreak);
 const mockedDeletePinned = vi.mocked(db.deletePinnedIdea);
 
 const folderUser = {
@@ -801,6 +803,42 @@ describe("extended idea pinning (pin/unpin/listPinned)", () => {
     const result = await caller.extended.deletePinnedIdea({ pinnedId: 3 });
     expect(result.success).toBe(true);
     expect(mockedDeletePinned).toHaveBeenCalledWith(2, 3);
+  });
+  it("reports the current streak of consecutive goal-completed months", async () => {
+    mockedStreak.mockResolvedValueOnce({ streak: 3, lastMetKey: "2026-07" } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.pinnedGoalStreak();
+    expect(result.streak).toBe(3);
+    expect(mockedStreak).toHaveBeenCalledWith(2);
+  });
+  it("defaults the streak to zero when no month has met its goal", async () => {
+    mockedStreak.mockResolvedValueOnce({ streak: 0, lastMetKey: null } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.pinnedGoalStreak();
+    expect(result.streak).toBe(0);
+  });
+  it("exports a one-page monthly production summary PDF (url + filename)", async () => {
+    mockedStats.mockResolvedValueOnce({
+      monthKey: "2026-08",
+      publishedThisMonth: 2,
+      avgProductionDays: 6.5,
+      goal: 4,
+    } as never);
+    mockedStreak.mockResolvedValueOnce({ streak: 1, lastMetKey: "2026-07" } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.exportMonthlyPdf({ monthKey: "2026-08" });
+    expect(result.fileName).toBe("resumo-producao-2026-08.pdf");
+    // O módulo de storage mockado no topo do arquivo (https://s3.example/p.pdf) é usado pelo router
+    expect(result.downloadUrl).toBe("https://s3.example/p.pdf");
+    expect(storagePut).toHaveBeenCalledWith(
+      expect.stringMatching(/^exports\/resumo-producao-2026-08-/),
+      expect.any(Buffer),
+      "application/pdf"
+    );
+  });
+  it("rejects a malformed month key on monthly export", async () => {
+    const caller = appRouter.createCaller(createFolderCtx());
+    await expect(caller.extended.exportMonthlyPdf({ monthKey: "2026/08" })).rejects.toThrow();
   });
   it("rejects an invalid status value", async () => {
     const caller = appRouter.createCaller(createFolderCtx());
