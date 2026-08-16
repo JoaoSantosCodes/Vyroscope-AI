@@ -1,0 +1,1 @@
+ALTER TABLE `pinned_idea_history` ADD `archived` int DEFAULT 0 NOT NULL;

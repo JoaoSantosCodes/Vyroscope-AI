@@ -443,6 +443,30 @@ export const extendedRouter = router({
       await updateStatus(ctx.user.id, input.pinnedId, input.status);
       return { success: true } as const;
     }),
+  /** Arquiva uma ideia fixada (remove do quadro Kanban sem perder o histórico). */
+  archiveIdea: protectedProcedure
+    .input(z.object({ pinnedId: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const { archiveIdea: archive } = await import("../db");
+      await archive(ctx.user.id, input.pinnedId);
+      return { success: true } as const;
+    }),
+  /** Restaura uma ideia arquivada para o quadro Kanban. */
+  unarchiveIdea: protectedProcedure
+    .input(z.object({ pinnedId: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const { unarchiveIdea: unarchive } = await import("../db");
+      await unarchive(ctx.user.id, input.pinnedId);
+      return { success: true } as const;
+    }),
+  /** Remove definitivamente uma ideia (arquivada ou não) do histórico. */
+  deletePinnedIdea: protectedProcedure
+    .input(z.object({ pinnedId: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const { deletePinnedIdea: del } = await import("../db");
+      await del(ctx.user.id, input.pinnedId);
+      return { success: true } as const;
+    }),
   /** Exporta o histórico de ideias do dia (fixadas + rotacionadas) em PDF.
    *  O PDF reflete a visão atual do usuário, incluindo os filtros aplicados
    *  na página (o frontend envia as listas filtradas). */
@@ -462,6 +486,19 @@ export const extendedRouter = router({
             status: z.enum(["planejada", "gravando", "publicada"]).optional(),
           })
         ).max(200),
+        archived: z.array(
+          z.object({
+            date: z.string().min(1).max(10),
+            niche: z.string().min(1),
+            analysisId: z.string().min(1),
+            title: z.string().min(1),
+            hook: z.string().optional(),
+            angle: z.string().optional(),
+            viralityScore: z.number().int().min(0).max(100).nullable(),
+            notes: z.string().optional(),
+            status: z.enum(["planejada", "gravando", "publicada"]).optional(),
+          })
+        ).max(200).optional(),
         ideas: z.array(
           z.object({
             date: z.string().min(1).max(10),
@@ -479,11 +516,12 @@ export const extendedRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { buildIdeaHistoryPdf } = await import("../exportPdf");
-      if (input.pinned.length === 0 && input.ideas.length === 0) {
+      if (input.pinned.length === 0 && (input.archived?.length ?? 0) === 0 && input.ideas.length === 0) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Não há ideias para exportar." });
       }
       const buffer = await buildIdeaHistoryPdf({
         pinned: input.pinned,
+        archived: input.archived,
         ideas: input.ideas,
         userName: ctx.user.name,
       });

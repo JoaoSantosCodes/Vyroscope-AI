@@ -25,7 +25,7 @@ import { KANBAN_HIDE_PUBLISHED_KEY, KANBAN_OLDEST_FIRST_KEY, readSessionFlag, so
 import { quickNoteValue, shouldSaveQuickNote } from "@/lib/quickNote";
 import { formatDate, scoreColor, scoreLabel } from "@/lib/score";
 import { trpc } from "@/lib/trpc";
-import { ArrowUpDown, Edit3, FileText, Lightbulb, Loader2, Pin, PinOff, Radar, Search, StickyNote } from "lucide-react";
+import { Archive, ArrowUpDown, Edit3, FileText, Lightbulb, Loader2, Pin, PinOff, Radar, Search, StickyNote } from "lucide-react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 
@@ -56,6 +56,8 @@ type PinnedIdea = {
   status: string;
   /** Momento em que a ideia entrou no status atual */
   statusChangedAt: Date;
+  /** 0 = ativa no quadro, 1 = arquivada */
+  archived: number;
   createdAt: Date;
 };
 
@@ -268,7 +270,7 @@ export default function IdeaHistory() {
     onMutate: async ({ date, analysisId, suggestionTitle, niche, viralityScore }) => {
       await utils.extended.listPinnedIdeas.cancel();
       const prev = utils.extended.listPinnedIdeas.getData();
-      utils.extended.listPinnedIdeas.setData(undefined, { ideas: [{ id: 0, date, analysisId, suggestionTitle, niche, viralityScore, sortOrder: null, notes: null, status: "planejada", statusChangedAt: new Date(), createdAt: new Date() }, ...(prev?.ideas ?? [])] });
+      utils.extended.listPinnedIdeas.setData(undefined, { ideas: [{ id: 0, date, analysisId, suggestionTitle, niche, viralityScore, sortOrder: null, notes: null, status: "planejada", statusChangedAt: new Date(), archived: 0, createdAt: new Date() }, ...(prev?.ideas ?? [])] });
       return { prev };
     },
     onError: (_, __, ctx) => {
@@ -321,6 +323,49 @@ export default function IdeaHistory() {
     onSuccess: () => toast.success("Status atualizado."),
   });
 
+  // ===== Arquivamento (quadro limpo sem perder o histórico) =====
+  const archiveMutation = trpc.extended.archiveIdea.useMutation({
+    onMutate: async ({ pinnedId }) => {
+      await utils.extended.listPinnedIdeas.cancel();
+      const prev = utils.extended.listPinnedIdeas.getData();
+      utils.extended.listPinnedIdeas.setData(undefined, {
+        ideas: (prev?.ideas ?? []).map((i) => (i.id === pinnedId ? { ...i, archived: 1 } : i)),
+      });
+      return { prev };
+    },
+    onError: (_, __, ctx) => utils.extended.listPinnedIdeas.setData(undefined, ctx?.prev ?? { ideas: [] }),
+    onSettled: () => utils.extended.listPinnedIdeas.invalidate(),
+    onSuccess: () => toast.success("Ideia arquivada. Ela continua no histórico."),
+  });
+
+  const unarchiveMutation = trpc.extended.unarchiveIdea.useMutation({
+    onMutate: async ({ pinnedId }) => {
+      await utils.extended.listPinnedIdeas.cancel();
+      const prev = utils.extended.listPinnedIdeas.getData();
+      utils.extended.listPinnedIdeas.setData(undefined, {
+        ideas: (prev?.ideas ?? []).map((i) => (i.id === pinnedId ? { ...i, archived: 0 } : i)),
+      });
+      return { prev };
+    },
+    onError: (_, __, ctx) => utils.extended.listPinnedIdeas.setData(undefined, ctx?.prev ?? { ideas: [] }),
+    onSettled: () => utils.extended.listPinnedIdeas.invalidate(),
+    onSuccess: () => toast.success("Ideia restaurada ao quadro."),
+  });
+
+  const deletePinnedMutation = trpc.extended.deletePinnedIdea.useMutation({
+    onMutate: async ({ pinnedId }) => {
+      await utils.extended.listPinnedIdeas.cancel();
+      const prev = utils.extended.listPinnedIdeas.getData();
+      utils.extended.listPinnedIdeas.setData(undefined, {
+        ideas: (prev?.ideas ?? []).filter((i) => i.id !== pinnedId),
+      });
+      return { prev };
+    },
+    onError: (_, __, ctx) => utils.extended.listPinnedIdeas.setData(undefined, ctx?.prev ?? { ideas: [] }),
+    onSettled: () => utils.extended.listPinnedIdeas.invalidate(),
+    onSuccess: () => toast.success("Ideia removida do histórico."),
+  });
+
   const exportMutation = trpc.extended.exportIdeaHistoryPdf.useMutation({
     onSuccess: (data) => {
       const link = document.createElement("a");
@@ -335,7 +380,9 @@ export default function IdeaHistory() {
   });
 
   const ideas: HistoryIdea[] = historyQuery.data?.ideas ?? [];
-  const pinned: PinnedIdea[] = pinnedQuery.data?.ideas ?? [];
+  // pinned = ativas (não arquivadas); pinnedAll = todas fixadas para o PDF incluir status/notas completas
+  const pinned: PinnedIdea[] = (pinnedQuery.data?.ideas ?? []).filter((p) => p.archived === 0);
+  const archived: PinnedIdea[] = (pinnedQuery.data?.ideas ?? []).filter((p) => p.archived === 1);
 
   // ===== Edição rápida de notas no card (modal compacto) =====
   const [quickNoteId, setQuickNoteId] = useState<number | null>(null);
@@ -415,6 +462,14 @@ export default function IdeaHistory() {
     unpinMutation.mutate({ pinnedId });
   };
 
+  const handleUnarchive = (pinnedId: number) => {
+    unarchiveMutation.mutate({ pinnedId });
+  };
+
+  const handleDeletePinned = (pinnedId: number) => {
+    deletePinnedMutation.mutate({ pinnedId });
+  };
+
   // ===== Reordenação das ideias fixadas (arrastar e soltar) =====
   const dragIndex = useRef<number | null>(null);
   const reorderMutation = trpc.extended.reorderPinnedIdeas.useMutation({
@@ -491,6 +546,9 @@ export default function IdeaHistory() {
     p.status === "gravando" && p.statusChangedAt && now - new Date(p.statusChangedAt).getTime() > STAGNATION_DAYS * 24 * 60 * 60 * 1000;
   const stagnantDays = (p: PinnedIdea) =>
     p.statusChangedAt ? Math.floor((now - new Date(p.statusChangedAt).getTime()) / (24 * 60 * 60 * 1000)) : 0;
+
+  /** Quantas ideias ativas estão estagnadas em "Gravando" (>7 dias) */
+  const staleIdeaCount = pinned.filter(isStagnant).length;
 
   const kanbanDragIndex = useRef<number | null>(null);
   const kanbanDragStatus = useRef<"planejada" | "gravando" | "publicada" | null>(null);
@@ -632,16 +690,17 @@ export default function IdeaHistory() {
             className="h-9"
             disabled={exportMutation.isPending || historyQuery.isLoading}
             onClick={() => {
-              const pinnedRows = pinned.map((p) => ({
-                date: p.date,
-                niche: p.niche,
-                analysisId: p.analysisId,
-                title: p.suggestionTitle,
-                viralityScore: p.viralityScore,
-                notes: p.notes ?? undefined,
-                status: (p.status === "planejada" || p.status === "gravando" || p.status === "publicada") ? (p.status as "planejada" | "gravando" | "publicada") : undefined,
-              }));
-              exportMutation.mutate({ pinned: pinnedRows, ideas: ideas.map(toPdfRow) });
+              const buildPinnedRows = (rows: PinnedIdea[]) =>
+                rows.map((p) => ({
+                  date: p.date,
+                  niche: p.niche,
+                  analysisId: p.analysisId,
+                  title: p.suggestionTitle,
+                  viralityScore: p.viralityScore,
+                  notes: p.notes ?? undefined,
+                  status: (p.status === "planejada" || p.status === "gravando" || p.status === "publicada") ? (p.status as "planejada" | "gravando" | "publicada") : undefined,
+                }));
+              exportMutation.mutate({ pinned: buildPinnedRows(pinned), archived: buildPinnedRows(archived), ideas: ideas.map(toPdfRow) });
             }}
           >
             {exportMutation.isPending ? (
@@ -803,6 +862,15 @@ export default function IdeaHistory() {
                                   )}
                                   Duplicar
                                 </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 gap-1 text-xs text-muted-foreground hover:text-foreground"
+                                  disabled={archiveMutation.isPending}
+                                  onClick={() => archiveMutation.mutate({ pinnedId: p.id })}
+                                >
+                                  <Archive className="h-3 w-3" /> Arquivar
+                                </Button>
                               </div>
                               <p className="mt-3 text-[11px] text-muted-foreground">
                                 {formatDate(new Date(p.date + "T12:00:00").getTime())} · {p.niche}
@@ -846,6 +914,61 @@ export default function IdeaHistory() {
                   </div>
                 );
               })}
+            </div>
+          </div>
+        )}
+
+        {/* Ideias arquivadas: fora do quadro, mas mantidas no histórico */}
+        {archived.length > 0 && (
+          <div className="mb-8">
+            <h2 className="mb-3 flex items-center gap-2 font-display text-lg font-semibold">
+              <Archive className="h-4 w-4 text-muted-foreground" /> Arquivadas
+            </h2>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Ideias concluídas que saíram do quadro para mantê-lo limpo. Elas continuam disponíveis para referência e nos exports.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {archived.map((p) => (
+                <Card key={p.id} className="flex flex-col border-dashed border-border bg-muted/30">
+                  <CardContent className="flex flex-1 flex-col p-4">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-[10px] font-medium text-muted-foreground">
+                        {STATUS_LIST.find((s) => s.key === p.status)?.label ?? p.status}
+                      </span>
+                    </div>
+                    <h3 className="mt-1 font-display text-sm font-semibold leading-snug">{p.suggestionTitle}</h3>
+                    {p.notes && (
+                      <p className="mt-2 line-clamp-3 text-[11px] text-muted-foreground">
+                        {p.notes}
+                      </p>
+                    )}
+                    <p className="mt-auto pt-3 text-[10px] text-muted-foreground">
+                      {formatDate(new Date(p.date + "T12:00:00").getTime())} · {p.niche}
+                      {p.viralityScore != null ? ` · score ${p.viralityScore}` : ""}
+                    </p>
+                    <div className="mt-2 flex gap-1.5">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 gap-1 text-xs"
+                        disabled={unarchiveMutation.isPending}
+                        onClick={() => handleUnarchive(p.id)}
+                      >
+                        <Archive className="h-3 w-3" /> Restaurar
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 gap-1 text-xs text-destructive/80 hover:text-destructive"
+                        disabled={deletePinnedMutation.isPending}
+                        onClick={() => handleDeletePinned(p.id)}
+                      >
+                        Excluir
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
             </div>
           </div>
         )}

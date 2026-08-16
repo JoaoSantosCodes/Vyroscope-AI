@@ -331,4 +331,44 @@ describe("buildIdeaHistoryPdf", () => {
     expect(compact).toContain("RASCUNHOSOBREAROTINAMATINAL");
     expect(compact).toContain("STATUS:GRAVANDO");
   });
+
+  it("inclui as ideias arquivadas (com status e notas) em seção dedicada do PDF", async () => {
+    const buffer = await buildIdeaHistoryPdf({
+      pinned: [],
+      archived: [
+        {
+          date: "2026-08-01",
+          niche: "inteligência artificial",
+          analysisDate: Date.parse("2026-07-25"),
+          title: "Assistente com IA",
+          viralityScore: 74,
+          notes: "Vídeo publicado em agosto",
+          status: "publicada",
+        },
+      ],
+      ideas: sampleHistoryIdeas,
+    });
+    const { spawnSync } = await import("node:child_process");
+    const { writeFileSync, mkdtempSync } = await import("node:fs");
+    const tmp = mkdtempSync("/tmp/pdf-test-");
+    const file = `${tmp}/history-archived.pdf`;
+    writeFileSync(file, buffer);
+    const run = spawnSync(
+      process.execPath,
+      ["/home/ubuntu/vyroscope-ai/node_modules/pdf-parse/bin/cli.mjs", "text", file],
+      { encoding: "utf-8", cwd: "/home/ubuntu/vyroscope-ai" }
+    );
+    const text = run.stdout + run.stderr;
+    if (run.status !== 0) throw new Error(`pdf-parse CLI falhou: ${text}`);
+    const compact = text.replace(/[\s ]/g, "").toUpperCase();
+    expect(compact).toContain("ARQUIVADAS");
+    expect(compact).toContain("ASSISTENTECOMIA");
+    expect(compact).toContain("STATUS:PUBLICADA");
+    expect(compact).toContain("VÍDEOPUBLICADOEMAGOSTO");
+    expect(compact).toContain("1ARQUIVADA");
+  });
+
+  it("rejeita entrada sem nenhuma ideia (ativas, arquivadas ou rotacionadas)", async () => {
+    await expect(buildIdeaHistoryPdf({ pinned: [], archived: [], ideas: [] })).rejects.toThrow();
+  });
 });

@@ -284,6 +284,9 @@ vi.mock("./db", async (importOriginal) => {
     updatePinnedNote: vi.fn(),
     reorderPinnedIdeas: vi.fn(),
     updateIdeaStatus: vi.fn(),
+    archiveIdea: vi.fn(),
+    unarchiveIdea: vi.fn(),
+    deletePinnedIdea: vi.fn(),
   };
 });
 
@@ -303,6 +306,9 @@ const mockedListPinned = vi.mocked(db.listPinnedIdeas);
 const mockedUpdateNote = vi.mocked(db.updatePinnedNote);
 const mockedReorderPinned = vi.mocked(db.reorderPinnedIdeas);
 const mockedUpdateStatus = vi.mocked(db.updateIdeaStatus);
+const mockedArchive = vi.mocked(db.archiveIdea);
+const mockedUnarchive = vi.mocked(db.unarchiveIdea);
+const mockedDeletePinned = vi.mocked(db.deletePinnedIdea);
 
 const folderUser = {
   id: 2,
@@ -702,6 +708,27 @@ describe("extended idea pinning (pin/unpin/listPinned)", () => {
     // updateIdeaStatus assina (userId, pinnedId, status) e persiste status + statusChangedAt; o mock só captura os 3 primeiros
     expect(mockedUpdateStatus).toHaveBeenCalledWith(2, 3, "gravando");
     expect(before).toBeGreaterThan(0);
+  });
+  it("archives a pinned idea (removed from Kanban, kept in history)", async () => {
+    mockedArchive.mockResolvedValueOnce(undefined as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.archiveIdea({ pinnedId: 3 });
+    expect(result.success).toBe(true);
+    expect(mockedArchive).toHaveBeenCalledWith(2, 3);
+  });
+  it("unarchives a pinned idea back to the Kanban board", async () => {
+    mockedUnarchive.mockResolvedValueOnce(undefined as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.unarchiveIdea({ pinnedId: 3 });
+    expect(result.success).toBe(true);
+    expect(mockedUnarchive).toHaveBeenCalledWith(2, 3);
+  });
+  it("permanently deletes a pinned idea", async () => {
+    mockedDeletePinned.mockResolvedValueOnce(undefined as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.deletePinnedIdea({ pinnedId: 3 });
+    expect(result.success).toBe(true);
+    expect(mockedDeletePinned).toHaveBeenCalledWith(2, 3);
   });
   it("rejects an invalid status value", async () => {
     const caller = appRouter.createCaller(createFolderCtx());

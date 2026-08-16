@@ -324,6 +324,8 @@ export type IdeaHistoryPdfIdea = {
  */
 export type IdeaHistoryPdfInput = {
   pinned: IdeaHistoryPdfIdea[];
+  /** Ideias arquivadas fora do quadro Kanban (mantidas no histórico) */
+  archived?: IdeaHistoryPdfIdea[];
   ideas: IdeaHistoryPdfIdea[];
   /** Nome do usuário para a capa (opcional) */
   userName?: string | null;
@@ -339,8 +341,9 @@ export async function buildIdeaHistoryPdf(input: IdeaHistoryPdfInput): Promise<B
     throw new Error("Dados inválidos para exportação do histórico.");
   }
   const pinned = Array.isArray(input.pinned) ? input.pinned : [];
+  const archived = Array.isArray(input.archived) ? input.archived : [];
   const ideas = Array.isArray(input.ideas) ? input.ideas : [];
-  if (pinned.length === 0 && ideas.length === 0) {
+  if (pinned.length === 0 && archived.length === 0 && ideas.length === 0) {
     throw new Error("Nada para exportar: o histórico está vazio.");
   }
   return new Promise<Buffer>((resolve, reject) => {
@@ -351,7 +354,7 @@ export async function buildIdeaHistoryPdf(input: IdeaHistoryPdfInput): Promise<B
       doc.on("end", () => resolve(Buffer.concat(chunks)));
       doc.on("error", reject);
 
-      const total = pinned.length + ideas.length;
+      const total = pinned.length + archived.length + ideas.length;
 
       // ===== Capa =====
       doc.rect(0, 0, doc.page.width, doc.page.height).fill(COLORS.dark);
@@ -364,7 +367,7 @@ export async function buildIdeaHistoryPdf(input: IdeaHistoryPdfInput): Promise<B
         .fillColor(COLORS.gray)
         .fontSize(10)
         .text("Gerado em " + new Date().toLocaleString("pt-BR"), 54, 240);
-      doc.fillColor(COLORS.light).fontSize(12).text(`${total} ideia${total === 1 ? "" : "s"} · ${pinned.length} fixada${pinned.length === 1 ? "" : "s"}`, 54, 265);
+      doc.fillColor(COLORS.light).fontSize(12).text(`${total} ideia${total === 1 ? "" : "s"} · ${pinned.length} fixada${pinned.length === 1 ? "" : "s"}${archived.length > 0 ? ` · ${archived.length} arquivada${archived.length === 1 ? "" : "s"}` : ""}`, 54, 265);
 
       doc.addPage();
 
@@ -431,6 +434,16 @@ export async function buildIdeaHistoryPdf(input: IdeaHistoryPdfInput): Promise<B
       if (pinned.length > 0) {
         renderSectionHeader("FIXADAS NO TOPO", pinned.length);
         pinned.forEach((idea) => {
+          renderIdeaCard(idea);
+          currentCount += 1;
+          if (currentCount < total && doc.y > doc.page.height - 60) doc.addPage();
+        });
+      }
+
+      if (archived.length > 0) {
+        if (currentCount > 0 && doc.y > doc.page.height - 60) doc.addPage();
+        renderSectionHeader("ARQUIVADAS", archived.length);
+        archived.forEach((idea) => {
           renderIdeaCard(idea);
           currentCount += 1;
           if (currentCount < total && doc.y > doc.page.height - 60) doc.addPage();

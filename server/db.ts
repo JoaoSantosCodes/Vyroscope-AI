@@ -420,6 +420,7 @@ export async function listPinnedIdeas(userId: number) {
       notes: pinnedIdeaHistory.notes,
       status: pinnedIdeaHistory.status,
       statusChangedAt: pinnedIdeaHistory.statusChangedAt,
+      archived: pinnedIdeaHistory.archived,
       createdAt: pinnedIdeaHistory.createdAt,
     })
     .from(pinnedIdeaHistory)
@@ -485,6 +486,41 @@ export async function updatePinnedNote(userId: number, pinnedId: number, notes: 
     .update(pinnedIdeaHistory)
     .set({ notes: notes === "" ? null : notes })
     .where(eq(pinnedIdeaHistory.id, pinnedId));
+}
+
+/** Arquiva uma ideia fixada (sai do quadro Kanban, mantém o histórico). */
+export async function archiveIdea(userId: number, pinnedId: number) {
+  const db = await getDb();
+  if (!db) return;
+  const owns = await db
+    .select({ id: pinnedIdeaHistory.id })
+    .from(pinnedIdeaHistory)
+    .where(and(eq(pinnedIdeaHistory.id, pinnedId), eq(pinnedIdeaHistory.userId, userId)))
+    .limit(1);
+  if (owns.length === 0) throw new Error("Ideia fixada não encontrada");
+  await db.update(pinnedIdeaHistory).set({ archived: 1 }).where(eq(pinnedIdeaHistory.id, pinnedId));
+}
+
+/** Restaura uma ideia arquivada para o quadro Kanban. */
+export async function unarchiveIdea(userId: number, pinnedId: number) {
+  const db = await getDb();
+  if (!db) return;
+  const owns = await db
+    .select({ id: pinnedIdeaHistory.id })
+    .from(pinnedIdeaHistory)
+    .where(and(eq(pinnedIdeaHistory.id, pinnedId), eq(pinnedIdeaHistory.userId, userId)))
+    .limit(1);
+  if (owns.length === 0) throw new Error("Ideia fixada não encontrada");
+  await db.update(pinnedIdeaHistory).set({ archived: 0 }).where(eq(pinnedIdeaHistory.id, pinnedId));
+}
+
+/** Remove definitivamente uma ideia (arquivada ou não) do histórico. */
+export async function deletePinnedIdea(userId: number, pinnedId: number) {
+  const db = await getDb();
+  if (!db) return;
+  await db
+    .delete(pinnedIdeaHistory)
+    .where(and(eq(pinnedIdeaHistory.id, pinnedId), eq(pinnedIdeaHistory.userId, userId)));
 }
 
 /** Atualiza o status de produção de uma ideia fixada, registrando o momento da mudança. */

@@ -346,6 +346,17 @@ function IdeaOfTheDayCard() {
   const [, navigate] = useLocation();
   const utils = trpc.useUtils();
   const ideaQuery = trpc.extended.ideaOfTheDay.useQuery(undefined, { refetchInterval: 0 });
+
+  // ===== Alerta de ideias estagnadas em "Gravando" (>7 dias) =====
+  const STAGNATION_DAYS = 7;
+  // O card só é renderizado para usuários autenticados (Home já condicionaliza)
+  const staleQuery = trpc.extended.listPinnedIdeas.useQuery(undefined, {
+    refetchInterval: 15 * 60 * 1000,
+  });
+  const staleIdeas = (staleQuery.data?.ideas ?? [])
+    .filter((p) => p.archived === 0 && p.status === "gravando" && p.statusChangedAt)
+    .filter((p) => Date.now() - new Date(p.statusChangedAt).getTime() > STAGNATION_DAYS * 24 * 60 * 60 * 1000);
+
   const [outline, setOutline] = useState<{ niche: string; analysisId: string; suggestion: { title: string; viralityScore: number | null; hook?: string; angle?: string; targetLength?: string }; outline: { title: string; totalLength: string; acts: { act: string; label: string; duration: string; points: string[]; keyLine: string }[]; notes: string[] } } | null>(null);
   const [outlineDialogOpen, setOutlineDialogOpen] = useState(false);
   const outlineMutation = trpc.extended.generateIdeaOutline.useMutation({
@@ -363,7 +374,20 @@ function IdeaOfTheDayCard() {
   };
 
   return (
-    <Card className="w-full max-w-2xl border-primary/25 bg-gradient-to-br from-primary/10 via-card to-card shadow-2xl shadow-black/30">
+    <>
+      {staleQuery.isSuccess && staleIdeas.length > 0 && (
+        <button
+          type="button"
+          onClick={() => navigate("/ideia-do-dia")}
+          className="mb-4 flex w-full max-w-2xl items-center gap-2.5 rounded-lg border border-amber-500/50 bg-amber-500/10 px-4 py-2.5 text-left transition-colors hover:border-amber-500/70 hover:bg-amber-500/15"
+        >
+          <span className="animate-pulse text-amber-500">⏸</span>
+          <span className="text-xs sm:text-sm">
+            <strong className="text-amber-600">{staleIdeas.length} ideia{staleIdeas.length === 1 ? "" : "s"} parada{staleIdeas.length === 1 ? "" : "s"}</strong> há mais de {STAGNATION_DAYS} dias em “Gravando” — abra o quadro Kanban para resolver.
+          </span>
+        </button>
+      )}
+      <Card className="w-full max-w-2xl border-primary/25 bg-gradient-to-br from-primary/10 via-card to-card shadow-2xl shadow-black/30">
       <CardContent className="p-5 sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
@@ -467,5 +491,6 @@ function IdeaOfTheDayCard() {
         <OutlineDialog outline={outline} onOpenChange={(open) => !open && setOutline(null)} />
       </CardContent>
     </Card>
+    </>
   );
 }

@@ -174,6 +174,8 @@ export const pinnedIdeaHistory = mysqlTable("pinned_idea_history", {
   status: varchar("status", { length: 10 }).default("planejada").notNull(),
   /** Momento em que a ideia entrou no status atual (usado para detectar estagnação) */
   statusChangedAt: timestamp("statusChangedAt").defaultNow().notNull(),
+  /** Ideia arquivada (0 = ativa no quadro, 1 = arquivada fora do quadro) */
+  archived: int("archived").default(0).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 

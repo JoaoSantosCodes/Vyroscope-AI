@@ -156,3 +156,8 @@
 - [x] Cobertura do fluxo de edição rápida de notas: extraído helper testável client/src/lib/quickNote.ts (shouldSaveQuickNote/normalizeNote/quickNoteValue) com 8 testes (mesmo texto, vazios equivalentes, mudança, apagamento); UI integrada ao helper com mutation de string vazia; 114 testes totais
 
 - [x] Teste do fluxo real de saveQuickNote: lógica de decisão (mutation vs. fechar sem mutation) testada no helper quickNote.test.ts (8 testes); sucesso/erro da mutation validados via verificação visual do fluxo (modal fecha após salvar; toast de erro em falha) com dados de teste no banco, depois limpos
+
+## Melhorias solicitadas (rodada 17)
+- [x] Kanban: botão "Arquivar" em ideias publicadas — move para seção "Arquivadas" (oculta do quadro ativo), com opção de desarquivar e de excluir definitivamente; coluna archived(0/1) no banco (migração 0011) + helpers/procedures archiveIdea/unarchiveIdea/deletePinnedIdea (ownership-gated) + mutations com update otimista
+- [x] Home: banner âmbar clicável (navigate /ideia-do-dia) no IdeaOfTheDayCard quando houver ideias não arquivadas em "Gravando" >7d (listPinnedIdeas, refetch 15min, STAGNATION_DAYS=7); texto corrigido (sem template literal com $)
+- [x] PDF do histórico: frontend envia pinned+archived (schema zod opcional), exportPdf.ts renderiza seção "ARQUIVADAS" com status/notas e capa conta arquivadas; 2 testes novos (119 testes)
