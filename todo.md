@@ -260,10 +260,10 @@
 - [x] Documentação da rodada 29 para o Obsidian (rodada-29-obsidian.md), verificação visual e checkpoint
 
 ## Exportação GitHub e preparo Vercel
-- [ ] Push do histórico completo do projeto para JoaoSantosCodes/Vyroscope-AI (branch main)
-- [ ] Configuração de build para Vercel (vercel.json ou scripts, output de produção)
-- [ ] Documentar variáveis de ambiente necessárias no README de deploy
-- [ ] Validar repositório e entregar ao usuário
+- [x] Push do histórico completo do projeto para JoaoSantosCodes/Vyroscope-AI (branch main) — realizado na rodada 30 (commit 94c6c43 inclui o histórico completo)
+- [x] Configuração de build para Vercel (vercel.json criado + scripts vercel:build/start + engines)
+- [x] Variáveis de ambiente documentadas no README.md e DEPLOY_VERCEL.md
+- [x] Repositório validado (build de produção OK, 196 testes) e entregue ao usuário
 
 ## Autenticação modular e preparo Vercel (rodada 30)
 - [x] Backend: auth provider swappable (server/_core/authProvider.ts) com implementações Manus OAuth e local (nome + código), controlado por env AUTH_PROVIDER (default manus)
