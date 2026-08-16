@@ -36,7 +36,8 @@ Veja `DEPLOY_VERCEL.md` — resumo:
 2. `DATABASE_URL` apontando para seu MySQL/TiDB
 3. `JWT_SECRET` com segredo próprio
 4. Aplicar as migrações em `drizzle/migrations/`
-5. O `vercel.json` já está configurado (build + rotas)
+5. Definir `OPENAI_API_KEY` (LLM + thumbnails) e `YOUTUBE_DATA_API_KEY` (consulta de vídeos) — sem elas as chamadas caem no fallback da plataforma Manus, que não existe fora dela
+6. O `vercel.json` já está configurado (build + rotas)
 
 ## Autenticação modular (Rodada 30)
 
@@ -47,7 +48,19 @@ O provedor de auth é controlado pela env `AUTH_PROVIDER`:
 | `manus` (padrão) | Botão "Entrar" → OAuth da Manus | Requer envs da plataforma (`VITE_APP_ID`, `OAUTH_SERVER_URL`) |
 | `local` | Nome + código secreto (`AUTH_SECRET_CODE`) | Sem dependências externas; mesmo cookie/JWT; comparação timing-safe |
 
-Implementação em `server/_core/authProvider.ts` e fluxo frontend em `client/src/components/LocalLoginForm.tsx`. Testes: `server/authProvider.test.ts` (14 testes do provider).
+Implementação em `server/_core/authProvider.ts` e fluxo frontend em `client/src/components/LocalLoginForm.tsx`. Testes: `server/authProvider.test.ts` (18 testes do provider).
+
+### Providers próprios de IA e YouTube (Rodada 31)
+
+Para deploy fora da Manus, os providers de LLM, imagem e YouTube escolhem automaticamente entre a chave própria (env) e o hub interno da Manus (fallback):
+
+| Provider | Arquivo | Envs |
+|---|---|---|
+| Texto (análises, roteiros) | `server/_core/llm.ts` | `OPENAI_API_KEY`, `OPENAI_API_BASE`, `OPENAI_MODEL` |
+| Imagem (thumbnails) | `server/_core/imageGeneration.ts` | `OPENAI_API_KEY`, `IMAGE_MODEL` (default `dall-e-3`) |
+| YouTube (vídeos em alta) | `server/youtube.ts` | `YOUTUBE_DATA_API_KEY` |
+
+Com `AUTH_ALLOW_PERSONAL_CODES=1`, usuários com conta criada pelo login local podem definir um código pessoal no perfil (card "Código de acesso local"), armazenado apenas como hash SHA-256 em `users.localCodeHash`. O login aceita o código global ou o pessoal; deixar o campo vazio remove o código pessoal.
 
 ## Repositório
 

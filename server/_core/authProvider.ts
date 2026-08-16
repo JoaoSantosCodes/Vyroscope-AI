@@ -36,7 +36,8 @@ export function getAuthProvider(): AuthProviderKind {
 export function isLocalAuthEnabled(): boolean {
   return (
     getAuthProvider() === "local" &&
-    isNonEmptyString(process.env.AUTH_SECRET_CODE)
+    (isNonEmptyString(process.env.AUTH_SECRET_CODE) ||
+      isNonEmptyString(process.env.AUTH_ALLOW_PERSONAL_CODES))
   );
 }
 
@@ -62,16 +63,30 @@ export async function handleLocalAuth(req: Request, res: Response) {
     res.status(400).json({ error: "code and name are required" });
     return;
   }
-  const secret = process.env.AUTH_SECRET_CODE ?? "";
-  const constantMatch =
-    code.length === secret.length &&
-    crypto.timingSafeEqual(Buffer.from(code), Buffer.from(secret));
-  if (!constantMatch) {
-    res.status(401).json({ error: "invalid code" });
-    return;
-  }
   try {
-    const openId = `local_${name.toLowerCase().replace(/[^a-z0-9]+/g, "_")}_${process.env.AUTH_SECRET_CODE_HASH ?? hashForOpenId(secret)}`;
+    // (Rodada 31) O código pode ser o global (AUTH_SECRET_CODE, comparação
+    // timing-safe) OU o código pessoal do usuário (hash SHA-256 salvo em
+    // users.localCodeHash via perfil). O usuário pessoal vence quando ambos
+    // existem; em ambos os casos a identificação final usa o hash.
+    const codeHash = crypto.createHash("sha256").update(code).digest("hex");
+    const globalSecret = process.env.AUTH_SECRET_CODE ?? "";
+    const constantMatch =
+      code.length === globalSecret.length &&
+      crypto.timingSafeEqual(Buffer.from(code), Buffer.from(globalSecret));
+    const globalOpenId = `local_${name.toLowerCase().replace(/[^a-z0-9]+/g, "_")}_${hashForOpenId(globalSecret)}`;
+    const personalOpenId = `local_${name.toLowerCase().replace(/[^a-z0-9]+/g, "_")}_${hashForOpenId(code)}`;
+
+    let openId = constantMatch ? globalOpenId : null;
+    if (!openId) {
+      const personal = await db.getUserByOpenId(personalOpenId);
+      if (personal?.localCodeHash && personal.localCodeHash === codeHash) {
+        openId = personalOpenId;
+      }
+    }
+    if (!openId) {
+      res.status(401).json({ error: "invalid code" });
+      return;
+    }
     const signedInAt = new Date();
     let user = await db.getUserByOpenId(openId);
     if (!user) {
@@ -81,8 +96,19 @@ export async function handleLocalAuth(req: Request, res: Response) {
         email: null,
         loginMethod: "local",
         lastSignedIn: signedInAt,
+        localCodeHash: constantMatch ? null : codeHash,
       });
       user = await db.getUserByOpenId(openId);
+    } else {
+      await db.upsertUser({
+        id: user.id,
+        openId,
+        name: name || null,
+        email: user.email ?? null,
+        loginMethod: "local",
+        lastSignedIn: signedInAt,
+        localCodeHash: user.localCodeHash ?? (constantMatch ? null : codeHash),
+      });
     }
     if (!user) {
       res.status(500).json({ error: "failed to register local user" });
@@ -144,6 +170,11 @@ function expressLikeJsonGuard(
     }
     await handler(req, res);
   };
+}
+
+/** Hash (SHA-256) de um código para comparação com users.localCodeHash. */
+export function hashSecretCode(code: string): string {
+  return crypto.createHash("sha256").update(code).digest("hex");
 }
 
 /**

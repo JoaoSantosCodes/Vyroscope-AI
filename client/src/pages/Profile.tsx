@@ -45,6 +45,33 @@ export default function Profile() {
     onError: (err) => toast.error(err.message),
   });
 
+  // (Rodada 31) Código secreto pessoal para o login local
+  const [secretCode, setSecretCode] = useState("");
+  const [secretConfirm, setSecretConfirm] = useState("");
+  const secretMutation = trpc.profile.setSecretCode.useMutation({
+    onSuccess: (res) => {
+      utils.profile.me.invalidate();
+      setSecretCode("");
+      setSecretConfirm("");
+      toast.success(
+        res.hasPersonalCode
+          ? "Código de acesso atualizado! Use-o para entrar em qualquer dispositivo."
+          : "Código de acesso removido."
+      );
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const isLocalUser = data?.loginMethod === "local";
+
+  const handleSaveSecret = () => {
+    if (secretCode !== secretConfirm) {
+      toast.error("Os códigos não coincidem.");
+      return;
+    }
+    secretMutation.mutate({ code: secretCode, confirm: secretConfirm });
+  };
+
   if (loading || meQuery.isLoading) {
     return (
       <SiteLayout>
@@ -153,6 +180,67 @@ export default function Profile() {
             </CardContent>
           </Card>
         </div>
+
+        {/* (Rodada 31) Código de acesso pessoal para o login local */}
+        <Card className="border-border/60">
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <ShieldCheck className="h-5 w-5 text-primary" />
+              Código de acesso local
+            </CardTitle>
+            <CardDescription>
+              {isLocalUser
+                ? "Defina ou altere seu código pessoal de login. Ele funciona mesmo se a senha global do site for trocada. O código é armazenado apenas como hash — não podemos exibi-lo depois."
+                : "Login local não disponível nesta conta (você usa Manus OAuth)."}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            {isLocalUser ? (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="secret-code">Novo código de acesso</Label>
+                  <Input
+                    id="secret-code"
+                    type="password"
+                    value={secretCode}
+                    onChange={(e) => setSecretCode(e.target.value)}
+                    placeholder={data.stats ? "Mínimo recomendado: 12 caracteres" : undefined}
+                    autoComplete="new-password"
+                    maxLength={120}
+                    disabled={secretMutation.isPending}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="secret-confirm">Confirme o código</Label>
+                  <Input
+                    id="secret-confirm"
+                    type="password"
+                    value={secretConfirm}
+                    onChange={(e) => setSecretConfirm(e.target.value)}
+                    placeholder="Digite o mesmo código novamente"
+                    autoComplete="new-password"
+                    maxLength={120}
+                    disabled={secretMutation.isPending}
+                  />
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button onClick={handleSaveSecret} disabled={secretMutation.isPending}>
+                    {secretMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    <Save className="mr-2 h-4 w-4" />
+                    {secretMutation.isPending ? "Salvando..." : "Salvar código"}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Dica: usar um código vazio remove o código pessoal e volta a usar o código global do site.
+                </p>
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground italic">
+                O código de acesso local só se aplica a contas criadas pelo login local.
+              </p>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Editar dados */}
         <Card className="border-border/60">

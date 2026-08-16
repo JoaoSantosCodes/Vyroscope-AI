@@ -2,6 +2,8 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ShieldCheck } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { isLocalAuthProvider, loginLocally } from "@/const";
 
 /**
@@ -34,6 +36,14 @@ export function LocalLoginForm() {
   };
 
   return (
+    <div className="flex flex-col gap-3 w-full max-w-sm">
+      {/* Feedback visual do método de autenticação ativo (Rodada 31) */}
+      <div className="flex items-center gap-2">
+        <ShieldCheck className="size-4 text-emerald-500" aria-hidden />
+        <Badge variant="outline" className="gap-1.5 border-emerald-500/50 text-emerald-500">
+          Autenticação local ativa
+        </Badge>
+      </div>
     <form onSubmit={submit} className="flex flex-col gap-3 w-full max-w-sm">
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="local-login-name">Seu nome</Label>
@@ -66,5 +76,6 @@ export function LocalLoginForm() {
         {loading ? "Entrando..." : "Entrar"}
       </Button>
     </form>
+    </div>
   );
 }

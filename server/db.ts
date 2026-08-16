@@ -207,6 +207,21 @@ export async function updateUserProfile(userId: number, patch: { name?: string |
   }
   return db.select().from(users).where(eq(users.id, userId)).limit(1).then((r) => r[0]);
 }
+
+/**
+ * (Rodada 31) Define ou remove o código secreto pessoal do usuário local
+ * (persistido como hash SHA-256; o código em si nunca é salvo).
+ * Quando `localCodeHash` for não-nulo, o login local aceita esse código
+ * mesmo que o AUTH_SECRET_CODE global seja outro — útil em deploy próprio.
+ */
+export async function updateLocalCode(
+  userId: number,
+  localCodeHash: string | null
+): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(users).set({ localCodeHash }).where(eq(users.id, userId));
+}
 import {
   analyses as analysesTable,
   suggestionThumbnails as stCols,

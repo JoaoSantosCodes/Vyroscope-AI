@@ -20,9 +20,10 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { isLocalAuthProvider, startLogin } from "@/const";
+import { Badge } from "@/components/ui/badge";
 import { LocalLoginForm } from "@/components/LocalLoginForm";
 import { useIsMobile } from "@/hooks/useMobile";
-import { BarChart3, CalendarHeart, Flame, History as HistoryIcon, LayoutDashboard, LogOut, PanelLeft, Pin } from "lucide-react";
+import { BarChart3, CalendarHeart, Flame, History as HistoryIcon, LayoutDashboard, LogOut, PanelLeft, Pin, ShieldCheck } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
@@ -83,13 +84,24 @@ export default function DashboardLayout({
           {isLocalAuthProvider() ? (
             <LocalLoginForm />
           ) : (
-            <Button
-              onClick={() => startLogin()}
-              size="lg"
-              className="w-full shadow-lg hover:shadow-xl transition-all"
-            >
-              Sign in
-            </Button>
+            <div className="flex w-full max-w-sm flex-col items-center gap-3">
+              <Button
+                onClick={() => startLogin()}
+                size="lg"
+                className="w-full shadow-lg hover:shadow-xl transition-all"
+              >
+                Sign in
+              </Button>
+              {/* Feedback visual do método de autenticação ativo (Rodada 31) */}
+              <Badge
+                variant="outline"
+                className="inline-flex items-center gap-1.5 border-muted-foreground/40 text-muted-foreground"
+                title={isLocalAuthProvider() ? "Acesso por código local" : "Login via conta"}
+              >
+                <ShieldCheck className="size-3.5" aria-hidden />
+                {isLocalAuthProvider() ? "Acesso local" : "Login via conta"}
+              </Badge>
+            </div>
           )}
         </div>
       </div>

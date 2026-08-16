@@ -2,9 +2,41 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import express from "express";
 import type { AddressInfo } from "net";
 import crypto from "crypto";
-
 // Testa a lógica do auth provider modular (Manus vs Local) de forma isolada,
 // sem depender do servidor Express completo nem do banco de dados.
+//
+// (Rodada 31) O módulo `db` do app é mockado em nível de arquivo: o teste
+// "código pessoal" habilita via process.env.__TEST_PERSONAL_USER = JSON
+// (usuário local simulado com localCodeHash), e os demais caminhos retornam
+// `null` para getUserByOpenId quando não há env configurada.
+// Memória simulada do banco para o teste do código pessoal
+let testUser: { id: number; openId: string; name: string | null; email: string | null; loginMethod: string; localCodeHash: string | null } | null = null;
+
+
+vi.mock("./db", async importOriginal => {
+  const actual = (await importOriginal()) as typeof import("./db");
+  return {
+    ...actual,
+    getUserByOpenId: async (openId: string) => {
+      if (testUser?.openId === openId) return testUser;
+      return null;
+    },
+    upsertUser: async (input: any) => {
+      {
+        testUser = {
+          id: input.id ?? 42,
+          openId: input.openId,
+          name: input.name ?? null,
+          email: input.email ?? null,
+          loginMethod: input.loginMethod ?? "local",
+          localCodeHash: input.localCodeHash ?? null,
+        };
+      }
+      return undefined;
+    },
+    getUserStats: async () => ({ total: 0, completed: 0 }),
+  };
+});
 
 describe("getAuthProvider", async () => {
   const { getAuthProvider } = await import("./_core/authProvider");
@@ -263,4 +295,168 @@ describe("compare timingSafeEqual edge case", async () => {
     // pelos testes da rota real acima; este describe documenta o contrato.
     expect(typeof handleLocalAuth).toBe("function");
   });
+});
+
+describe("código secreto pessoal (Rodada 31)", async () => {
+  const { hashSecretCode } = await import("./_core/authProvider");
+  const http = await import("http");
+
+  const provider = process.env.AUTH_PROVIDER;
+  const secret = process.env.AUTH_SECRET_CODE;
+  const allowPersonal = process.env.AUTH_ALLOW_PERSONAL_CODES;
+  const personalUserEnv = process.env.__TEST_PERSONAL_USER;
+
+  function buildApp() {
+    const app = express();
+    app.use(express.json());
+    return app;
+  }
+
+  function start(app: express.Express) {
+    const server = app.listen(0);
+    const port = (server.address() as AddressInfo).port;
+    return { server, port };
+  }
+
+  afterEach(() => {
+    process.env.AUTH_PROVIDER = provider ?? "";
+    if (secret === undefined) delete process.env.AUTH_SECRET_CODE;
+    else process.env.AUTH_SECRET_CODE = secret;
+    if (allowPersonal === undefined) delete process.env.AUTH_ALLOW_PERSONAL_CODES;
+    else process.env.AUTH_ALLOW_PERSONAL_CODES = allowPersonal;
+    if (personalUserEnv === undefined) delete process.env.__TEST_PERSONAL_USER;
+    else process.env.__TEST_PERSONAL_USER = personalUserEnv;
+    testUser = null;
+  });
+
+  function post(port: number, path: string, body: unknown) {
+    const payload = JSON.stringify(body);
+    return new Promise<{ status: number; body: string; cookies: string[] }>(
+      (resolve, reject) => {
+        const req = http.request(
+          {
+            host: "127.0.0.1",
+            port,
+            path,
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Content-Length": Buffer.byteLength(payload),
+            },
+          },
+          res => {
+            let data = "";
+            res.on("data", c => (data += c));
+            res.on("end", () =>
+              resolve({
+                status: res.statusCode ?? 0,
+                body: data,
+                cookies: res.headers["set-cookie"] ?? [],
+              })
+            );
+          }
+        );
+        req.on("error", reject);
+        req.write(payload);
+        req.end();
+      }
+    );
+  }
+
+  it("hashSecretCode é SHA-256 estável de 64 caracteres hex", () => {
+    const h1 = hashSecretCode("meu-codigo-pessoal");
+    const h2 = hashSecretCode("meu-codigo-pessoal");
+    expect(h1).toBe(h2);
+    expect(h1).toMatch(/^[0-9a-f]{64}$/);
+    expect(hashSecretCode("outro")).not.toBe(h1);
+  });
+
+  it("o hash do código global bate com o prefixo usado no openId global", () => {
+    const GLOBAL_SECRET = "segredo-global-r31";
+    process.env.AUTH_PROVIDER = "local";
+    process.env.AUTH_SECRET_CODE = GLOBAL_SECRET;
+    // O openId global usa os primeiros 16 chars do hash do segredo global.
+    const prefix = crypto
+      .createHash("sha256")
+      .update(GLOBAL_SECRET)
+      .digest("hex")
+      .slice(0, 16);
+    expect(hashSecretCode(GLOBAL_SECRET).slice(0, 16)).toBe(prefix);
+  });
+
+  it("rota local aceita código pessoal persistido no banco (e-mails locais)", async () => {
+    process.env.AUTH_PROVIDER = "local";
+    delete process.env.AUTH_SECRET_CODE;
+    process.env.AUTH_ALLOW_PERSONAL_CODES = "1";
+    process.env.AUTH_DEBUG = "1";
+    // Stub do banco: usuário local "Beto" com localCodeHash do código-pessoal
+    testUser = {
+      id: 42,
+      openId: `local_beto_${hashSecretCode("codigo-pessoal").slice(0, 16)}`,
+      name: "Beto",
+      email: null,
+      loginMethod: "local",
+      localCodeHash: hashSecretCode("codigo-pessoal"),
+    };
+    process.env.__TEST_PERSONAL_USER = "1";
+    const { registerAuthRoutes: reg2 } = await import("./_core/authProvider");
+
+    const app = express();
+    app.use(express.json());
+    await reg2(app);
+    const server = app.listen(0);
+    const port = (server.address() as AddressInfo).port;
+    try {
+      const r = await post(port, "/api/local-auth", {
+        code: "codigo-pessoal",
+        name: "Beto",
+      });
+      expect(r.status).toBe(200);
+      expect(JSON.parse(r.body).success).toBe(true);
+      const cookie = r.cookies.find(c => c.startsWith("app_session_id="))!;
+      const token = cookie.replace(/^app_session_id=/, "").split(";")[0];
+      const payload = JSON.parse(
+        Buffer.from(token.split(".")[1], "base64url").toString()
+      );
+      // openId pessoal: hash do código (não do segredo global)
+      expect(payload.openId).toBe(
+        `local_beto_${hashSecretCode("codigo-pessoal").slice(0, 16)}`
+      );
+    } finally {
+      server.close();
+    }
+  });
+
+  it("rejeita código pessoal de outro usuário (401)", async () => {
+    process.env.AUTH_PROVIDER = "local";
+    delete process.env.AUTH_SECRET_CODE;
+    process.env.AUTH_ALLOW_PERSONAL_CODES = "1";
+    // Stub do banco: usuário local cujo hash NAO corresponde ao código enviado
+    testUser = {
+      id: 7,
+      openId: `local_x_${hashSecretCode("outro-codigo").slice(0, 16)}`,
+      name: "X",
+      email: null,
+      loginMethod: "local",
+      localCodeHash: hashSecretCode("outro-codigo"),
+    };
+    process.env.__TEST_PERSONAL_USER = "1";
+    const { registerAuthRoutes: reg3 } = await import("./_core/authProvider");
+    const app = express();
+    app.use(express.json());
+    await reg3(app);
+    const server = app.listen(0);
+    const port = (server.address() as AddressInfo).port;
+    try {
+      const r = await post(port, "/api/local-auth", {
+        code: "codigo-errado",
+        name: "X",
+      });
+      expect(r.status).toBe(401);
+    } finally {
+      server.close();
+      vi.doUnmock("../db");
+    }
+  });
+
 });

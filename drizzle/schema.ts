@@ -20,6 +20,12 @@ export const users = mysqlTable("users", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
+  /**
+   * (Rodada 31) Hash SHA-256 do código secreto pessoal do usuário local.
+   * Quando definido (via perfil), sobrepõe o AUTH_SECRET_CODE global para
+   * aquele usuário. Armazenado como hash — o código em si nunca é persistido.
+   */
+  localCodeHash: varchar("localCodeHash", { length: 64 }),
 });
 
 export type User = typeof users.$inferSelect;

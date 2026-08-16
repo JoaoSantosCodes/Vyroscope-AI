@@ -26,6 +26,12 @@ O sistema de autenticação agora é trocável via variável de ambiente `AUTH_P
 | `VITE_AUTH_PROVIDER` | Sim (modo local) | Espelho de `AUTH_PROVIDER` para o frontend (`local` ou `manus`) — o build Vite precisa disso em tempo de compilação |
 | `VITE_APP_TITLE` | Opcional | Título exibido no site |
 | `VITE_APP_LOGO` | Opcional | Logo exibido no site |
+| `OPENAI_API_KEY` | Sim (deploy externo) | Chave OpenAI para as análises de IA e geração de thumbnails. Sem ela, as chamadas de LLM/imagem caem no fallback da Manus (que não existe fora da plataforma) |
+| `OPENAI_API_BASE` | Opcional | Base da API OpenAI (default `https://api.openai.com/v1`); use para serviços compatíveis (Groq, OpenRouter, LM Studio...) |
+| `OPENAI_MODEL` | Opcional | Modelo de texto (default `gpt-4o`) |
+| `IMAGE_MODEL` | Opcional | Modelo de imagem (default `dall-e-3`) |
+| `YOUTUBE_DATA_API_KEY` | Sim (deploy externo) | Chave da YouTube Data API v3 para a consulta de vídeos em alta. Sem ela, a consulta cai no hub de dados da Manus (que não existe fora da plataforma) |
+| `AUTH_ALLOW_PERSONAL_CODES` | Opcional | `1` para habilitar o login por código pessoal definido por cada usuário no perfil (além do código global) |
 
 **Modo Manus fora da Manus**: não é recomendado — as chaves `VITE_APP_ID`/`OAUTH_SERVER_URL` pertencem à plataforma Manus e não funcionam em outro host. Para hospedar por conta própria, use o modo `local`.
 
@@ -39,10 +45,14 @@ O sistema de autenticação agora é trocável via variável de ambiente `AUTH_P
 ## Segurança do modo local
 
 - A comparação do código usa `crypto.timingSafeEqual` (proteção contra timing attacks) e só é feita quando os comprimentos coincidem.
-- O código nunca é armazenado no banco; ele é usado apenas para emitir o JWT, exatamente como um OAuth faria.
+- O código global nunca é armazenado no banco; ele é usado apenas para emitir o JWT, exatamente como um OAuth faria.
 - O `openId` do usuário local é estável (`local_<nome_slug>_<hash16 do código>`) — trocar o código muda o usuário (comportamento intencional: use um código definitivo).
 - O cookie é `HttpOnly`, `SameSite=None` e com `Secure` quando servido em HTTPS (a Vercel serve em HTTPS por padrão — necessário para `SameSite=None`).
 - **Nunca exponha `AUTH_SECRET_CODE` no frontend**; o frontend só conhece o provider (`VITE_AUTH_PROVIDER`).
+
+### Código pessoal por usuário (Rodada 31)
+
+Com `AUTH_ALLOW_PERSONAL_CODES=1`, cada usuário com conta criada pelo login local pode definir um código pessoal no perfil (card "Código de acesso local"). O código pessoal é armazenado apenas como hash SHA-256 (`users.localCodeHash`, 64 caracteres hex). O login aceita o código global **ou** o pessoal; o pessoal persiste no banco e sobrevive a trocas do código global. Deixar o campo vazio no perfil remove o código pessoal.
 
 ## Estrutura das rotas no vercel.json
 
@@ -54,5 +64,11 @@ O sistema de autenticação agora é trocável via variável de ambiente `AUTH_P
 
 ## Limitações conhecidas ao sair da plataforma Manus
 
-- Geração de thumbnails e análises por IA usam as APIs internas da Manus (`BUILT_IN_FORGE_*`). Fora da Manus essas chamadas não existem — para hospedar por conta própria, substitua as chamadas de LLM/imagem em `server/_core/llm.ts` e `server/_core/imageGeneration.ts` por um provider próprio (OpenAI/Anthropic) com chave sua.
 - Upload de arquivos usa S3 com helpers do template (`storagePut`/`storageGet`). Configure um bucket próprio se necessário.
+- Rodada 31 (providers próprios): LLM, imagem e YouTube já funcionam com providers próprios via envs — não é mais preciso trocar código. Com `OPENAI_API_KEY` e `YOUTUBE_DATA_API_KEY` definidas, o app usa OpenAI (texto e dall-e-3) e a YouTube Data API diretamente; sem elas, cai no fallback da Manus. Defina ambas para um deploy externo funcional.
+
+| Provider | Arquivo | Como escolher |
+|---|---|---|
+| Texto (análises, sugestões, roteiros) | `server/_core/llm.ts` | `OPENAI_API_KEY` presente → OpenAI; ausente → Forge Manus |
+| Imagem (thumbnails) | `server/_core/imageGeneration.ts` | `OPENAI_API_KEY` presente → dall-e-3; ausente → Forge Manus |
+| YouTube (trending/search) | `server/youtube.ts` | `YOUTUBE_DATA_API_KEY` presente → API direta; ausente → hub de dados Manus |

@@ -7,6 +7,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -20,7 +21,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTheme } from "@/contexts/ThemeContext";
-import { LogIn, LogOut, Moon, Radar, Sun, User } from "lucide-react";
+import { LogIn, LogOut, Moon, Radar, ShieldCheck, Sun, User } from "lucide-react";
 import { Link, useLocation } from "wouter";
 
 export default function SiteLayout({ children }: { children: React.ReactNode }) {
@@ -154,9 +155,20 @@ export default function SiteLayout({ children }: { children: React.ReactNode }) 
                 </DialogContent>
               </Dialog>
             ) : (
-              <Button size="sm" onClick={() => startLogin()}>
-                <LogIn className="mr-1.5 h-4 w-4" /> Entrar
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button size="sm" onClick={() => startLogin()}>
+                  <LogIn className="mr-1.5 h-4 w-4" /> Entrar
+                </Button>
+                {/* Feedback visual do método de autenticação ativo (Rodada 31) */}
+                <Badge
+                  variant="outline"
+                  className="hidden items-center gap-1.5 border-muted-foreground/40 text-muted-foreground sm:inline-flex"
+                  title={isLocalAuthProvider() ? "Acesso por código local" : "Login via conta"}
+                >
+                  <ShieldCheck className="size-3.5" aria-hidden />
+                  {isLocalAuthProvider() ? "Acesso local" : "Login via conta"}
+                </Badge>
+              </div>
             )}
           </div>
         </div>

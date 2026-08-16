@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { getUserStats, updateUserProfile } from "../db";
+import { getUserStats, updateUserProfile, updateLocalCode } from "../db";
+import { hashSecretCode } from "../_core/authProvider";
 import { protectedProcedure, router } from "../_core/trpc";
 
 export const profileRouter = router({
@@ -38,6 +39,41 @@ export const profileRouter = router({
         };
       } catch {
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Não foi possível atualizar o perfil." });
+      }
+    }),
+
+  /**
+   * (Rodada 31) Define, atualiza ou remove o código secreto pessoal do
+   * usuário para o login local. O código é persistido apenas como hash
+   * SHA-256 (users.localCodeHash); o código em si nunca é armazenado.
+   * `code` vazio/remove=true remove o código pessoal (volta ao global).
+   */
+  setSecretCode: protectedProcedure
+    .input(
+      z.object({
+        code: z.string().trim().min(0).max(120),
+        confirm: z.string().trim(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      if (input.code !== input.confirm) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Os códigos não coincidem.",
+        });
+      }
+      try {
+        if (input.code.length === 0) {
+          await updateLocalCode(ctx.user.id, null);
+          return { hasPersonalCode: false };
+        }
+        await updateLocalCode(ctx.user.id, hashSecretCode(input.code));
+        return { hasPersonalCode: true };
+      } catch {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Não foi possível salvar o código de acesso.",
+        });
       }
     }),
 });
