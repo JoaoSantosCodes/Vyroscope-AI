@@ -72,3 +72,17 @@ Com `AUTH_ALLOW_PERSONAL_CODES=1`, cada usuário com conta criada pelo login loc
 | Texto (análises, sugestões, roteiros) | `server/_core/llm.ts` | `OPENAI_API_KEY` presente → OpenAI; ausente → Forge Manus |
 | Imagem (thumbnails) | `server/_core/imageGeneration.ts` | `OPENAI_API_KEY` presente → dall-e-3; ausente → Forge Manus |
 | YouTube (trending/search) | `server/youtube.ts` | `YOUTUBE_DATA_API_KEY` presente → API direta; ausente → hub de dados Manus |
+
+### Rodada 32: status de APIs e provedores alternativos por usuário
+
+Além das envs do servidor, cada usuário autenticado pode **sobrescrever o provedor** individualmente pelo perfil (card "Status das APIs" → "Configurar provedor"). As configurações ficam na tabela `user_settings` (chave/valor por usuário) e são aplicadas em todas as chamadas de LLM/imagem daquele usuário — sem alterar as envs nem afetar os demais.
+
+| Camada | Ordem de resolução | Observações |
+|---|---|---|
+| LLM (texto) | usuário > `OPENAI_API_KEY/BASE/MODEL` > Forge Manus | Base pode apontar para Groq (`https://api.groq.com/openai/v1`), OpenRouter (`https://openrouter.ai/api/v1`) ou endpoint custom (deve ser `https`) |
+| Imagem | `image_api_key` do usuário > `llm_api_key` do usuário > env > Forge Manus | Modelos compatíveis com a API de imagens escolhida; default `dall-e-3` |
+| YouTube | `YOUTUBE_DATA_API_KEY` (env) > hub de dados Manus | Não há override por usuário — a chave pertence ao projeto |
+
+O card de status no perfil mostra cada provider com o identificador (openai, groq, openrouter, manus-forge, custom) e o estado Ativo/Inativo. O tratamento de erros da API do YouTube inclui retry automático com backoff exponencial (até 3 tentativas, respeita `Retry-After` do 429); a tela de resultado falhado mostra o motivo (cota, chave, rede) com botão "Tentar novamente" (mesma análise) e "Nova análise".
+
+**Custo**: para reduzir gastos, aponte o provedor para a Groq (planos gratuitos) ou OpenRouter (agregador com modelos baratos) diretamente na UI do perfil — não é preciso reiniciar o servidor.

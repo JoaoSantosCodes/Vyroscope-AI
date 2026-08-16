@@ -6,6 +6,7 @@ import {
   InsertAnalysis,
   InsertAnalysisVideo,
   InsertUser,
+  userSettings,
   users,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
@@ -1166,4 +1167,95 @@ function clampGoal(goal: number): number {
   const parsed = parseInt(String(goal), 10);
   if (!Number.isFinite(parsed) || parsed < 1) return 1;
   return parsed > 100 ? 100 : parsed;
+}
+
+// ---------------------------------------------------------------------------
+// (Rodada 32) Configurações de providers por usuário.
+// Permite provedores alternativos (Groq, OpenRouter, endpoints custom) sem
+// alterar as envs do servidor. Valor vazio/removido = padrão do servidor.
+// ---------------------------------------------------------------------------
+
+export type ProviderSettings = {
+  llmApiBase?: string;
+  llmApiKey?: string;
+  llmModel?: string;
+  imageApiKey?: string;
+  imageModel?: string;
+};
+
+export const PROVIDER_SETTING_KEYS = [
+  "llm_api_base",
+  "llm_api_key",
+  "llm_model",
+  "image_api_key",
+  "image_model",
+] as const;
+
+/** Lê todas as configurações de providers do usuário (mapa key → value). */
+export async function getProviderSettings(
+  userId: number
+): Promise<ProviderSettings> {
+  const db = await getDb();
+  if (!db) return {};
+  const rows = await db
+    .select({ settingKey: userSettings.settingKey, value: userSettings.value })
+    .from(userSettings)
+    .where(eq(userSettings.userId, userId))
+    .then(rows => rows.filter(r => (PROVIDER_SETTING_KEYS as readonly string[]).includes(r.settingKey)));
+
+  const result: ProviderSettings = {};
+  rows.forEach(r => {
+    const v = r.value ?? "";
+    if (v.trim().length === 0) return;
+    switch (r.settingKey) {
+      case "llm_api_base":
+        result.llmApiBase = v.trim();
+        break;
+      case "llm_api_key":
+        result.llmApiKey = v.trim();
+        break;
+      case "llm_model":
+        result.llmModel = v.trim();
+        break;
+      case "image_api_key":
+        result.imageApiKey = v.trim();
+        break;
+      case "image_model":
+        result.imageModel = v.trim();
+        break;
+    }
+  });
+  return result;
+}
+
+/** Persiste o mapa completo de configurações de providers do usuário. */
+export async function setProviderSettings(
+  userId: number,
+  settings: ProviderSettings
+): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+
+  const pairs: Array<[string, string | null]> = [
+    ["llm_api_base", settings.llmApiBase ?? null],
+    ["llm_api_key", settings.llmApiKey ?? null],
+    ["llm_model", settings.llmModel ?? null],
+    ["image_api_key", settings.imageApiKey ?? null],
+    ["image_model", settings.imageModel ?? null],
+  ];
+
+  for (const [key, value] of pairs) {
+    if (value === null || value.trim().length === 0) {
+      await db
+        .delete(userSettings)
+        .where(
+          and(eq(userSettings.userId, userId), eq(userSettings.settingKey, key))
+        );
+    } else {
+      await db
+        .insert(userSettings)
+        .values({ userId, settingKey: key, value: value.trim() })
+        .onDuplicateKeyUpdate({ set: { value: value.trim() } });
+    }
+  }
 }

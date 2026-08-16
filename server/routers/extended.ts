@@ -5,6 +5,7 @@ import { analyzeNicheComparison, buildPinnedSuggestion, buildThumbnailPrompt, ge
 
 import { fetchTrendingVideosForNiche } from "../youtube";
 import { protectedProcedure, router } from "../_core/trpc";
+import { resolveImageConfig, resolveLlmConfig } from "../providers";
 
 function parseResult(raw: string | null): AnalysisResult | null {
   if (!raw) return null;
@@ -13,6 +14,15 @@ function parseResult(raw: string | null): AnalysisResult | null {
   } catch {
     return null;
   }
+}
+
+/** (Rodada 32) Resolve as configs de LLM/imagem do usuário autenticado. */
+async function resolveUserConfigs(userId: number) {
+  const [llmConfig, imageConfig] = await Promise.all([
+    resolveLlmConfig(userId),
+    resolveImageConfig(userId),
+  ]);
+  return { llmConfig, imageConfig };
 }
 
 const scriptInput = z.object({
@@ -48,12 +58,13 @@ export const extendedRouter = router({
     if (!suggestion) {
       throw new TRPCError({ code: "NOT_FOUND", message: "Sugestão não encontrada." });
     }
-    const script = await generateExtendedScript(analysis.niche, suggestion, result.patterns ?? []);
+    const configs = await resolveUserConfigs(ctx.user.id);
+    const script = await generateExtendedScript(analysis.niche, suggestion, result.patterns ?? [], configs);
     return script;
   }),
 
   /** Compara dois nichos em tempo real usando vídeos em alta de cada um. */
-  compare: protectedProcedure.input(comparisonInput).mutation(async ({ input }) => {
+  compare: protectedProcedure.input(comparisonInput).mutation(async ({ ctx, input }) => {
     const [videosA, videosB] = await Promise.all([
       fetchTrendingVideosForNiche(input.nicheA.trim(), 10).catch(() => [] as never[]),
       fetchTrendingVideosForNiche(input.nicheB.trim(), 10).catch(() => [] as never[]),
@@ -61,7 +72,8 @@ export const extendedRouter = router({
     if (!videosA.length || !videosB.length) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Não foi possível coletar vídeos suficientes em um dos nichos. Tente outros termos." });
     }
-    const comparison = await analyzeNicheComparison(input.nicheA.trim(), videosA, input.nicheB.trim(), videosB);
+    const configs = await resolveUserConfigs(ctx.user.id);
+    const comparison = await analyzeNicheComparison(input.nicheA.trim(), videosA, input.nicheB.trim(), videosB, configs);
     // enriquece com top video e engajamento agregado dos dados reais
     const enriched = comparison.niches.map((n, idx) => {
       const videos = idx === 0 ? videosA : videosB;
@@ -112,10 +124,11 @@ export const extendedRouter = router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Sugestão não encontrada." });
       }
       const { generateImage } = await import("../_core/imageGeneration");
+      const configs = await resolveUserConfigs(ctx.user.id);
       const prompt = buildThumbnailPrompt(analysis.niche, suggestion.title, result.patterns ?? []);
       let imageUrl: string;
       try {
-        const generated = await generateImage({ prompt });
+        const generated = await generateImage({ prompt }, configs.imageConfig);
         imageUrl = generated.url ?? "";
       } catch {
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Falha ao gerar a imagem. Tente novamente." });
@@ -150,7 +163,8 @@ export const extendedRouter = router({
     if (!suggestion) {
       throw new TRPCError({ code: "NOT_FOUND", message: "Sugestão não encontrada." });
     }
-    return generateAlternativeTitles(analysis.niche, suggestion, result.patterns ?? []);
+    const configs = await resolveUserConfigs(ctx.user.id);
+    return generateAlternativeTitles(analysis.niche, suggestion, result.patterns ?? [], configs);
   }),
 
   /** Marca/desmarca uma thumbnail como favorita (galeria). */
@@ -865,7 +879,8 @@ export const extendedRouter = router({
         suggestion = topSuggestions[dayIndex % topSuggestions.length];
       }
       const result = parseResult(analysis.result)!;
-      const outline = await generateOutline(analysis.niche, suggestion, result.patterns ?? []);
+      const configs = await resolveUserConfigs(ctx.user.id);
+      const outline = await generateOutline(analysis.niche, suggestion, result.patterns ?? [], configs);
       return { niche: analysis.niche, analysisId: analysis.id, suggestion, outline };
     }),
 
@@ -971,6 +986,7 @@ export const extendedRouter = router({
     if (!result) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Esta análise ainda não foi concluída." });
     }
-    return generateContentAgenda(analysis.niche, result.suggestions ?? []);
+    const configs = await resolveUserConfigs(ctx.user.id);
+    return generateContentAgenda(analysis.niche, result.suggestions ?? [], configs);
   }),
 });

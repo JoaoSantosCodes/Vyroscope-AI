@@ -285,3 +285,12 @@
 - [x] Atualizar DEPLOY_VERCEL.md/README.md com OPENAI_API_KEY e YOUTUBE_DATA_API_KEY (tabela de envs + tabela de providers + seção código pessoal)
 - [x] Push ao GitHub (commit 6ad5d11 na branch main), skill vyroscope-video-analyst atualizada (SKILL.md + features-roadmap.md) e validada
 - [x] Documentação da rodada 31 para o Obsidian (rodada-31-obsidian.md) e checkpoint (6ad5d114)
+
+## Status de APIs e provedores alternativos (rodada 32)
+- [ ] Backend: procedure getApiProviderStatus que inspeciona as envs (OPENAI_API_KEY, YOUTUBE_DATA_API_KEY, OPENAI_API_BASE) e informa provider/ativo/model em uso
+- [ ] Backend: tabela user_settings (key/value por usuário) para persistir provider alternativo por usuário (llm base/model, image model, override de base)
+- [ ] Backend: providers (llm.ts/imageGeneration.ts/youtube.ts) respeitam o override por usuário via getProviderConfig(userId) com fallback para envs
+- [ ] Frontend: card "Status das APIs" no perfil (tabela com provider/model/ativo por LLM, imagem, YouTube) + Dialog de configuração de provedor alternativo com presets Groq/OpenRouter/custom
+- [ ] Análise: botão "Tentar Novamente" no resultado de falha (quota/rede) com retry e mensagens diferenciadas; contagem de tentativas por análise no frontend
+- [ ] Testes vitest (status, overrides por usuário, retry), docs (DEPLOY_VERCEL.md/README.md), push GitHub, skill atualizada, doc Obsidian rodada-32
+- [ ] Checkpoint final

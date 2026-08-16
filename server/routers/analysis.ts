@@ -15,6 +15,7 @@ import {
 } from "../db";
 import { protectedProcedure, router } from "../_core/trpc";
 import { analyzeNiche, type AnalysisResult } from "../analysis";
+import { resolveImageConfig, resolveLlmConfig } from "../providers";
 import { fetchTrendingVideosForNiche } from "../youtube";
 
 const inputSchema = z.object({
@@ -36,7 +37,11 @@ export const analysisRouter = router({
     await createAnalysis({ id: analysisId, userId, niche, status: "running" });
 
     try {
-      await runAnalysisAsync(analysisId, niche);
+      const [llmConfig, imageConfig] = await Promise.all([
+        resolveLlmConfig(userId),
+        resolveImageConfig(userId),
+      ]);
+      await runAnalysisAsync(analysisId, niche, { llmConfig, imageConfig });
     } catch {
       /* erros já gravados via updateAnalysis */
     }
@@ -48,6 +53,38 @@ export const analysisRouter = router({
       status: final?.status ?? ("failed" as const),
     };
   }),
+
+  /**
+   * (Rodada 32) Tenta novamente uma análise falhada: cria uma nova execução
+   * com o mesmo nicho do usuário, reutilizando os provedores configurados.
+   */
+  retry: protectedProcedure
+    .input(z.object({ analysisId: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const row = await getAnalysisById(input.analysisId);
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Análise não encontrada" });
+      if (row.userId !== ctx.user.id) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Você não tem acesso a esta análise" });
+      }
+      const userId = ctx.user.id;
+      const newId = nanoid(14);
+      await createAnalysis({ id: newId, userId, niche: row.niche, status: "running" });
+      try {
+        const [llmConfig, imageConfig] = await Promise.all([
+          resolveLlmConfig(userId),
+          resolveImageConfig(userId),
+        ]);
+        await runAnalysisAsync(newId, row.niche, { llmConfig, imageConfig });
+      } catch {
+        /* erros já gravados via updateAnalysis */
+      }
+      const final = await getAnalysisById(newId);
+      return {
+        id: newId,
+        niche: row.niche,
+        status: final?.status ?? ("failed" as const),
+      };
+    }),
 
   /** Lista análises do usuário autenticado (histórico). */
   list: protectedProcedure.query(async ({ ctx }) => {
@@ -126,7 +163,16 @@ export const analysisRouter = router({
   }),
 });
 
-async function runAnalysisAsync(analysisId: string, niche: string) {
+type AnalysisConfigs = {
+  llmConfig: { apiUrl: string; apiKey: string | undefined; model?: string };
+  imageConfig: { apiUrl: string; apiKey: string | undefined; model?: string };
+};
+
+async function runAnalysisAsync(
+  analysisId: string,
+  niche: string,
+  configs: AnalysisConfigs
+) {
   try {
     await updateAnalysisProgress(analysisId, 15);
     const videos = await fetchTrendingVideosForNiche(niche, 12);
@@ -149,7 +195,7 @@ async function runAnalysisAsync(analysisId: string, niche: string) {
     );
 
     await updateAnalysisProgress(analysisId, 60);
-    const result = await analyzeNiche(niche, videos);
+    const result = await analyzeNiche(niche, videos, configs);
     await updateAnalysisProgress(analysisId, 90);
     await updateAnalysis(analysisId, { status: "completed", result: JSON.stringify(result) });
     await updateAnalysisProgress(analysisId, 100);

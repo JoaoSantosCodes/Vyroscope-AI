@@ -129,7 +129,9 @@ export default function Result() {
         </div>
 
         {isRunning && <StillRunning />}
-        {isFailed && <FailedState message={data.errorMessage ?? "Erro desconhecido"} niche={data.niche} />}
+        {isFailed && (
+          <FailedState analysisId={data.id} message={data.errorMessage ?? "Erro desconhecido"} niche={data.niche} />
+        )}
         {!isRunning && !isFailed && data.result && (
           <Dashboard result={data.result} videos={data.videos} analysisId={data.id} thumbnails={data.thumbnails ?? []} />
         )}
@@ -228,16 +230,47 @@ function StillRunning() {
   );
 }
 
-function FailedState({ message, niche }: { message: string; niche: string }) {
+function FailedState({
+  analysisId,
+  message,
+  niche,
+}: {
+  analysisId: string;
+  message: string;
+  niche: string;
+}) {
   const [, navigate] = useLocation();
+  const utils = trpc.useUtils();
+  const retryMutation = trpc.analysis.retry.useMutation({
+    onSuccess: (res) => {
+      toast.success("Nova análise iniciada — você será levado a ela.");
+      void utils.analysis.list.invalidate();
+      navigate(`/resultado/${res.id}`);
+    },
+    onError: (err) => toast.error(err.message),
+  });
   return (
     <div className="flex min-h-[40vh] flex-col items-center justify-center gap-4 text-center">
       <Radar className="h-10 w-10 text-destructive/70" />
       <h2 className="font-display text-2xl font-semibold">A análise não pôde ser concluída</h2>
       <p className="max-w-md text-sm text-muted-foreground">{message}</p>
-      <Button onClick={() => navigate(`/analise?niche=${encodeURIComponent(niche)}`)}>
-        <RotateCcw className="mr-2 h-4 w-4" /> Tentar novamente
-      </Button>
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        <Button
+          onClick={() => retryMutation.mutate({ analysisId })}
+          disabled={retryMutation.isPending}
+        >
+          {retryMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          <RotateCcw className="mr-2 h-4 w-4" />
+          {retryMutation.isPending ? "Iniciando…" : "Tentar novamente (mesma análise)"}
+        </Button>
+        <Button
+          variant="outline"
+          onClick={() => navigate(`/analise?niche=${encodeURIComponent(niche)}`)}
+          disabled={retryMutation.isPending}
+        >
+          Nova análise
+        </Button>
+      </div>
     </div>
   );
 }

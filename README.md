@@ -62,6 +62,10 @@ Para deploy fora da Manus, os providers de LLM, imagem e YouTube escolhem automa
 
 Com `AUTH_ALLOW_PERSONAL_CODES=1`, usuários com conta criada pelo login local podem definir um código pessoal no perfil (card "Código de acesso local"), armazenado apenas como hash SHA-256 em `users.localCodeHash`. O login aceita o código global ou o pessoal; deixar o campo vazio remove o código pessoal.
 
+### Status de APIs e provedores por usuário (Rodada 32)
+
+O perfil exibe o card "Status das APIs" (LLM, imagem e YouTube com identificador e estado Ativo/Inativo) e o dialog "Configurar provedor", que permite trocar o provedor de texto/imagem por Groq, OpenRouter, OpenAI ou endpoint custom — o override fica salvo em `user_settings` por usuário, sem tocar nas envs do servidor. A consulta ao YouTube (env-only) tem retry automático com backoff (429 respeita `Retry-After`; 5xx/rede até 3 tentativas) e a tela de análise falhada oferece "Tentar novamente" (mesma análise) ou "Nova análise" com diagnóstico do erro.
+
 ## Repositório
 
 <https://github.com/JoaoSantosCodes/Vyroscope-AI>

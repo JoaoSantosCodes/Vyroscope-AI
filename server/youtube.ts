@@ -11,14 +11,39 @@ const useDirectProvider = () =>
 
 const DIRECT_BASE = "https://www.googleapis.com/youtube/v3";
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * (Rodada 32) Busca com retry para erros transitórios:
+ *   - 429: respeita o Retry-After (ou backoff de 10s);
+ *   - 5xx: backoff exponencial (1s, 2s, 4s);
+ *   - erros de rede (fetch lançando): mesma estratégia.
+ * Erros permanentes (400/401/403) propagam imediatamente.
+ */
 async function fetchJson(url: string): Promise<unknown> {
-  const response = await fetch(url, {
-    headers: { accept: "application/json" },
-  });
-  if (!response.ok) {
+  const RETRY_MAX = 3;
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt <= RETRY_MAX; attempt += 1) {
+    let response: Response;
+    try {
+      response = await fetch(url, { headers: { accept: "application/json" } });
+    } catch (err) {
+      // Erro de rede — transitório se ainda houver tentativas
+      lastError = new Error(
+        `youtube_network_error (${err instanceof Error ? err.message : "unknown"})`
+      );
+      if (attempt < RETRY_MAX) {
+        await sleep(1000 * Math.pow(2, attempt));
+        continue;
+      }
+      throw lastError;
+    }
+    if (response.ok) {
+      return response.json();
+    }
     const detail = await response.text().catch(() => "");
     const status = response.status;
-    // 403/400 com quota ou chave inválida — mensagens autoexplicativas
+    // Erros permanentes propagam imediatamente
     if (status === 403) {
       throw new Error(
         `youtube_quota_or_key (${status} ${response.statusText})${detail ? `: ${detail}` : ""}`
@@ -29,11 +54,18 @@ async function fetchJson(url: string): Promise<unknown> {
         `youtube_invalid_key (${status} ${response.statusText})${detail ? `: ${detail}` : ""}`
       );
     }
+    // Transitórios: 429 (quota diária momentânea) e 5xx
+    const retryAfter = Number(response.headers.get("retry-after") || 0);
+    const wait = status === 429 ? Math.max(2, retryAfter || 10) : Math.pow(2, attempt) * 1000;
+    if (attempt < RETRY_MAX) {
+      await sleep(Math.min(wait, 30_000));
+      continue;
+    }
     throw new Error(
       `youtube_request_failed (${status} ${response.statusText})${detail ? `: ${detail}` : ""}`
     );
   }
-  return response.json();
+  throw lastError ?? new Error("youtube_request_failed");
 }
 
 const buildDirectUrl = (

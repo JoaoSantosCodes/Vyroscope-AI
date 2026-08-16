@@ -48,9 +48,19 @@ export type GenerateImageResponse = {
 const useOpenAiProvider = () =>
   ENV.openaiApiKey !== undefined && ENV.openaiApiKey.trim().length > 0;
 
+export type ImageInvokeConfig = {
+  apiUrl: string;
+  apiKey: string | undefined;
+  model?: string;
+};
+
 export async function generateImage(
-  options: GenerateImageOptions
+  options: GenerateImageOptions,
+  config?: ImageInvokeConfig
 ): Promise<GenerateImageResponse> {
+  if (config?.apiKey) {
+    return generateImageWithOpenAi(options, config);
+  }
   if (useOpenAiProvider()) {
     return generateImageWithOpenAi(options);
   }
@@ -129,9 +139,11 @@ async function generateImageWithForge(
  * exige as envs do Forge; sem elas, a geração de edição falha com mensagem clara.
  */
 async function generateImageWithOpenAi(
-  options: GenerateImageOptions
+  options: GenerateImageOptions,
+  config?: ImageInvokeConfig
 ): Promise<GenerateImageResponse> {
-  if (!ENV.openaiApiKey) {
+  const apiKey = config?.apiKey ?? ENV.openaiApiKey;
+  if (!apiKey) {
     throw new Error("OPENAI_API_KEY is not configured");
   }
   if (options.originalImages && options.originalImages.length > 0) {
@@ -140,17 +152,19 @@ async function generateImageWithOpenAi(
     );
   }
 
-  const base = ENV.openaiApiBase.endsWith("/")
-    ? ENV.openaiApiBase.slice(0, -1)
-    : ENV.openaiApiBase;
-  const url = `${base}/images/generations`;
-  const model = options.model ?? ENV.imageModel ?? "dall-e-3";
+  const url = config?.apiUrl ?? (() => {
+    const base = ENV.openaiApiBase.endsWith("/")
+      ? ENV.openaiApiBase.slice(0, -1)
+      : ENV.openaiApiBase;
+    return `${base}/images/generations`;
+  })();
+  const model = config?.model ?? options.model ?? ENV.imageModel ?? "dall-e-3";
 
   const response = await fetch(url, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${ENV.openaiApiKey}`,
+      authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
       model,

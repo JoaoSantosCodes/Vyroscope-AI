@@ -30,6 +30,25 @@ const db = vi.hoisted(() => ({
 }));
 
 vi.mock("./db", () => db);
+vi.mock("./providers", () => ({
+  resolveLlmConfig: vi.fn().mockResolvedValue({
+    apiUrl: "https://forge.manus.im/v1/chat/completions",
+    apiKey: "forge-secret",
+    model: undefined,
+    provider: "manus-forge",
+    active: true,
+  }),
+  resolveImageConfig: vi.fn().mockResolvedValue({
+    apiUrl: "https://forge.manus.im/v1/images/generations",
+    apiKey: "forge-secret",
+    model: "dall-e-3",
+    provider: "manus-forge",
+    active: true,
+  }),
+}));
+vi.mock("./_core/imageGeneration", () => ({
+  generateImage: vi.fn().mockResolvedValue({ url: "https://example.com/thumbnail.png" }),
+}));
 vi.mock("./youtube", () => ({
   fetchTrendingVideosForNiche: vi.fn().mockResolvedValue([
     {

@@ -97,7 +97,14 @@ const ANALYSIS_SCHEMA = {
  * Analisa os vídeos em alta do nicho com LLM e produz padrões de viralidade,
  * scores por vídeo e 5 sugestões prontas para gravar.
  */
-export async function analyzeNiche(niche: string, videos: VideoItem[]): Promise<AnalysisResult> {
+export async function analyzeNiche(
+  niche: string,
+  videos: VideoItem[],
+  configs?: {
+    llmConfig?: { apiUrl: string; apiKey: string | undefined; model?: string };
+    imageConfig?: { apiUrl: string; apiKey: string | undefined; model?: string };
+  }
+): Promise<AnalysisResult> {
   const videoBlocks = videos
     .map((v, i) => {
       return [
@@ -125,10 +132,13 @@ export async function analyzeNiche(niche: string, videos: VideoItem[]): Promise<
     },
   ];
 
-  const response = await invokeLLM({
-    messages,
-    response_format: ANALYSIS_SCHEMA,
-  });
+  const response = await invokeLLM(
+    {
+      messages,
+      response_format: ANALYSIS_SCHEMA,
+    },
+    configs?.llmConfig
+  );
 
   const raw = response.choices[0]?.message?.content;
   if (!raw || typeof raw !== "string") {

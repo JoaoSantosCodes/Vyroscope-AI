@@ -1,6 +1,12 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { getUserStats, updateUserProfile, updateLocalCode } from "../db";
+import { getUserStats, setProviderSettings, updateLocalCode, updateUserProfile } from "../db";
+import {
+  resolveImageConfig,
+  resolveLlmConfig,
+  resolveYoutubeConfig,
+  validateApiBase,
+} from "../providers";
 import { hashSecretCode } from "../_core/authProvider";
 import { protectedProcedure, router } from "../_core/trpc";
 
@@ -73,6 +79,61 @@ export const profileRouter = router({
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message: "Não foi possível salvar o código de acesso.",
+        });
+      }
+    }),
+
+  /**
+   * (Rodada 32) Status das APIs configuradas: quais providers de LLM, imagem
+   * e YouTube estão ativos e qual provedor está em uso (envs do servidor +
+   * overrides por usuário de user_settings).
+   */
+  apiProviderStatus: protectedProcedure.query(async ({ ctx }) => {
+    const [llm, image, youtube] = await Promise.all([
+      resolveLlmConfig(ctx.user.id),
+      resolveImageConfig(ctx.user.id),
+      Promise.resolve(resolveYoutubeConfig()),
+    ]);
+    return { llm, image, youtube };
+  }),
+
+  /**
+   * (Rodada 32) Configura provedores alternativos por usuário (Groq,
+   * OpenRouter, endpoints custom). Chaves e bases vazias removem o override
+   * (volta ao padrão do servidor/env). URLs devem ser https.
+   */
+  setProviderSettings: protectedProcedure
+    .input(
+      z.object({
+        llmApiBase: z.string().trim().max(500).optional(),
+        llmApiKey: z.string().trim().max(2000).optional(),
+        llmModel: z.string().trim().max(120).optional(),
+        imageApiKey: z.string().trim().max(2000).optional(),
+        imageModel: z.string().trim().max(120).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      // Se o usuário informou chave (LLM ou imagem) sem base custom, assume
+      // o OpenAI como base padrão; caso contrário valida a URL informada.
+      const requiresBase =
+        Boolean(input.llmApiKey) || Boolean(input.imageApiKey);
+      const llmBase = input.llmApiBase ?? (requiresBase ? "https://api.openai.com/v1" : undefined);
+      if (llmBase) {
+        const baseError = validateApiBase(llmBase);
+        if (baseError) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: baseError });
+        }
+      }
+      try {
+        await setProviderSettings(ctx.user.id, {
+          ...input,
+          llmApiBase: llmBase,
+        });
+        return { ok: true };
+      } catch {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Não foi possível salvar as configurações.",
         });
       }
     }),

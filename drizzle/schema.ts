@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { index, int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -30,6 +30,30 @@ export const users = mysqlTable("users", {
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
+
+/**
+ * (Rodada 32) Configurações de providers por usuário.
+ * Permite escolher provedores alternativos de LLM/imagem (Groq, OpenRouter,
+ * endpoints custom) sem alterar as envs do servidor. Chaves conhecidas:
+ * `llm_api_base`, `llm_api_key`, `llm_model`, `image_api_key`, `image_model`.
+ * Valor vazio/nulo significa "usar o padrão do servidor/env".
+ */
+export const userSettings = mysqlTable("user_settings", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  settingKey: varchar("settingKey", { length: 64 }).notNull(),
+  value: text("value"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+// Índice composto (userId, settingKey) para leitura rápida das configurações por usuário.
+export const userSettingsUserKeyIndex = index("idx_user_settings_user_key").on(
+  userSettings.userId,
+  userSettings.settingKey
+);
+
+export type UserSetting = typeof userSettings.$inferSelect;
+export type InsertUserSetting = typeof userSettings.$inferInsert;
 
 /**
  * Análises de viralidade por nicho. Cada linha representa uma análise completa

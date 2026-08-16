@@ -74,10 +74,16 @@ const SCRIPT_SCHEMA = {
  * Gera um roteiro estendido (1.500–3.000 palavras) a partir de uma sugestão,
  * enriquecido com o contexto dos padrões de viralidade do nicho.
  */
+export type LlmConfigs = {
+  llmConfig?: { apiUrl: string; apiKey: string | undefined; model?: string };
+  imageConfig?: { apiUrl: string; apiKey: string | undefined; model?: string };
+};
+
 export async function generateExtendedScript(
   niche: string,
   suggestion: Suggestion,
-  patterns: ViralityPattern[]
+  patterns: ViralityPattern[],
+  configs?: LlmConfigs
 ): Promise<ExtendedScript> {
   const patternsText = patterns
     .map((p) => `• ${p.pattern} (score ${p.score}): ${p.explanation}`)
@@ -94,7 +100,7 @@ export async function generateExtendedScript(
     },
   ];
 
-  const response = await invokeLLM({ messages, response_format: SCRIPT_SCHEMA });
+  const response = await invokeLLM({ messages, response_format: SCRIPT_SCHEMA }, configs?.llmConfig);
   const raw = response.choices[0]?.message?.content;
   if (!raw || typeof raw !== "string") {
     throw new Error("llm_empty_response");
@@ -154,7 +160,12 @@ const OUTLINE_SCHEMA = {
  * Gera um esboço de roteiro compacto a partir de uma sugestão,
  * enriquecido com os padrões de viralidade do nicho.
  */
-export async function generateOutline(niche: string, suggestion: Suggestion, patterns: ViralityPattern[]): Promise<ScriptOutline> {
+export async function generateOutline(
+  niche: string,
+  suggestion: Suggestion,
+  patterns: ViralityPattern[],
+  configs?: LlmConfigs
+): Promise<ScriptOutline> {
   const patternsText = patterns.slice(0, 3).map((p) => `• ${p.pattern} (score ${p.score}): ${p.explanation}`).join("\n");
   const messages: LlmMessage[] = [
     {
@@ -167,7 +178,7 @@ export async function generateOutline(niche: string, suggestion: Suggestion, pat
     },
   ];
 
-  const response = await invokeLLM({ messages, response_format: OUTLINE_SCHEMA });
+  const response = await invokeLLM({ messages, response_format: OUTLINE_SCHEMA }, configs?.llmConfig);
   const raw = response.choices[0]?.message?.content;
   if (!raw || typeof raw !== "string") {
     throw new Error("llm_empty_response");
@@ -291,7 +302,8 @@ export async function analyzeNicheComparison(
   nicheA: string,
   videosA: { title: string; viewCount: number | null; likeCount: number | null; commentCount: number | null }[],
   nicheB: string,
-  videosB: { title: string; viewCount: number | null; likeCount: number | null; commentCount: number | null }[]
+  videosB: { title: string; viewCount: number | null; likeCount: number | null; commentCount: number | null }[],
+  configs?: LlmConfigs
 ): Promise<NicheComparison> {
   const block = (label: string, videos: typeof videosA) =>
     videos
@@ -312,7 +324,7 @@ export async function analyzeNicheComparison(
     },
   ];
 
-  const response = await invokeLLM({ messages, response_format: COMPARISON_SCHEMA });
+  const response = await invokeLLM({ messages, response_format: COMPARISON_SCHEMA }, configs?.llmConfig);
   const raw = response.choices[0]?.message?.content;
   if (!raw || typeof raw !== "string") {
     throw new Error("llm_empty_response");
@@ -385,7 +397,8 @@ const AGENDA_SCHEMA = {
  */
 export async function generateContentAgenda(
   niche: string,
-  suggestions: Suggestion[]
+  suggestions: Suggestion[],
+  configs?: LlmConfigs
 ): Promise<ContentAgenda> {
   const suggestionsText = suggestions
     .map(
@@ -405,7 +418,7 @@ export async function generateContentAgenda(
     },
   ];
 
-  const response = await invokeLLM({ messages, response_format: AGENDA_SCHEMA });
+  const response = await invokeLLM({ messages, response_format: AGENDA_SCHEMA }, configs?.llmConfig);
   const raw = response.choices[0]?.message?.content;
   if (!raw || typeof raw !== "string") {
     throw new Error("llm_empty_response");
@@ -497,7 +510,8 @@ const ALT_TITLES_SCHEMA = {
 export async function generateAlternativeTitles(
   niche: string,
   suggestion: Suggestion,
-  patterns: ViralityPattern[]
+  patterns: ViralityPattern[],
+  configs?: LlmConfigs
 ): Promise<AlternativeTitlesResult> {
   const patternsText = patterns
     .slice(0, 4)
@@ -515,7 +529,7 @@ export async function generateAlternativeTitles(
     },
   ];
 
-  const response = await invokeLLM({ messages, response_format: ALT_TITLES_SCHEMA });
+  const response = await invokeLLM({ messages, response_format: ALT_TITLES_SCHEMA }, configs?.llmConfig);
   const raw = response.choices[0]?.message?.content;
   if (!raw || typeof raw !== "string") {
     throw new Error("llm_empty_response");
@@ -566,7 +580,12 @@ const PINNED_SUGGESTION_SCHEMA = {
  * Usa o título fixado e as anotações do usuário como insumo para o LLM
  * gerar hook, ângulo, estrutura narrativa, duração alvo e score.
  */
-export async function buildPinnedSuggestion(niche: string, title: string, notes: string | null): Promise<Suggestion> {
+export async function buildPinnedSuggestion(
+  niche: string,
+  title: string,
+  notes: string | null,
+  configs?: LlmConfigs
+): Promise<Suggestion> {
   const notesText = notes?.trim() ? `Anotações do criador sobre essa ideia:\n${notes.trim()}\n` : "";
   const messages: LlmMessage[] = [
     {
@@ -578,7 +597,7 @@ export async function buildPinnedSuggestion(niche: string, title: string, notes:
       content: `Nicho: "${niche}"\n\nIdeia fixada pelo criador (título): "${title}"\n\n${notesText}Instruções:\n1. Escreva um título aprimorado mantendo a essência da ideia (até 70 caracteres).\n2. Crie o hook de abertura (1–2 frases que prendem a atenção nos primeiros 5 segundos).\n3. Defina o ângulo único de abordagem.\n4. Descreva a estrutura narrativa (abertura, desenvolvimento, fechamento).\n5. Sugira a duração alvo (ex: "8–12 min").\n6. Atribua um viralityScore de 0 a 100 calibrado para o nicho.\n7. Explique em 1–2 frases o porquê do potencial de viralidade.`,
     },
   ];
-  const response = await invokeLLM({ messages, response_format: PINNED_SUGGESTION_SCHEMA });
+  const response = await invokeLLM({ messages, response_format: PINNED_SUGGESTION_SCHEMA }, configs?.llmConfig);
   const raw = response.choices[0]?.message?.content;
   if (!raw || typeof raw !== "string") {
     throw new Error("llm_empty_response");

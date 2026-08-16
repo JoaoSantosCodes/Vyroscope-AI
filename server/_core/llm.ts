@@ -362,8 +362,23 @@ const fetchWithBackoff = async (
     : new Error("LLM request failed after exhausting retries");
 };
 
-export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
-  assertApiKey();
+export type LlmInvokeConfig = {
+  apiUrl: string;
+  apiKey: string | undefined;
+  model?: string;
+};
+
+export async function invokeLLM(
+  params: InvokeParams,
+  config?: LlmInvokeConfig
+): Promise<InvokeResult> {
+  if (!config) {
+    assertApiKey();
+  } else if (!config.apiKey) {
+    throw new Error(
+      "LLM invoke failed: provider apiKey is not configured (user settings or env)"
+    );
+  }
 
   const {
     messages,
@@ -387,11 +402,12 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
 
   // Rodada 31: no provider OpenAI, o modelo padrão vem de OPENAI_MODEL quando
   // o chamador não especifica — o Forge ignora o campo quando ausente.
-  const resolvedModel =
-    model ??
+  const envDefaultModel =
+    config?.model ??
     (ENV.openaiApiKey && ENV.openaiApiKey.trim().length > 0
       ? ENV.openaiModel || undefined
       : undefined);
+  const resolvedModel = model ?? envDefaultModel;
   if (resolvedModel) {
     payload.model = resolvedModel;
   }
@@ -431,11 +447,12 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     payload.response_format = normalizedResponseFormat;
   }
 
-  const response = await fetchWithBackoff(resolveApiUrl(), {
+  const targetUrl = config?.apiUrl ?? resolveApiUrl();
+  const response = await fetchWithBackoff(targetUrl, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${resolveApiKey()}`,
+      authorization: `Bearer ${config?.apiKey ?? resolveApiKey()}`,
     },
     body: JSON.stringify(payload),
   });

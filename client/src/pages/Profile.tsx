@@ -1,14 +1,17 @@
 import SiteLayout from "@/components/SiteLayout";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { formatDate } from "@/lib/score";
 import { trpc } from "@/lib/trpc";
-import { BarChart3, Clapperboard, Loader2, Radar, Save, ShieldCheck, UserRound } from "lucide-react";
+import { BarChart3, Clapperboard, Loader2, Radar, Save, ShieldCheck, Settings2, UserRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
@@ -63,6 +66,78 @@ export default function Profile() {
   });
 
   const isLocalUser = data?.loginMethod === "local";
+
+  // (Rodada 32) Status e configuração de provedores de API
+  const providerQuery = trpc.profile.apiProviderStatus.useQuery(undefined, {
+    enabled: isAuthenticated,
+    staleTime: 30_000,
+  });
+  const providerMutation = trpc.profile.setProviderSettings.useMutation({
+    onSuccess: () => {
+      utils.profile.apiProviderStatus.invalidate();
+      toast.success("Provedores atualizados. As próximas análises já usarão a nova configuração.");
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  // Estado do dialog de provedores (presets: openai | groq | openrouter | custom)
+  const [providerPreset, setProviderPreset] = useState("auto");
+  const [llmApiBase, setLlmApiBase] = useState("");
+  const [llmApiKey, setLlmApiKey] = useState("");
+  const [llmModel, setLlmModel] = useState("");
+  const [imageApiKey, setImageApiKey] = useState("");
+  const [imageModel, setImageModel] = useState("");
+  const [providerDialogOpen, setProviderDialogOpen] = useState(false);
+
+  useEffect(() => {
+    if (providerDialogOpen && providerQuery.data) {
+      const { llm } = providerQuery.data;
+      setProviderPreset(llm.provider ?? "auto");
+      // Base exibida sem o sufixo do endpoint
+      const base = llm.apiUrl
+        .replace(/\/v1\/chat\/completions$/, "")
+        .replace(/\/chat\/completions$/, "");
+      setLlmApiBase(base === "https://api.openai.com" ? "" : base);
+      setLlmModel(llm.model ?? "");
+      // Chave atual nunca é revelada; mostrar apenas se o override é do usuário
+      setLlmApiKey("");
+      setImageApiKey("");
+      setImageModel("");
+    }
+  }, [providerDialogOpen, providerQuery.data]);
+
+  const PRESETS = [
+    { value: "openai", label: "OpenAI", base: "https://api.openai.com/v1", model: "gpt-4o", imageModel: "dall-e-3" },
+    { value: "groq", label: "Groq (mais barato)", base: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile", imageModel: "dall-e-3" },
+    { value: "openrouter", label: "OpenRouter", base: "https://openrouter.ai/api/v1", model: "openai/gpt-4o-mini", imageModel: "openai/dall-e-3" },
+    { value: "custom", label: "Personalizado", base: "", model: "", imageModel: "" },
+  ];
+  const currentPreset = PRESETS.find((p) => p.value === providerPreset);
+
+  const applyProvider = () => {
+    const base =
+      providerPreset === "custom"
+        ? llmApiBase.trim()
+        : currentPreset
+          ? currentPreset.base
+          : providerQuery.data?.llm.apiUrl?.replace(/\/v1\/chat\/completions$/, "").replace(/\/chat\/completions$/, "");
+    const key = (llmApiKey || imageApiKey).trim();
+    if (key && !base) {
+      toast.error("Informe a URL base da API ou escolha um provedor pré-configurado.");
+      return;
+    }
+    const model =
+      llmModel.trim() || (providerPreset === "custom" ? undefined : currentPreset?.model);
+    const imgModel = imageModel.trim() || undefined;
+    providerMutation.mutate({
+      llmApiBase: base || undefined,
+      llmApiKey: key || undefined,
+      llmModel: model || undefined,
+      imageApiKey: (imageApiKey || llmApiKey).trim() || undefined,
+      imageModel: imgModel,
+    });
+    setProviderDialogOpen(false);
+  };
 
   const handleSaveSecret = () => {
     if (secretCode !== secretConfirm) {
@@ -242,6 +317,174 @@ export default function Profile() {
           </CardContent>
         </Card>
 
+        {/* (Rodada 32) Status e configuração de provedores de API */}
+        <Card className="border-border/60">
+          <CardHeader className="flex flex-row items-center justify-between gap-4">
+            <div>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Settings2 className="h-5 w-5 text-primary" />
+                Status das APIs
+              </CardTitle>
+              <CardDescription>
+                Veja quais provedores de LLM, imagem e YouTube estão ativos e configure
+                provedores alternativos (Groq, OpenRouter ou endpoint próprio) para reduzir custos.
+              </CardDescription>
+            </div>
+            <Dialog open={providerDialogOpen} onOpenChange={setProviderDialogOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" disabled={providerMutation.isPending}>
+                  {providerMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  <Settings2 className="mr-2 h-4 w-4" />
+                  Configurar provedor
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>Provedor alternativo (economia de custos)</DialogTitle>
+                  <DialogDescription>
+                    Escolha um provedor compatível com a API da OpenAI. Suas análises,
+                    roteiros, títulos, thumbnails e agendas passarão a usar o provider
+                    configurado. Campos vazios voltam ao padrão do servidor.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Provedor</Label>
+                    <Select value={providerPreset} onValueChange={setProviderPreset}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Escolha o provedor" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="auto">Padrão do servidor (sem override)</SelectItem>
+                        {PRESETS.map((p) => (
+                          <SelectItem key={p.value} value={p.value}>
+                            {p.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {providerPreset === "custom" && (
+                    <div className="space-y-2">
+                      <Label htmlFor="provider-base">URL base da API (https)</Label>
+                      <Input
+                        id="provider-base"
+                        value={llmApiBase}
+                        onChange={(e) => setLlmApiBase(e.target.value)}
+                        placeholder="https://api.openai.com/v1"
+                        autoComplete="off"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Deve apontar para um endpoint compatível com OpenAI (ex.: /v1/chat/completions).
+                      </p>
+                    </div>
+                  )}
+                  <div className="space-y-2">
+                    <Label htmlFor="provider-key">Chave da API (LLM)</Label>
+                    <Input
+                      id="provider-key"
+                      type="password"
+                      value={llmApiKey}
+                      onChange={(e) => setLlmApiKey(e.target.value)}
+                      placeholder="sk-... (obrigatória para ativar o override)"
+                      autoComplete="off"
+                      maxLength={2000}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      A mesma chave é usada para thumbnails, salvo campo próprio abaixo.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="provider-model">Modelo de LLM (opcional)</Label>
+                    <Input
+                      id="provider-model"
+                      value={llmModel}
+                      onChange={(e) => setLlmModel(e.target.value)}
+                      placeholder={currentPreset?.model ?? "ex.: gpt-4o-mini"}
+                      autoComplete="off"
+                      maxLength={120}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="provider-image-key">Chave da API de imagem (opcional)</Label>
+                    <Input
+                      id="provider-image-key"
+                      type="password"
+                      value={imageApiKey}
+                      onChange={(e) => setImageApiKey(e.target.value)}
+                      placeholder="Use a chave do LLM se for a mesma"
+                      autoComplete="off"
+                      maxLength={2000}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="provider-image-model">Modelo de imagem (opcional)</Label>
+                    <Input
+                      id="provider-image-model"
+                      value={imageModel}
+                      onChange={(e) => setImageModel(e.target.value)}
+                      placeholder={currentPreset?.imageModel ?? "ex.: dall-e-3"}
+                      autoComplete="off"
+                      maxLength={120}
+                    />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setProviderDialogOpen(false)}>
+                    Cancelar
+                  </Button>
+                  <Button onClick={applyProvider} disabled={providerMutation.isPending}>
+                    {providerMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Aplicar configuração
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {providerQuery.isLoading ? (
+              <div className="space-y-3">
+                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-12 w-full" />
+              </div>
+            ) : providerQuery.data ? (
+              <>
+                <StatusRow
+                  name="LLM (análises, roteiros, títulos, agendas)"
+                  provider={providerQuery.data.llm.provider}
+                  model={providerQuery.data.llm.model}
+                  active={providerQuery.data.llm.active}
+                  base={providerQuery.data.llm.apiUrl.replace(/\/v1\/chat\/completions$/, "").replace(/\/chat\/completions$/, "")}
+                />
+                <StatusRow
+                  name="Imagem (thumbnails)"
+                  provider={providerQuery.data.image.provider}
+                  model={providerQuery.data.image.model}
+                  active={providerQuery.data.image.active}
+                  base={providerQuery.data.image.apiUrl.replace(/\/images\/generations$/, "")}
+                />
+                <StatusRow
+                  name="YouTube (dados dos vídeos)"
+                  provider={providerQuery.data.youtube.provider}
+                  active={providerQuery.data.youtube.keyConfigured}
+                  base="YouTube Data API v3"
+                />
+                <p className="text-xs text-muted-foreground">
+                  A consulta ao YouTube usa a chave do projeto ({" "}
+                  <code>YOUTUBE_DATA_API_KEY</code>) configurada no servidor — por segurança,
+                  ela não pode ser definida por usuário. Se estiver usando o hub de dados
+                  interno da Manus, a análise só funciona dentro da plataforma.
+                </p>
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Não foi possível carregar o status das APIs.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
         {/* Editar dados */}
         <Card className="border-border/60">
           <CardHeader>
@@ -278,5 +521,45 @@ export default function Profile() {
         </Card>
       </div>
     </SiteLayout>
+  );
+}
+
+/** Linha de status de um provider (Rodada 32). */
+function StatusRow(props: {
+  name: string;
+  provider: string;
+  model?: string;
+  active: boolean;
+  base?: string;
+}) {
+  const { name, provider, model, active, base } = props;
+  const label =
+    provider === "manus-forge"
+      ? "Forge interno (padrão)"
+      : provider === "youtube-data-api-direct"
+        ? "YouTube Data API (chave do projeto)"
+        : provider === "manus-data-hub"
+          ? "Hub de dados Manus"
+          : provider === "groq"
+            ? "Groq"
+            : provider === "openrouter"
+              ? "OpenRouter"
+              : provider === "openai"
+                ? "OpenAI"
+                : "Personalizado";
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border/60 bg-muted/40 p-3">
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium">{name}</p>
+        <p className="text-xs text-muted-foreground truncate">
+          {label}
+          {model ? ` · ${model}` : ""}
+          {base && provider !== "manus-data-hub" ? ` · ${base}` : ""}
+        </p>
+      </div>
+      <Badge variant={active ? "default" : "secondary"} className={active ? "bg-emerald-500/90 hover:bg-emerald-500/90" : undefined}>
+        {active ? "Ativo" : "Inativo"}
+      </Badge>
+    </div>
   );
 }
