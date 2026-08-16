@@ -24,10 +24,11 @@ import { Bar, BarChart, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAx
 import { Skeleton } from "@/components/ui/skeleton";
 import { buildIdeaHistoryCsv, exportIdeaHistoryCsv } from "@/lib/export";
 import { KANBAN_HIDE_PUBLISHED_KEY, KANBAN_OLDEST_FIRST_KEY, readSessionFlag, sortColumnOldestFirst, writeSessionFlag } from "@/lib/kanbanSort";
+import GoalCelebrationView from "@/components/GoalCelebration";
 import { quickNoteValue, shouldSaveQuickNote } from "@/lib/quickNote";
 import { formatDate, scoreColor, scoreLabel } from "@/lib/score";
 import { trpc } from "@/lib/trpc";
-import { Archive, ArrowUpDown, CalendarDays, Clock, Edit3, FileDown, FileText, Flame, Lightbulb, Loader2, Pin, PinOff, Radar, Search, StickyNote, Target, TrendingUp } from "lucide-react";
+import { Archive, ArrowUpDown, CalendarDays, Clock, Edit3, FileDown, FileText, Flame, Lightbulb, Loader2, Pin, PinOff, Radar, Search, Sparkles, StickyNote, Target, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 
@@ -631,6 +632,10 @@ export default function IdeaHistory() {
     refetchOnWindowFocus: false,
     staleTime: 5 * 60 * 1000,
   });
+  const metCount = useMemo(
+    () => (monthlyHistoryQuery.data ?? []).filter((m) => m.met && !m.isCurrent).length,
+    [monthlyHistoryQuery.data]
+  );
   // Últimos 6 meses para o mini-gráfico de barras (rodada 21)
   const sixMonthHistory = useMemo(
     () => (monthlyHistoryQuery.data ?? []).slice(-6),
@@ -648,6 +653,22 @@ export default function IdeaHistory() {
     },
     onError: (err) => toast.error(err.message || "Falha ao gerar o resumo mensal."),
   });
+
+  // ===== Sugestão de meta realista via IA para um mês (rodada 22) =====
+  const suggestGoalMutation = trpc.extended.suggestMonthlyGoal.useMutation({
+    onSuccess: (data) => {
+      setSuggestedGoal({ goal: data.suggestedGoal, reason: data.reason, keepExisting: data.keepExisting });
+      toast.success(`Meta sugerida pela IA para ${formatMonthKey(statsMonthKey).toLowerCase()}: ${data.suggestedGoal}.`);
+    },
+    onError: (err) => toast.error(err.message || "Falha ao gerar a sugestão de meta."),
+  });
+  const [suggestedGoal, setSuggestedGoal] = useState<{ goal: number; reason: string; keepExisting: boolean } | null>(null);
+  const applySuggestedGoal = () => {
+    if (!suggestedGoal) return;
+    setGoalMutation.mutate({ monthKey: statsMonthKey, goal: suggestedGoal.goal }, {
+      onSuccess: () => setSuggestedGoal(null),
+    });
+  };
 
   const archivePublishedMutation = trpc.extended.archivePublishedIdeas.useMutation({
     onMutate: () => {
@@ -984,6 +1005,21 @@ export default function IdeaHistory() {
                   )}
                   Exportar mês
                 </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 border-border bg-card px-2 text-[11px]"
+                  disabled={suggestGoalMutation.isPending}
+                  title="A IA analisa o ritmo dos últimos meses e o streak atual para sugerir uma meta realista (1–10)"
+                  onClick={() => suggestGoalMutation.mutate({ monthKey: statsMonthKey })}
+                >
+                  {suggestGoalMutation.isPending ? (
+                    <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                  ) : (
+                    <Sparkles className="mr-1.5 h-3 w-3 text-amber-500" />
+                  )}
+                  Sugerir meta (IA)
+                </Button>
               </div>
               {/* Mini-gráfico de barras: publicadas nos últimos 6 meses (rodada 21) */}
               <div className="mt-2">
@@ -1024,7 +1060,7 @@ export default function IdeaHistory() {
                 </div>
               </div>
             </div>
-            {/* Meta e barra de progresso do mês (rodada 19, visível no mês corrente; rodada 20: streak) */}
+            {/* Meta e barra de progresso do mês (rodada 19, visível no mês corrente; rodada 20: streak; rodada 22: celebração ao atingir 100%) */}
             {isCurrentMonthView && statsQuery.data && statsQuery.data.goal > 0 && (
               <div className="mt-3 flex flex-wrap items-center gap-2.5 rounded-lg border border-border bg-card/50 px-3 py-2.5">
                 <Progress
@@ -1072,6 +1108,42 @@ export default function IdeaHistory() {
                 </div>
               );
             })()}
+            {/* Sugestão de meta via IA (rodada 22): banner com a meta sugerida e botão de aplicar */}
+            {isCurrentMonthView && suggestedGoal && (
+              <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-500">
+                <Sparkles className="h-3.5 w-3.5 shrink-0" />
+                <span>
+                  {suggestedGoal.keepExisting ? (
+                    <>{suggestedGoal.reason}</>
+                  ) : (
+                    <>
+                      A IA sugere a meta de <strong className="font-semibold text-amber-400">{suggestedGoal.goal}</strong> para {formatMonthKey(currentMonthKey).toLowerCase()}: {suggestedGoal.reason}
+                    </>
+                  )}
+                </span>
+                {!suggestedGoal.keepExisting && (
+                  <button
+                    type="button"
+                    className="rounded-md bg-amber-500 px-2 py-0.5 text-[10px] font-semibold text-primary-foreground transition-transform hover:brightness-110 active:scale-[0.97]"
+                    onClick={applySuggestedGoal}
+                  >
+                    {setGoalMutation.isPending ? "Aplicando…" : "Aplicar meta"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="text-[10px] text-amber-500/70 transition-colors hover:text-foreground"
+                  title="Ignorar a sugestão"
+                  onClick={() => setSuggestedGoal(null)}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+            {/* Celebração ao atingir 100% da meta mensal (rodada 22) */}
+            {isCurrentMonthView && statsQuery.data && statsQuery.data.goal > 0 && statsQuery.data.publishedThisMonth >= statsQuery.data.goal ? (
+              <GoalCelebrationView />
+            ) : null}
             <p className="mb-3 text-xs text-muted-foreground">
               Arraste os cards para reordenar dentro da coluna ou movê-los entre as colunas de status. As fixadas aparecem primeiro no PDF exportado e as arquivadas entram nas exportações em uma seção dedicada.
             </p>

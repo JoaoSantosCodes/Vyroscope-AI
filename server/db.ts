@@ -609,6 +609,22 @@ export function dayOfMonth(date: Date = new Date()): number {
   return date.getDate();
 }
 
+/** Retorna a meta configurada para o mês (ou null se não houver). Rodada 22
+ * — extrai a consulta para que o caminho "meta já existe" seja testável
+ * isoladamente no teste do procedimento de sugestão. */
+export async function getMonthlyGoalByMonth(
+  userId: number,
+  monthKey: string
+): Promise<{ goal: number } | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db
+    .select({ goal: pinnedMonthlyGoal.goal })
+    .from(pinnedMonthlyGoal)
+    .where(and(eq(pinnedMonthlyGoal.userId, userId), eq(pinnedMonthlyGoal.monthKey, monthKey)));
+  return row ?? null;
+}
+
 /** Histórico mês a mês retrocedendo a partir do mês corrente (inclusive, N=12
  * por padrão): para cada mês retorna monthKey, rótulo pt-BR, publicadas, meta,
  * média de dias de produção (null sem dados) e se a meta foi cumprida.

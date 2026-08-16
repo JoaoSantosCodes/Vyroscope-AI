@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis, Tooltip as ChartTooltip } from "recharts";
 import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -13,6 +14,7 @@ import {
   Target,
   XCircle,
   CalendarDays,
+  FileDown,
 } from "lucide-react";
 
 export default function Streaks() {
@@ -30,6 +32,15 @@ export default function Streaks() {
   const metCount = history.filter((m) => m.met && !m.isCurrent).length;
   const streak = streakQuery.data?.streak ?? 0;
 
+  // ===== Exportação do histórico de streaks em PDF (rodada 22) =====
+  const exportStreaksMutation = trpc.extended.exportStreaksPdf.useMutation({
+    onSuccess: (data) => {
+      window.open(data.downloadUrl, "_blank");
+      toast.success("PDF do histórico de metas mensais gerado.");
+    },
+    onError: (err) => toast.error(err.message || "Falha ao gerar o PDF de metas mensais."),
+  });
+
   if (!isAuthenticated) return null;
 
   return (
@@ -44,13 +55,31 @@ export default function Streaks() {
           Voltar ao quadro Kanban
         </button>
 
-        <h1 className="flex items-center gap-2 text-2xl font-bold text-foreground">
-          <Flame className="h-6 w-6 text-amber-500" />
-          Histórico de metas mensais
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Acompanhamento mês a mês: meta configurada, publicações realizadas e se a meta foi cumprida.
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="flex items-center gap-2 text-2xl font-bold text-foreground">
+              <Flame className="h-6 w-6 text-amber-500" />
+              Histórico de metas mensais
+            </h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Acompanhamento mês a mês: meta configurada, publicações realizadas e se a meta foi cumprida.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-xs"
+            disabled={exportStreaksMutation.isPending}
+            onClick={() => exportStreaksMutation.mutate({})}
+          >
+            {exportStreaksMutation.isPending ? (
+              <FileDown className="mr-1.5 h-3.5 w-3.5 animate-spin opacity-70" />
+            ) : (
+              <FileDown className="mr-1.5 h-3.5 w-3.5" />
+            )}
+            Exportar streaks em PDF
+          </Button>
+        </div>
 
         <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
           <div className="rounded-lg border border-border bg-card p-3">

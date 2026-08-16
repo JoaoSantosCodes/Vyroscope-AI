@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./_core/llm", () => ({
   invokeLLM: vi.fn(),
@@ -291,6 +291,7 @@ vi.mock("./db", async (importOriginal) => {
     setPinnedMonthlyGoal: vi.fn(),
     getMonthlyGoalStreak: vi.fn(),
     getMonthlyHistory: vi.fn(),
+    getMonthlyGoalByMonth: vi.fn(),
     deletePinnedIdea: vi.fn(),
   };
 });
@@ -318,6 +319,7 @@ const mockedStats = vi.mocked(db.getPinnedProductionStats);
 const mockedSetGoal = vi.mocked(db.setPinnedMonthlyGoal);
 const mockedStreak = vi.mocked(db.getMonthlyGoalStreak);
 const mockedMonthlyHistory = vi.mocked(db.getMonthlyHistory);
+const mockedExistingGoal = vi.mocked(db.getMonthlyGoalByMonth);
 const mockedDeletePinned = vi.mocked(db.deletePinnedIdea);
 
 const folderUser = {
@@ -929,6 +931,119 @@ describe("extended.exportIdeaHistoryPdf", () => {
   it("throws when both lists are empty", async () => {
     const caller = appRouter.createCaller(createFolderCtx());
     await expect(caller.extended.exportIdeaHistoryPdf({ pinned: [], ideas: [] })).rejects.toThrow("Não há ideias para exportar");
+  });
+});
+
+describe("extended.exportStreaksPdf", () => {
+  it("exports the 12-month streak history as a PDF download URL", async () => {
+    const months = Array.from({ length: 12 }, (_, i) => ({
+      monthKey: `2025-${String(i + 1).padStart(2, "0")}`,
+      label: `mês ${i + 1}`,
+      publishedThisMonth: i,
+      avgProductionDays: null,
+      goal: 4,
+      met: i >= 4,
+      isCurrent: false,
+    }));
+    mockedMonthlyHistory.mockResolvedValueOnce(months as never);
+    mockedStreak.mockResolvedValueOnce({ streak: 2, lastMetKey: "2026-07" } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.exportStreaksPdf({});
+    expect(result.fileName).toBe("metas-mensais-streaks.pdf");
+    expect(result.downloadUrl).toBe("https://s3.example/p.pdf");
+    expect(storagePut).toHaveBeenCalledWith(
+      expect.stringMatching(/^exports\/streaks-\d+-2\.pdf$/),
+      expect.any(Buffer),
+      "application/pdf"
+    );
+    expect(mockedMonthlyHistory).toHaveBeenCalledWith(2, 12);
+  });
+  it("accepts a client-provided months override and clamps to 12 rows", async () => {
+    const months = Array.from({ length: 13 }, (_, i) => ({
+      monthKey: `2024-${String((i % 12) + 1).padStart(2, "0")}`,
+      label: `mês ${i + 1}`,
+      publishedThisMonth: i,
+      avgProductionDays: null,
+      goal: 4,
+      met: false,
+      isCurrent: false,
+    }));
+    mockedStreak.mockResolvedValueOnce({ streak: 0, lastMetKey: null } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.exportStreaksPdf({ months });
+    // 13 → cortado a 12
+    expect(mockedMonthlyHistory).not.toHaveBeenCalled();
+    expect(result.downloadUrl).toBe("https://s3.example/p.pdf");
+  });
+  it("rejects when the history is empty", async () => {
+    mockedMonthlyHistory.mockResolvedValueOnce([] as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    await expect(caller.extended.exportStreaksPdf({})).rejects.toThrow();
+  });
+});
+
+describe("extended.suggestMonthlyGoal", () => {
+  const baseMonth = Array.from({ length: 4 }, (_, i) => ({
+    monthKey: `2026-${String(i + 1).padStart(2, "0")}`,
+    label: `mês ${i + 1}`,
+    publishedThisMonth: 3,
+    avgProductionDays: 4,
+    goal: 4,
+    met: true,
+    isCurrent: false,
+  }));
+  it("suggests a realistic goal via LLM for the requested month", async () => {
+    mockedStreak.mockResolvedValueOnce({ streak: 4, lastMetKey: "2026-07" } as never);
+    mockedMonthlyHistory.mockResolvedValueOnce(baseMonth as never);
+    mockedInvokeLLM.mockResolvedValueOnce({
+      choices: [
+        {
+          message: { content: JSON.stringify({ suggestedGoal: 4, reason: "Ritmo estável de 3 publicações nos últimos 4 meses, com meta cumprida em todos." }) },
+        },
+      ],
+    } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.suggestMonthlyGoal({ monthKey: "2026-08" });
+    expect(result.suggestedGoal).toBe(4);
+    expect(result.reason).toContain("Ritmo estável");
+    expect(result.keepExisting).toBe(false);
+    const llmCall = mockedInvokeLLM.mock.calls[0]![0] as { messages: { content: string }[] };
+    const text = llmCall.messages.map((m) => m.content).join(" ");
+    expect(text).toContain("Sequência atual de meses consecutivos com a meta cumprida: 4");
+  });
+  it("returns keepExisting when a goal is already configured for the month", async () => {
+    const withGoal = [...baseMonth, {
+      monthKey: "2026-08",
+      label: "mês extra",
+      publishedThisMonth: 2,
+      avgProductionDays: null,
+      goal: 5,
+      met: false,
+      isCurrent: true,
+    }];
+    mockedStreak.mockResolvedValueOnce({ streak: 0, lastMetKey: null } as never);
+    mockedMonthlyHistory.mockResolvedValueOnce(withGoal as never);
+    mockedExistingGoal.mockResolvedValueOnce({ goal: 5 } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.suggestMonthlyGoal({ monthKey: "2026-08" });
+    expect(result.keepExisting).toBe(true);
+    expect(result.suggestedGoal).toBe(5);
+    // Nenhuma chamada de LLM para mês com meta já definida
+    expect(mockedInvokeLLM).not.toHaveBeenCalled();
+  });
+  it("rejects a past month key", async () => {
+    const caller = appRouter.createCaller(createFolderCtx());
+    await expect(caller.extended.suggestMonthlyGoal({ monthKey: "2025-01" })).rejects.toThrow();
+  });
+  it("rejects when there is no publication history", async () => {
+    mockedStreak.mockResolvedValueOnce({ streak: 0, lastMetKey: null } as never);
+    mockedMonthlyHistory.mockResolvedValueOnce([] as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    await expect(caller.extended.suggestMonthlyGoal({ monthKey: "2026-09" })).rejects.toThrow(/não tem histórico/);
+  });
+  it("rejects a malformed month key", async () => {
+    const caller = appRouter.createCaller(createFolderCtx());
+    await expect(caller.extended.suggestMonthlyGoal({ monthKey: "2026/08" })).rejects.toThrow();
   });
 });
 

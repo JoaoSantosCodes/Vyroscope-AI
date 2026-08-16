@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import type { AnalysisResult } from "../analysis";
 import { analyzeNicheComparison, buildPinnedSuggestion, buildThumbnailPrompt, generateAlternativeTitles, generateContentAgenda, generateExtendedScript, generateOutline } from "../extended";
+
 import { fetchTrendingVideosForNiche } from "../youtube";
 import { protectedProcedure, router } from "../_core/trpc";
 
@@ -503,6 +504,119 @@ export const extendedRouter = router({
     const { getMonthlyHistory } = await import("../db");
     return getMonthlyHistory(ctx.user.id, 12);
   }),
+  /** Exporta o histórico de streaks mensais em PDF (capa com KPIs, gráfico
+   *  de barras de 12 meses e tabela mês a mês). Rodada 22. */
+  exportStreaksPdf: protectedProcedure
+    .input(z.object({
+      /** Opcional: override client-side do histórico (quando fornecido, o
+       *  frontend já enviou a visão que quer exportar). */
+      months: z
+        .array(
+          z.object({
+            monthKey: z.string().regex(/^\d{4}-\d{2}$/),
+            label: z.string().min(1),
+            publishedThisMonth: z.number().int().min(0),
+            goal: z.number().int().min(1).max(100),
+            met: z.boolean(),
+            isCurrent: z.boolean(),
+          })
+        )
+        .min(1)
+        .max(36)
+        .optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await import("../db");
+      const months = input.months ?? (await db.getMonthlyHistory(ctx.user.id, 12));
+      const { streak } = await db.getMonthlyGoalStreak(ctx.user.id);
+      const metCount = months.filter((m) => m.met && !m.isCurrent).length;
+      const totalPublished = months.reduce((acc, m) => acc + m.publishedThisMonth, 0);
+      const { buildStreaksPdf } = await import("../exportPdf");
+      const buffer = await buildStreaksPdf({ months, streak, metCount, totalPublished, userName: ctx.user.name });
+      const key = `exports/streaks-${Date.now()}-${ctx.user.id}.pdf`;
+      const { storagePut } = await import("../storage");
+      const { url } = await storagePut(key, buffer, "application/pdf");
+      return { downloadUrl: url, fileName: "metas-mensais-streaks.pdf" } as const;
+    }),
+  /** Sugere uma meta realista de publicações para um mês via IA, analisando
+   *  o ritmo dos últimos 3 meses e o streak atual. Rodada 22. */
+  suggestMonthlyGoal: protectedProcedure
+    .input(z.object({ monthKey: z.string().regex(/^\d{4}-\d{2}$/) }))
+    .mutation(async ({ ctx, input }) => {
+      if (!/^[0-9]{4}-(0[1-9]|1[0-2])$/.test(input.monthKey)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Mês inválido." });
+      }
+      const now = new Date();
+      const target = input.monthKey;
+      // O mês sugerido deve ser o corrente ou futuro
+      const currentKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+      if (target < currentKey) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "A sugestão só pode ser gerada para o mês corrente ou meses futuros." });
+      }
+      const { getMonthlyHistory, getMonthlyGoalStreak, getMonthlyGoalByMonth } = await import("../db");
+      const history = await getMonthlyHistory(ctx.user.id, 4); // 3 anteriores + corrente
+      const { streak } = await getMonthlyGoalStreak(ctx.user.id);
+      if (history.length === 0) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Você ainda não tem histórico de publicações para gerar uma sugestão de meta." });
+      }
+      const existing = await getMonthlyGoalByMonth(ctx.user.id, target);
+      if (existing) {
+        return { suggestedGoal: existing.goal, reason: "Meta já definida para este mês — a IA recomenda mantê-la até você revisar manualmente.", keepExisting: true } as const;
+      }
+      const current = history[history.length - 1];
+      const previous = history.slice(0, history.length - 1);
+      const previousGoals = previous.map((m) => m.goal);
+      const previousPublished = previous.map((m) => m.publishedThisMonth);
+      const avgPrevious = previousPublished.reduce((a, b) => a + b, 0) / previousPublished.length;
+      const bestPrevious = Math.max(...previousPublished);
+      const goalTrend = previousGoals.length > 0 ? previousGoals.reduce((a, b) => a + b, 0) / previousGoals.length : 4;
+      const context = previous.map((m) => `${m.label}: ${m.publishedThisMonth}/${m.goal} (${m.met ? "cumprida" : "não cumprida"});`).join(" ");
+      const { invokeLLM } = await import("../_core/llm");
+      const GOAL_SCHEMA = {
+        type: "json_schema",
+        json_schema: {
+          name: "goal_suggestion",
+          strict: true,
+          schema: {
+            type: "object",
+            properties: {
+              suggestedGoal: { type: "integer", minimum: 1, maximum: 10, description: "Meta sugerida de publicações para o mês" },
+              reason: { type: "string", description: "Justificativa curta em pt-BR citando o ritmo recente" },
+            },
+            required: ["suggestedGoal", "reason"],
+            additionalProperties: false,
+          },
+        },
+      } as const;
+      const response = await invokeLLM({
+        messages: [
+          {
+            role: "system",
+            content: "Você é um estrategista de produção de conteúdo para YouTube. Sugira metas de publicações mensais realistas e levemente progressivas com base no histórico do criador. Responda apenas com o JSON solicitado.",
+          },
+          {
+            role: "user",
+            content: `Histórico de publicações (mais antigo primeiro): ${context} Sequência atual de meses consecutivos com a meta cumprida: ${streak}. Mês corrente (${current.label}): ${current.publishedThisMonth}/${current.goal} publicadas até agora (meta ainda em andamento). Meta média dos meses anteriores: ${goalTrend.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}. Média de publicações dos meses anteriores: ${avgPrevious.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}. Melhor mês anterior: ${bestPrevious}. Sugira uma meta de 1 a 10 publicações para o mês alvo que seja alcançável no ritmo recente e progressiva quando o streak for positivo.`,
+          },
+        ],
+        response_format: GOAL_SCHEMA,
+      });
+      const raw = response.choices[0]?.message?.content;
+      if (!raw || typeof raw !== "string") {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "A IA não retornou uma sugestão válida — tente novamente." });
+      }
+      let parsed: { suggestedGoal?: unknown; reason?: unknown };
+      try {
+        parsed = JSON.parse(raw) as typeof parsed;
+      } catch {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "A IA não retornou uma sugestão válida — tente novamente." });
+      }
+      const suggestedGoal = Math.min(10, Math.max(1, Number(parsed.suggestedGoal) || 0));
+      if (suggestedGoal < 1) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "A IA não retornou uma meta válida — tente novamente." });
+      }
+      return { suggestedGoal, reason: String(parsed.reason ?? ""), keepExisting: false } as const;
+    }),
   /** Exporta um resumo mensal de produção em PDF curto (página única)
    *  com o resumo do mês selecionado, dia do mês e selo de streak. Rodada 20. */
   exportMonthlyPdf: protectedProcedure

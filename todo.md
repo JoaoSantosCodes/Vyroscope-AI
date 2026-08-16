@@ -193,3 +193,11 @@
 - [x] Testes vitest das novas funcionalidades (143 testes: pinnedMonthlyHistory x2)
 - [x] Atualizar habilidade vyroscope-video-analyst com a rodada 21 (SKILL.md: seção "Monthly streak page, 6-month mini-chart and green encouragement highlight (round 21)" + quick reference item 7; features-roadmap.md: rota /streaks, parágrafo Round 21, helpers getMonthlyGoalStreak/getMonthlyHistory/dayOfMonth; validada com quick_validate)
 - [x] Verificação visual (/streaks: KPIs, gráfico 12 meses, lista mês a mês; /ideia-do-dia intacto; Sidebar do DashboardLayout com navegação real) e checkpoint
+
+## Melhorias solicitadas (rodada 22)
+- [x] Página de metas: botão exportar o histórico de streaks e o gráfico de 12 meses em PDF (buildStreaksPdf — 1 página com KPIs + gráfico de barras + tabela mês a mês, procedure exportStreaksPdf via storage)
+- [x] Painel de estatísticas: botão "Sugerir meta (IA)" que analisa publicações dos últimos 3 meses e ritmo atual via LLM, retornando meta sugerida com justificativa (procedure suggestMonthlyGoal, input monthKey do próximo mês; helper getMonthlyGoalByMonth extraído em db.ts para testabilidade)
+- [x] Painel de estatísticas: animação de celebração (confetti) ao progresso atingir 100% da meta do mês corrente (GoalCelebrationView — cannon de confetti ao carregar dados com ratio >= 100%, não repetir se já celebrada na sessão)
+- [x] Testes vitest das novas funcionalidades (suggestMonthlyGoal x4: sugere via LLM, keepExisting, rejeita mês passado, rejeita sem histórico; buildStreaksPdf x4 no texto do PDF — 151 testes totais)
+- [x] Atualizar habilidade vyroscope-video-analyst com a rodada 22 (SKILL.md: seção "Streaks PDF, AI goal suggestion and 100% celebration (round 22)" + quick reference; features-roadmap.md: parágrafo Round 22, helper getMonthlyGoalByMonth)
+- [x] Verificação visual (/streaks e /ideia-do-dia renderizando; 151 testes) e checkpoint
