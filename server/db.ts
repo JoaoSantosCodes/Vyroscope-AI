@@ -609,6 +609,55 @@ export function dayOfMonth(date: Date = new Date()): number {
   return date.getDate();
 }
 
+/** Histórico mês a mês retrocedendo a partir do mês corrente (inclusive, N=12
+ * por padrão): para cada mês retorna monthKey, rótulo pt-BR, publicadas, meta,
+ * média de dias de produção (null sem dados) e se a meta foi cumprida.
+ * Rodada 21 — alimenta a página de streaks e o mini-gráfico de barras. */
+export async function getMonthlyHistory(
+  userId: number,
+  months = 12
+): Promise<
+  {
+    monthKey: string;
+    label: string;
+    publishedThisMonth: number;
+    avgProductionDays: number | null;
+    goal: number;
+    met: boolean;
+    isCurrent: boolean;
+  }[]
+> {
+  const db = await getDb();
+  if (!db) return [];
+  const now = new Date();
+  const currentKey = monthKeyOf(now);
+  const rows: Awaited<ReturnType<typeof getMonthlyHistory>> = [];
+  let year = now.getFullYear();
+  let month = now.getMonth() + 1; // 1-based; iteração decremente primeiro
+  for (let i = 0; i < months; i += 1) {
+    month -= 1;
+    if (month < 1) {
+      month = 12;
+      year -= 1;
+    }
+    const key = `${year}-${String(month).padStart(2, "0")}`;
+    const stats = await getPinnedProductionStats(userId, key);
+    const label = new Date(year, month - 1, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+    const met = stats.publishedThisMonth >= stats.goal;
+    rows.push({
+      monthKey: key,
+      label,
+      publishedThisMonth: stats.publishedThisMonth,
+      avgProductionDays: stats.avgProductionDays,
+      goal: stats.goal,
+      met,
+      isCurrent: key === currentKey,
+    });
+  }
+  // Mais antigos primeiro (janeiro → corrente) para gráficos e lista
+  return rows.reverse();
+}
+
 /** Quantos meses consecutivos (retrocedendo do mês corrente, exclusive, sem
  * pular meses) tiveram a meta cumprida (publicadas >= goal do mês).
  * Meses sem nenhum registro de ideia publicada interrompem o streak. */

@@ -290,6 +290,7 @@ vi.mock("./db", async (importOriginal) => {
     getPinnedProductionStats: vi.fn(),
     setPinnedMonthlyGoal: vi.fn(),
     getMonthlyGoalStreak: vi.fn(),
+    getMonthlyHistory: vi.fn(),
     deletePinnedIdea: vi.fn(),
   };
 });
@@ -316,6 +317,7 @@ const mockedArchivePublished = vi.mocked(db.archivePublishedIdeas);
 const mockedStats = vi.mocked(db.getPinnedProductionStats);
 const mockedSetGoal = vi.mocked(db.setPinnedMonthlyGoal);
 const mockedStreak = vi.mocked(db.getMonthlyGoalStreak);
+const mockedMonthlyHistory = vi.mocked(db.getMonthlyHistory);
 const mockedDeletePinned = vi.mocked(db.deletePinnedIdea);
 
 const folderUser = {
@@ -816,6 +818,29 @@ describe("extended idea pinning (pin/unpin/listPinned)", () => {
     const caller = appRouter.createCaller(createFolderCtx());
     const result = await caller.extended.pinnedGoalStreak();
     expect(result.streak).toBe(0);
+  });
+  it("returns the 12-month goal history", async () => {
+    const caller = appRouter.createCaller(createFolderCtx());
+    const months = Array.from({ length: 12 }, (_, i) => ({
+      monthKey: `2025-${String(i + 1).padStart(2, "0")}`,
+      label: `mês ${i + 1}`,
+      publishedThisMonth: i,
+      avgProductionDays: null,
+      goal: 4,
+      met: i >= 4,
+      isCurrent: false,
+    }));
+    mockedMonthlyHistory.mockResolvedValueOnce(months as never);
+    const result = await caller.extended.pinnedMonthlyHistory();
+    expect(result).toHaveLength(12);
+    expect(result[0]?.monthKey).toBe("2025-01");
+    expect(mockedMonthlyHistory).toHaveBeenCalledWith(2, 12);
+  });
+  it("forwards an empty array when the database is unavailable", async () => {
+    const caller = appRouter.createCaller(createFolderCtx());
+    mockedMonthlyHistory.mockResolvedValueOnce([] as never);
+    const result = await caller.extended.pinnedMonthlyHistory();
+    expect(result).toEqual([]);
   });
   it("exports a one-page monthly production summary PDF (url + filename)", async () => {
     mockedStats.mockResolvedValueOnce({

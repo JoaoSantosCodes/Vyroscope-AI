@@ -179,9 +179,17 @@
 - [x] Verificação visual (home/ideia-do-dia/monitorar sem dados do usuário — estados vazios OK; painel de stats renderiza quando há ideia fixada) e checkpoint
 
 ## Melhorias solicitadas (rodada 20)
-- [ ] Home: alerta no banner (ideia do dia) quando o mês está avançando e a meta do mês ainda não foi alcançada (progresso vs. dias decorridos, ex.: "Dia 20: 2/4 publicadas")
-- [ ] Kanban: painel de streaks — contar meses consecutivos (retrocedendo a partir do mês corrente) com meta cumprida e exibir selo motivacional no quadro
-- [ ] Estatísticas: botão "Exportar mês" que gera PDF curto apenas com o resumo de produção do mês selecionado (nova procedure exportMonthlyPdf + builder buildMonthlyPdf)
+- [x] Home: alerta no banner (ideia do dia) quando o mês está avançando e a meta do mês ainda não foi alcançada (progresso vs. dias decorridos, ex.: "Dia 20: 2/4 publicadas")
+- [x] Kanban: painel de streaks — contar meses consecutivos (retrocedendo a partir do mês corrente) com meta cumprida e exibir selo motivacional no quadro
+- [x] Estatísticas: botão "Exportar mês" que gera PDF curto apenas com o resumo de produção do mês selecionado (nova procedure exportMonthlyPdf + builder buildMonthlyPdf)
 - [x] Testes vitest das novas funcionalidades (141 testes: pinnedGoalStreak x2, exportMonthlyPdf x2, buildMonthlyPdf x3 no texto do PDF — padrão compacto, doMock("./storage") removido após interferência)
 - [x] Atualizar habilidade vyroscope-video-analyst com a rodada 20 (SKILL.md: seção "Monthly goal alert, goal streak and monthly PDF export (round 20)" + quick reference; features-roadmap.md: parágrafo Round 20 no stats + procedures pinnedGoalStreak/exportMonthlyPdf + padrão pdf-parse; validada com quick_validate)
-- [ ] Verificação visual e checkpoint
+- [x] Verificação visual e checkpoint
+
+## Melhorias solicitadas (rodada 21)
+- [x] Página detalhada de streaks: histórico mês a mês (últimos 12) com cores indicando meta cumprida (verde) ou não (cinza/vazio), publicada, meta e % — rota nova /streaks e link no painel do Kanban (pinnedMonthlyHistory + getMonthlyHistory)
+- [x] Estatísticas: mini-gráfico de barras dos últimos 6 meses (BarChart Recharts) comparando publicadas por mês (verde cumprida, âmbar corrente, roxo restante; tooltip com publicadas/meta e flag met)
+- [x] Painel: destaque verde (banner + mensagem de incentivo) quando o progresso da meta do mês corrente estiver entre 75% e 90% ("Você está a N publicações da meta de G — continue nesse ritmo!")
+- [x] Testes vitest das novas funcionalidades (143 testes: pinnedMonthlyHistory x2)
+- [x] Atualizar habilidade vyroscope-video-analyst com a rodada 21 (SKILL.md: seção "Monthly streak page, 6-month mini-chart and green encouragement highlight (round 21)" + quick reference item 7; features-roadmap.md: rota /streaks, parágrafo Round 21, helpers getMonthlyGoalStreak/getMonthlyHistory/dayOfMonth; validada com quick_validate)
+- [x] Verificação visual (/streaks: KPIs, gráfico 12 meses, lista mês a mês; /ideia-do-dia intacto; Sidebar do DashboardLayout com navegação real) e checkpoint

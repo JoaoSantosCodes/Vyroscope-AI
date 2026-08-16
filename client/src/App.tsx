@@ -13,6 +13,7 @@ import IdeaHistory from "./pages/IdeaHistory";
 import Monitoring from "./pages/Monitoring";
 import Profile from "./pages/Profile";
 import Result from "./pages/Result";
+import Streaks from "./pages/Streaks";
 
 function Router() {
   // make sure to consider if you need authentication for certain routes
@@ -27,6 +28,7 @@ function Router() {
       <Route path={"/monitorar"} component={Monitoring} />
       <Route path={"/perfil"} component={Profile} />
       <Route path={"/favoritos"} component={Favorites} />
+      <Route path="/streaks" component={Streaks} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />

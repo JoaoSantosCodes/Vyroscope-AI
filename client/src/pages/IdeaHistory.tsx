@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
+import { Bar, BarChart, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis } from "recharts";
 import { Skeleton } from "@/components/ui/skeleton";
 import { buildIdeaHistoryCsv, exportIdeaHistoryCsv } from "@/lib/export";
 import { KANBAN_HIDE_PUBLISHED_KEY, KANBAN_OLDEST_FIRST_KEY, readSessionFlag, sortColumnOldestFirst, writeSessionFlag } from "@/lib/kanbanSort";
@@ -626,6 +627,15 @@ export default function IdeaHistory() {
   const isCurrentMonthView = statsMonthKey === currentMonthKey;
 
   // ===== Streak de meses consecutivos com a meta cumprida (rodada 20) =====
+  const monthlyHistoryQuery = trpc.extended.pinnedMonthlyHistory.useQuery(undefined, {
+    refetchOnWindowFocus: false,
+    staleTime: 5 * 60 * 1000,
+  });
+  // Últimos 6 meses para o mini-gráfico de barras (rodada 21)
+  const sixMonthHistory = useMemo(
+    () => (monthlyHistoryQuery.data ?? []).slice(-6),
+    [monthlyHistoryQuery.data]
+  );
   const streakQuery = trpc.extended.pinnedGoalStreak.useQuery(undefined, {
     refetchInterval: 15 * 60 * 1000,
   });
@@ -975,6 +985,44 @@ export default function IdeaHistory() {
                   Exportar mês
                 </Button>
               </div>
+              {/* Mini-gráfico de barras: publicadas nos últimos 6 meses (rodada 21) */}
+              <div className="mt-2">
+                <div className="mb-1 flex items-center justify-between text-[10px] text-muted-foreground/70">
+                  <span>Publicadas por mês</span>
+                  <span className="inline-flex items-center gap-1">
+                    <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" /> meta cumprida
+                    <span className="ml-1 inline-block h-2 w-2 rounded-full bg-primary/70" /> em andamento
+                  </span>
+                </div>
+                <div className="h-24 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={sixMonthHistory} margin={{ top: 2, right: 2, bottom: 0, left: 2 }}>
+                      <XAxis dataKey="monthKey" tick={{ fontSize: 9, fill: "currentColor", opacity: 0.6 }} tickFormatter={(v: string) => v.slice(2)} stroke="currentColor" opacity={0.4} height={16} />
+                      <YAxis tick={{ fontSize: 9, fill: "currentColor", opacity: 0.6 }} stroke="currentColor" opacity={0.4} width={14} allowDecimals={false} />
+                      <ChartTooltip
+                        cursor={false}
+                        content={({ active, payload }) => {
+                          const row = payload?.[0]?.payload as { monthKey?: string; label?: string; publishedThisMonth?: number; goal?: number; met?: boolean } | undefined;
+                          if (!active || !row) return null;
+                          return (
+                            <div className="rounded border border-border bg-card px-2 py-1 text-[10px] shadow-md">
+                              <div className="font-medium text-foreground">{row.label ?? row.monthKey}</div>
+                              <div className="text-muted-foreground">
+                                {row.publishedThisMonth}/{row.goal} publicadas{row.met ? " · meta cumprida" : ""}
+                              </div>
+                            </div>
+                          );
+                        }}
+                      />
+                      <Bar dataKey="publishedThisMonth" name="publicadas" radius={[2, 2, 0, 0]} shape={(props: { x?: number; y?: number; width?: number; height?: number; payload?: { met?: boolean; isCurrent?: boolean } }) => {
+                        const { x, y, width, height, payload } = props;
+                        const color = payload?.met ? "rgb(16 185 129)" : payload?.isCurrent ? "rgb(245 158 11)" : "rgba(192,132,252,0.55)";
+                        return <rect x={x ?? 0} y={y ?? 0} width={width ?? 0} height={height ?? 0} fill={color} rx={2} />;
+                      }} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
             </div>
             {/* Meta e barra de progresso do mês (rodada 19, visível no mês corrente; rodada 20: streak) */}
             {isCurrentMonthView && statsQuery.data && statsQuery.data.goal > 0 && (
@@ -989,15 +1037,41 @@ export default function IdeaHistory() {
                   {Math.min(100, Math.round((statsQuery.data.publishedThisMonth / statsQuery.data.goal) * 100))}% concluído em {formatMonthKey(currentMonthKey).toLowerCase()}
                 </span>
                 {streakQuery.data?.streak ? (
-                  <span className="ml-auto inline-flex items-center gap-1 rounded-full border border-amber-500/50 bg-amber-500/15 px-2 py-px text-[10px] font-semibold text-amber-600" title={`Sequência de ${streakQuery.data.streak} ${streakQuery.data.streak === 1 ? "mês" : "meses"} seguidos com a meta cumprida`}>
+                  <button
+                    type="button"
+                    className="ml-auto inline-flex cursor-pointer items-center gap-1 rounded-full border border-amber-500/50 bg-amber-500/15 px-2 py-px text-[10px] font-semibold text-amber-600 transition-colors hover:bg-amber-500/25"
+                    title={`Sequência de ${streakQuery.data.streak} ${streakQuery.data.streak === 1 ? "mês" : "meses"} seguidos com a meta cumprida — clique para ver o histórico`}
+                    onClick={() => navigate("/streaks")}
+                  >
                     <Flame className="h-3 w-3" />
                     {streakQuery.data.streak} {streakQuery.data.streak === 1 ? "mês" : "meses"} seguidos com a meta cumprida
-                  </span>
+                  </button>
                 ) : (
-                  <span className="ml-auto text-[10px] text-muted-foreground/60">Comece sua sequência de metas cumpridas</span>
+                  <button
+                    type="button"
+                    className="ml-auto cursor-pointer text-[10px] text-muted-foreground/60 transition-colors hover:text-foreground"
+                    title="Ver histórico mensal de metas"
+                    onClick={() => navigate("/streaks")}
+                  >
+                    Comece sua sequência de metas cumpridas →
+                  </button>
                 )}
               </div>
             )}
+            {/* Destaque verde de incentivo quando o progresso está entre 75% e 90% (rodada 21) */}
+            {isCurrentMonthView && statsQuery.data && statsQuery.data.goal > 0 && (() => {
+              const progress7590 = (statsQuery.data.publishedThisMonth / statsQuery.data.goal) * 100;
+              if (progress7590 < 75 || progress7590 > 90 || statsQuery.data.publishedThisMonth >= statsQuery.data.goal) return null;
+              const remaining = statsQuery.data.goal - statsQuery.data.publishedThisMonth;
+              return (
+                <div className="mt-2 flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-500">
+                  <TrendingUp className="h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    Você está a {remaining} {remaining === 1 ? "publicação" : "publicações"} da meta de {statsQuery.data.goal} — continue nesse ritmo!
+                  </span>
+                </div>
+              );
+            })()}
             <p className="mb-3 text-xs text-muted-foreground">
               Arraste os cards para reordenar dentro da coluna ou movê-los entre as colunas de status. As fixadas aparecem primeiro no PDF exportado e as arquivadas entram nas exportações em uma seção dedicada.
             </p>

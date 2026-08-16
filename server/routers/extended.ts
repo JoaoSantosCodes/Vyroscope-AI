@@ -496,6 +496,13 @@ export const extendedRouter = router({
     const { getMonthlyGoalStreak } = await import("../db");
     return getMonthlyGoalStreak(ctx.user.id);
   }),
+  /** Histórico mês a mês (12 meses, corrente inclusive) com publicadas, meta,
+   *  média de dias e se a meta foi cumprida — alimenta a página de streaks e
+   *  o mini-gráfico de barras. Rodada 21. */
+  pinnedMonthlyHistory: protectedProcedure.query(async ({ ctx }) => {
+    const { getMonthlyHistory } = await import("../db");
+    return getMonthlyHistory(ctx.user.id, 12);
+  }),
   /** Exporta um resumo mensal de produção em PDF curto (página única)
    *  com o resumo do mês selecionado, dia do mês e selo de streak. Rodada 20. */
   exportMonthlyPdf: protectedProcedure
