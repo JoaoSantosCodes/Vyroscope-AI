@@ -21,6 +21,8 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { buildIdeaHistoryCsv, exportIdeaHistoryCsv } from "@/lib/export";
+import { KANBAN_HIDE_PUBLISHED_KEY, KANBAN_OLDEST_FIRST_KEY, readSessionFlag, sortColumnOldestFirst, writeSessionFlag } from "@/lib/kanbanSort";
+import { quickNoteValue, shouldSaveQuickNote } from "@/lib/quickNote";
 import { formatDate, scoreColor, scoreLabel } from "@/lib/score";
 import { trpc } from "@/lib/trpc";
 import { ArrowUpDown, Edit3, FileText, Lightbulb, Loader2, Pin, PinOff, Radar, Search, StickyNote } from "lucide-react";
@@ -339,10 +341,36 @@ export default function IdeaHistory() {
   const [quickNoteId, setQuickNoteId] = useState<number | null>(null);
   const quickNoteDraft = useRef<string>("");
   const [quickNoteOpen, setQuickNoteOpen] = useState(false);
+  const [quickNoteSaving, setQuickNoteSaving] = useState(false);
   const openQuickNote = (pinnedId: number) => {
     quickNoteDraft.current = pinned.find((p) => p.id === pinnedId)?.notes ?? "";
     setQuickNoteId(pinnedId);
     setQuickNoteOpen(true);
+    setQuickNoteSaving(false);
+  };
+  const saveQuickNote = () => {
+    if (quickNoteId == null || noteMutation.isPending || quickNoteSaving) return;
+    const persisted = pinned.find((p) => p.id === quickNoteId)?.notes ?? null;
+    if (!shouldSaveQuickNote(quickNoteDraft.current, persisted)) {
+      setQuickNoteOpen(false);
+      return;
+    }
+    const value = quickNoteValue(quickNoteDraft.current);
+    setQuickNoteSaving(true);
+    noteMutation.mutate(
+      { pinnedId: quickNoteId, notes: value ?? "" },
+      {
+        onSuccess: () => {
+          setQuickNoteSaving(false);
+          setQuickNoteOpen(false);
+          toast.success("Anotação salva.");
+        },
+        onError: () => {
+          setQuickNoteSaving(false);
+          toast.error("Falha ao salvar a anotação. Tente novamente.");
+        },
+      }
+    );
   };
   const niches = historyQuery.data?.filters?.niches ?? [];
   const today = new Date().toISOString().slice(0, 10);
@@ -431,22 +459,11 @@ export default function IdeaHistory() {
   ] as const;
 
   // ===== Ordenação das colunas pelo tempo no status atual =====
-  const [oldestFirst, setOldestFirst] = useState<boolean>(() => {
-    try {
-      return sessionStorage.getItem("vyroscope-kanban-oldest-first") === "1";
-    } catch {
-      return false;
-    }
-  });
+  const [oldestFirst, setOldestFirst] = useState<boolean>(() => readSessionFlag(KANBAN_OLDEST_FIRST_KEY, false));
   const toggleOldestFirst = (value: boolean) => {
     setOldestFirst(value);
-    try {
-      sessionStorage.setItem("vyroscope-kanban-oldest-first", value ? "1" : "0");
-    } catch {
-      // sessionStorage indisponível: segue só em memória
-    }
+    writeSessionFlag(KANBAN_OLDEST_FIRST_KEY, value);
   };
-  const columnSortKey = (p: PinnedIdea) => new Date(p.statusChangedAt ?? p.createdAt).getTime();
 
   // ===== Destaque temporário ao mover card entre colunas =====
   const [highlightedId, setHighlightedId] = useState<number | null>(null);
@@ -461,20 +478,10 @@ export default function IdeaHistory() {
   };
 
   // ===== Filtro: ocultar publicadas (persistido na sessão via sessionStorage) =====
-  const [hidePublished, setHidePublished] = useState<boolean>(() => {
-    try {
-      return sessionStorage.getItem("vyroscope-kanban-hide-published") === "1";
-    } catch {
-      return false;
-    }
-  });
+  const [hidePublished, setHidePublished] = useState<boolean>(() => readSessionFlag(KANBAN_HIDE_PUBLISHED_KEY, false));
   const toggleHidePublished = (value: boolean) => {
     setHidePublished(value);
-    try {
-      sessionStorage.setItem("vyroscope-kanban-hide-published", value ? "1" : "0");
-    } catch {
-      // sessionStorage indisponível (privado/incógnito): segue só em memória
-    }
+    writeSessionFlag(KANBAN_HIDE_PUBLISHED_KEY, value);
   };
 
   // ===== Estagnação: ideias em "Gravando" por mais de 7 dias =====
@@ -711,7 +718,7 @@ export default function IdeaHistory() {
                 if (hidePublished && key === "publicada") return null;
                 let column = pinned.filter((p) => p.status === key);
                 if (oldestFirst) {
-                  column = [...column].sort((a, b) => columnSortKey(a) - columnSortKey(b));
+                  column = sortColumnOldestFirst(column);
                 }
                 return (
                   <div key={key} className="flex flex-col rounded-lg border border-border bg-card/50">
@@ -1003,9 +1010,7 @@ export default function IdeaHistory() {
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
                     e.preventDefault();
-                    commitNote(quickNoteId, quickNoteDraft.current);
-                    setQuickNoteOpen(false);
-                    toast.success("Anotação salva.");
+                    saveQuickNote();
                   }
                 }}
                 className="w-full resize-y rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-foreground placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -1016,12 +1021,12 @@ export default function IdeaHistory() {
                 </Button>
                 <Button
                   size="sm"
-                  onClick={() => {
-                    commitNote(quickNoteId, quickNoteDraft.current);
-                    setQuickNoteOpen(false);
-                    toast.success("Anotação salva.");
-                  }}
+                  disabled={noteMutation.isPending || quickNoteSaving}
+                  onClick={saveQuickNote}
                 >
+                  {noteMutation.isPending || quickNoteSaving ? (
+                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  ) : null}
                   Salvar
                 </Button>
               </DialogFooter>

@@ -142,9 +142,17 @@
 - [x] Verificação visual (screenshots desktop e mobile) e checkpoint fe0bd07c salvo (auto-publicado)
 
 ## Melhorias solicitadas (rodada 16)
-- [ ] Kanban: opção de ordenação das colunas pelo tempo no status atual (toggle "Mais antigas primeiro" — ideias com statusChangedAt mais antigo no topo), estado persistente na sessão
-- [ ] Kanban: animação de transição suave + destaque visual temporário (pulse/brilho âmbar) ao mover card entre colunas
-- [ ] Kanban: botão de edição rápida de notas no card (modal/popover inline com salvar rápido, sem abrir o detalhe completo)
-- [ ] Testes vitest das novas funcionalidades
-- [ ] Atualizar habilidade vyroscope-video-analyst com a rodada 16
-- [ ] Verificação visual e checkpoint
+- [x] Kanban: opção de ordenação das colunas pelo tempo no status atual (toggle "Mais antigas no status primeiro" — ideias com statusChangedAt mais antigo no topo, fallback createdAt), estado persistente na sessão via sessionStorage (vyroscope-kanban-oldest-first)
+- [x] Kanban: animação de transição suave + destaque visual temporário (keyframe vy-move-highlight .vy-kanban-moved ~1.4s, gate prefers-reduced-motion, ring âmbar + scale + flash do título por 1.5s) ao mover card entre colunas
+- [x] Kanban: botão "Editar rápida" de notas no card (Dialog compacto com autoFocus, Ctrl+Enter salva, limite 2000 chars), sem abrir o detalhe completo
+- [x] Testes vitest das novas funcionalidades (kanbanSort.test.ts com 4 testes da chave de ordenação; 100 testes totais)
+- [x] Atualizar habilidade vyroscope-video-analyst com a rodada 16 (SKILL.md + features-roadmap.md)
+- [x] Verificação visual (screenshots com dados de teste, depois limpos) e checkpoint 3e330bae (auto-publicado)
+
+## Refinamentos pós-revisão (rodada 16)
+- [x] Edição rápida: fechar modal e exibir sucesso somente após a mutation confirmar (onSuccess/onError no noteMutation.mutate), toast de erro em falha, estado de pendência (spinner) no botão Salvar, Ctrl+Enter usa o mesmo fluxo
+- [x] Extraída a lógica de ordenação para client/src/lib/kanbanSort.ts (kanbanSortKey, sortColumnOldestFirst genérico, read/writeSessionFlag com sessionStorage.getStorage injetável) — UI refatorada para usar o utilitário
+- [x] Cobertura: 10 testes no kanbanSort.test.ts (chave de ordenação, sort imutável, fallbacks, persistência via storageProvider mockado, indisponibilidade do storage); 106 testes totais
+- [x] Cobertura do fluxo de edição rápida de notas: extraído helper testável client/src/lib/quickNote.ts (shouldSaveQuickNote/normalizeNote/quickNoteValue) com 8 testes (mesmo texto, vazios equivalentes, mudança, apagamento); UI integrada ao helper com mutation de string vazia; 114 testes totais
+
+- [x] Teste do fluxo real de saveQuickNote: lógica de decisão (mutation vs. fechar sem mutation) testada no helper quickNote.test.ts (8 testes); sucesso/erro da mutation validados via verificação visual do fluxo (modal fecha após salvar; toast de erro em falha) com dados de teste no banco, depois limpos
