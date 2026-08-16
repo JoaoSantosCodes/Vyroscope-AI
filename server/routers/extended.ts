@@ -919,6 +919,20 @@ export const extendedRouter = router({
       const { url } = await storagePut(key, buffer, "application/pdf");
       return { downloadUrl: url, fileName: `ano-em-numeros-${summary.year}.pdf` } as const;
     }),
+  /** Exporta o PDF dedicado da galeria de conquistas (anuais + intermediárias). Rodada 28. */
+  exportAchievementsPdf: protectedProcedure.mutation(async ({ ctx }) => {
+    const { getUserAchievements, getIntermediateAchievements } = await import("../db");
+    const [achievements, intermediate] = await Promise.all([
+      getUserAchievements(ctx.user.id),
+      getIntermediateAchievements(ctx.user.id),
+    ]);
+    const { buildAchievementsPdf } = await import("../exportPdf");
+    const buffer = await buildAchievementsPdf({ badges: achievements.badges, intermediate, userName: ctx.user.name });
+    const key = `exports/galeria-de-conquistas-${Date.now()}-${ctx.user.id}.pdf`;
+    const { storagePut } = await import("../storage");
+    const { url } = await storagePut(key, buffer, "application/pdf");
+    return { downloadUrl: url, fileName: "galeria-de-conquistas.pdf" } as const;
+  }),
 
   /** Gera agenda de conteúdo de 4 semanas a partir das sugestões de uma análise. */
   generateAgenda: protectedProcedure.input(agendaInput).mutation(async ({ ctx, input }) => {

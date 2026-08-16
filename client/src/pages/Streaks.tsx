@@ -65,6 +65,15 @@ export default function Streaks() {
   const year = yearSummaryQuery.data?.year ?? new Date().getFullYear();
   const sy = yearSummaryQuery.data;
 
+  // ===== PDF dedicado da galeria de conquistas (rodada 28) =====
+  const exportAchievementsMutation = trpc.extended.exportAchievementsPdf.useMutation({
+    onSuccess: (data) => {
+      window.open(data.downloadUrl, "_blank");
+      toast.success("PDF da galeria de conquistas gerado.");
+    },
+    onError: (err) => toast.error(err.message || "Falha ao gerar o PDF de conquistas."),
+  });
+
   // ===== Comparativo de anos (rodada 24) =====
   const [compareYear, setCompareYear] = useState<number | null>(null);
   const compareQuery = trpc.extended.yearComparison.useQuery(
@@ -514,28 +523,42 @@ export default function Streaks() {
                     {compareByMonthQuery.data.currentYear}
                   </span>
                 </div>
-                <ResponsiveContainer width="100%" height={180}>
-                  <BarChart data={(compareByMonthQuery.data.months ?? []).map((m) => ({
+                {/* Marcações de selos de trimestre (rodada 28): meses em que o trimestre do ano corrente foi concluído ganham "★" âmbar no rótulo. */}
+                {(() => {
+                  const qSeals = new Set(
+                    (intermediateQuery.data?.quarters ?? [])
+                      .filter((q) => q.year === (compareByMonthQuery.data?.currentYear ?? year))
+                      .filter((q) => q.metMonths === 3)
+                      .flatMap((q) => Array.from({ length: 3 }, (_, i) => q.quarter * 3 - 2 + i)),
+                  );
+                  const chartData = (compareByMonthQuery.data.months ?? []).map((m, i) => ({
                     ...m,
                     prevValue: compareMode === "percent" ? (m.previous.goal > 0 ? Math.round((m.previous.published / m.previous.goal) * 100) : 0) : m.previous.published,
                     currValue: compareMode === "percent" ? (m.current.goal > 0 ? Math.round((m.current.published / m.current.goal) * 100) : 0) : m.current.published,
-                  }))} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
-                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: "var(--text-muted)" }} axisLine={false} tickLine={false} />
-                    <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: "var(--text-muted)" }} axisLine={false} tickLine={false} width={22} />
-                    <ChartTooltip
-                      cursor={{ fill: "rgba(255,255,255,0.05)" }}
-                      contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", fontSize: 11, borderRadius: 6 }}
-                      formatter={(value: number, name: string) => [
-                        compareMode === "percent" ? `${value}%` : value,
-                        name === "previous" ? String(compareByMonthQuery.data!.previousYear) : String(compareByMonthQuery.data!.currentYear),
-                      ]}
-                    />
-                    <Bar dataKey="prevValue" name="previous" fill="rgba(168,85,247,0.7)" radius={[2, 2, 0, 0]} maxBarSize={14} />
-                    <Bar dataKey="currValue" name="current" fill="hsl(38 92% 50%)" radius={[2, 2, 0, 0]} maxBarSize={14} />
-                  </BarChart>
-                </ResponsiveContainer>
-                <div className="mt-1 text-center text-[10px] text-muted-foreground">
-                  {compareMode === "percent" ? "% da meta mensal por mês" : "Publicações por mês"} · {compareYear ?? year - 1} vs {year}
+                    quarterSeal: qSeals.has(i + 1),
+                  }));
+                  return (
+                    <ResponsiveContainer width="100%" height={180}>
+                      <BarChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
+                        <XAxis dataKey="label" tick={{ fontSize: 10, fill: "var(--text-muted)" }} axisLine={false} tickLine={false} tickFormatter={(label: string, idx: number) => (chartData[idx]?.quarterSeal ? `${label} ★` : label)} />
+                        <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: "var(--text-muted)" }} axisLine={false} tickLine={false} width={22} />
+                        <ChartTooltip
+                          cursor={{ fill: "rgba(255,255,255,0.05)" }}
+                          contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", fontSize: 11, borderRadius: 6 }}
+                          formatter={(value: number, name: string) => [
+                            compareMode === "percent" ? `${value}%` : value,
+                            name === "previous" ? String(compareByMonthQuery.data!.previousYear) : String(compareByMonthQuery.data!.currentYear),
+                          ]}
+                        />
+                        <Bar dataKey="prevValue" name="previous" fill="rgba(168,85,247,0.7)" radius={[2, 2, 0, 0]} maxBarSize={14} />
+                        <Bar dataKey="currValue" name="current" fill="hsl(38 92% 50%)" radius={[2, 2, 0, 0]} maxBarSize={14} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  );
+                })()}
+                <div className="mt-1 flex flex-wrap items-center justify-center gap-3 text-[10px] text-muted-foreground">
+                  <span>{compareMode === "percent" ? "% da meta mensal por mês" : "Publicações por mês"} · {compareYear ?? year - 1} vs {year}</span>
+                  <span className="text-amber-400">★ = selo de trimestre conquistado no ano corrente</span>
                 </div>
               </div>
             )}
@@ -544,10 +567,27 @@ export default function Streaks() {
         {/* Galeria de conquistas (rodada 25): selos de "Ano Completo" acumulados */}
         {(achievementsQuery.data?.badges.length ?? 0) > 0 && (
           <div className="mt-6">
-            <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold text-foreground">
-              <Trophy className="h-4 w-4 text-amber-500" />
-              Galeria de conquistas
-            </h2>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <Trophy className="h-4 w-4 text-amber-500" />
+                Galeria de conquistas
+              </h2>
+              {/* Botão de exportação do PDF dedicado de conquistas (rodada 28): anuais + intermediárias. */}
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs"
+                disabled={exportAchievementsMutation.isPending}
+                onClick={() => exportAchievementsMutation.mutate()}
+              >
+                {exportAchievementsMutation.isPending ? (
+                  <FileDown className="mr-1.5 h-3.5 w-3.5 animate-spin opacity-70" />
+                ) : (
+                  <FileDown className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                Exportar conquistas em PDF
+              </Button>
+            </div>
             <p className="mb-3 text-[11px] text-muted-foreground">
               {achievementsQuery.data ? `${achievementsQuery.data.badges.length} de ${achievementsQuery.data.totalYearsChecked} anos analisados terminaram com a meta cumprida em todos os meses.` : ""}
             </p>
@@ -594,6 +634,44 @@ export default function Streaks() {
                     {done
                       ? "Metas do trimestre cumpridas"
                       : `${metPassed}/${total} metas cumpridas (${pct}%)`}
+                  </div>
+                </div>
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary">
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ${done ? "bg-emerald-500" : pct >= 50 ? "bg-emerald-500/80" : "bg-amber-500/70"}`}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              </div>
+            );
+          }
+          return null;
+        })()}
+        {/* Semestre atual em andamento (rodada 28): progresso das metas mensais do semestre corrente (H1=1–6, H2=7–12). */}
+        {(() => {
+          const now = new Date();
+          const halfIdx = now.getMonth() >= 6 ? 1 : 0; // 0 = H1, 1 = H2
+          const hLabel = halfIdx === 0 ? "1º semestre" : "2º semestre";
+          const startMonth = halfIdx * 6 + 1; // 1 (H1) ou 7 (H2)
+          const monthsInH = Array.from({ length: 6 }, (_, i) =>
+            `${now.getFullYear()}-${String(startMonth + i).padStart(2, "0")}`,
+          );
+          const hMonths = (sy?.months ?? []).filter((m) => monthsInH.includes(m.monthKey));
+          const passed = hMonths.filter((m) => !m.isCurrent);
+          const metPassed = passed.filter((m) => m.met).length;
+          const total = hMonths.length;
+          if (total > 0 && passed.length > 0) {
+            const pct = Math.round((metPassed / total) * 100);
+            const done = metPassed === passed.length;
+            return (
+              <div className="mt-4 rounded-md border border-emerald-500/30 bg-emerald-500/[0.06] p-3">
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-[12px] font-bold text-emerald-400">
+                    <CalendarDays className="h-4 w-4" />
+                    SEMESTRE ATUAL · {hLabel.toUpperCase()} · {now.getFullYear()}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground">
+                    {done ? "Metas do semestre cumpridas" : `${metPassed}/${total} metas cumpridas (${pct}%)`}
                   </div>
                 </div>
                 <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary">

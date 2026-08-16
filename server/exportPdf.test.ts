@@ -515,7 +515,7 @@ describe("buildMonthlyPdf (resumo de produção mensal, rodada 20)", () => {
 });
 
 // ===== "Ano em números" (rodada 23) =====
-import { buildYearPdf, type YearPdfInput } from "./exportPdf";
+import { buildYearPdf, type YearPdfInput, buildAchievementsPdf } from "./exportPdf";
 
 function baseYearSummary(): YearPdfInput["summary"] {
   return {
@@ -615,5 +615,58 @@ describe("buildYearPdf (rodada 23)", () => {
     expect(compact).not.toContain("CONQUISTASINTERMEDIÁRIAS");
     expect(compact).toContain("0SELOSINTERMEDIÁRIOS");
     expect(compact).toContain("SEQUÊNCIAATUAL");
+  });
+});
+
+// ===== PDF dedicado da galeria de conquistas (rodada 28) =====
+describe("buildAchievementsPdf (rodada 28)", () => {
+  const r28 = async (buffer: Buffer, expectContains: string[], expectNot: string[]) => {
+    const { spawnSync } = await import("node:child_process");
+    const { writeFileSync, mkdtempSync } = await import("node:fs");
+    const tmp = mkdtempSync("/tmp/pdf-test-");
+    const file = `${tmp}/ach.pdf`;
+    writeFileSync(file, buffer);
+    const run = spawnSync(process.execPath, ["/home/ubuntu/vyroscope-ai/node_modules/pdf-parse/bin/cli.mjs", "text", file], {
+      encoding: "utf-8",
+      cwd: "/home/ubuntu/vyroscope-ai",
+    });
+    const text = run.stdout + run.stderr;
+    if (run.status !== 0) throw new Error(`pdf-parse CLI falhou: ${text}`);
+    const compact = text.replace(/[\s ]/g, "").toUpperCase();
+    for (const expected of expectContains) expect(compact).toContain(expected);
+    for (const notExpected of expectNot) expect(compact).not.toContain(notExpected);
+  };
+
+  it("gera o PDF da galeria com selos anuais e intermediários organizados por ano", async () => {
+    const buffer = await buildAchievementsPdf({
+      userName: "Maria",
+      badges: [{ year: 2025, published: 60, annualGoal: 48, metMonths: 12 }],
+      intermediate: {
+        yearsChecked: 2,
+        halfYears: [{ year: 2025, half: 2, label: "2º semestre · 2025", metMonths: 6, published: 32, annualGoal: 24 }],
+        quarters: [
+          { year: 2025, quarter: 3, label: "3º trimestre · 2025", metMonths: 3, published: 16, annualGoal: 12 },
+          { year: 2025, quarter: 4, label: "4º trimestre · 2025", metMonths: 3, published: 16, annualGoal: 12 },
+        ],
+      },
+    });
+    expect(buffer).toBeInstanceOf(Buffer);
+    await r28(
+      buffer,
+      ["GALERIADECONQUISTAS", "MARIA", "SELO·ANOCOMPLETO2025", "MEDAL2ºSEMESTRE·2025", "Q3ºTRIMESTRE·2025", "Q4ºTRIMESTRE·2025", "60/48"],
+      [],
+    );
+  });
+
+  it("gera o PDF mesmo sem conquistas (estados vazios)", async () => {
+    const buffer = await buildAchievementsPdf({ badges: [], intermediate: { yearsChecked: 1, halfYears: [], quarters: [] } });
+    expect(buffer).toBeInstanceOf(Buffer);
+    await r28(buffer, ["GALERIADECONQUISTAS", "NENHUMSELOINTERMEDIÁRIOAINDA", "TOTALACUMULADO:0SELOS"], ["SELO·ANOCOMPLETO", "MEDAL", "Q3º"]);
+  });
+
+  it("tolera input indefinido como estado vazio", async () => {
+    const buffer = await buildAchievementsPdf(undefined as unknown as never);
+    expect(buffer).toBeInstanceOf(Buffer);
+    await r28(buffer, ["GALERIADECONQUISTAS"], ["SELO·ANOCOMPLETO"]);
   });
 });

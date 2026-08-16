@@ -242,3 +242,11 @@
 - [x] Testes vitest das novas funcionalidades (+3: buildYearPdf com selos ×1, sem selos ×1, exportYearPdf mock ×1 → 178 passando)
 - [x] Atualizar habilidade vyroscope-video-analyst com a rodada 27 (SKILL.md + features-roadmap.md)
 - [x] Documentação da rodada 27 para o Obsidian (rodada-27-obsidian.md), verificação visual e checkpoint
+
+## Melhorias solicitadas (rodada 28)
+- [x] Galeria de conquistas: indicador de progresso do semestre atual (H1=1–6, H2=7–12) além do trimestre (bloco "SEMESTRE ATUAL · Hn · AAAA" com barra N/T metas cumpridas, derivado de yearSummary)
+- [x] Exportar PDF dedicado da galeria de conquistas: botão "Exportar conquistas em PDF" na página /streaks que gera PDF com selos anuais + intermediários (buildAchievementsPdf no server/exportPdf.ts + procedure exportAchievementsPdf + storagePut exports/galeria-de-conquistas-*)
+- [x] Gráfico comparativo: marcações visuais indicando em quais meses os selos de trimestre foram conquistados (asterisco âmbar no rótulo dos meses do ano corrente com selo de trimestre)
+- [x] Testes vitest das novas funcionalidades (+4: buildAchievementsPdf ×3, exportAchievementsPdf ×1 → 182 passando)
+- [x] Atualizar habilidade vyroscope-video-analyst com a rodada 28 (SKILL.md + features-roadmap.md)
+- [x] Documentação da rodada 28 para o Obsidian (rodada-28-obsidian.md), verificação visual e checkpoint

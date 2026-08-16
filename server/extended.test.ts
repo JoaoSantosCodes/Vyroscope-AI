@@ -1224,6 +1224,28 @@ describe("rodada 23 (persistência da celebração, histórico de sugestões, an
     await expect(caller.extended.exportYearPdf({ year: 2025 })).rejects.toThrow();
     expect(storagePut).not.toHaveBeenCalled();
   });
+  it("exportAchievementsPdf gera o PDF da galeria de conquistas e envia para o storage (rodada 28)", async () => {
+    mockedUserAchievements.mockResolvedValueOnce({
+      badges: [{ year: 2025, published: 48, annualGoal: 36, metMonths: 12 }],
+      totalYearsChecked: 2,
+    } as never);
+    mockedIntermediateAchievements.mockResolvedValueOnce({
+      quarters: [{ year: 2025, quarter: 3, label: "3º trimestre · 2025", metMonths: 3, published: 12, annualGoal: 9 }],
+      halfYears: [],
+      yearsChecked: 2,
+    } as never);
+    const caller = appRouter.createCaller(createFolderCtx());
+    const result = await caller.extended.exportAchievementsPdf();
+    expect(result.fileName).toBe("galeria-de-conquistas.pdf");
+    expect(mockedUserAchievements).toHaveBeenCalledWith(2);
+    expect(mockedIntermediateAchievements).toHaveBeenCalledWith(2);
+    expect(result.downloadUrl).toBe("https://s3.example/p.pdf");
+    expect(storagePut).toHaveBeenCalledWith(
+      expect.stringMatching(/^exports\/galeria-de-conquistas-\d+-2\.pdf$/),
+      expect.any(Buffer),
+      "application/pdf"
+    );
+  });
 });
 
 describe("reorderThumbnails", () => {

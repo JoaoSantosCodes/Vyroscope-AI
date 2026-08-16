@@ -862,3 +862,130 @@ export async function buildYearPdf(input: YearPdfInput): Promise<Buffer> {
     }
   });
 }
+
+/** Selos anuais de "Ano Completo" (rodada 25), incluídos no PDF de conquistas. */
+export type AchievementsPdfYearBadge = {
+  year: number;
+  published: number;
+  annualGoal: number;
+  metMonths: number;
+};
+
+/** Selos intermediários (trimestres/semestres) incluídos no PDF de conquistas. */
+export type AchievementsPdfIntermediate = {
+  quarters: { year: number; quarter: number; label: string; metMonths: number; published: number; annualGoal: number }[];
+  halfYears: { year: number; half: number; label: string; metMonths: number; published: number; annualGoal: number }[];
+  yearsChecked: number;
+};
+
+/** Input do builder do PDF dedicado de conquistas (rodada 28). */
+export type AchievementsPdfInput = {
+  /** Selos anuais de "Ano Completo" (achievements()). */
+  badges?: AchievementsPdfYearBadge[];
+  /** Selos intermediários de trimestres/semestres (getIntermediateAchievements()). */
+  intermediate?: AchievementsPdfIntermediate | null;
+  /** Nome do usuário para a capa (opcional). */
+  userName?: string | null;
+};
+
+/**
+ * PDF dedicado da galeria de conquistas (rodada 28): capa escura com o total de
+ * conquistas, página de selos de "Ano Completo" e página de selos intermediários
+ * (semestres primeiro, trimestres em seguida), organizados por ano.
+ */
+export async function buildAchievementsPdf(input: AchievementsPdfInput): Promise<Buffer> {
+  const badges = input?.badges ?? [];
+  const quarters = input?.intermediate?.quarters ?? [];
+  const halfYears = input?.intermediate?.halfYears ?? [];
+  const userName = input?.userName?.trim();
+  const totalSeals = badges.length + quarters.length + halfYears.length;
+  const yearsCounted = Math.max(input?.intermediate?.yearsChecked ?? 0, badges.length);
+  return new Promise<Buffer>((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ size: "A4", margin: 54 });
+      const chunks: Buffer[] = [];
+      doc.on("data", (c) => chunks.push(c));
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("error", reject);
+      // ===== Capa =====
+      doc.rect(0, 0, doc.page.width, doc.page.height).fill(COLORS.dark);
+      doc.fillColor(COLORS.amber).fontSize(11).text("VYROSCOPE AI", 54, 72, { characterSpacing: 4 });
+      doc.moveTo(54, 96).lineTo(150, 96).strokeColor(COLORS.amber).lineWidth(1.5).stroke();
+      doc.fillColor(COLORS.light).fontSize(24).font("Helvetica-Bold").text("Galeria de conquistas", 54, 150);
+      doc.fillColor(COLORS.gray).fontSize(11).text("Selos anuais, de semestre e de trimestre completos", 54, 190);
+      doc.fillColor(COLORS.gray).fontSize(10).text("Gerado em " + new Date().toLocaleString("pt-BR") + (userName ? ` · ${userName}` : ""), 54, 220);
+      // ===== Cartão de KPIs =====
+      const kpiW = Math.floor((doc.page.width - 108 - 16) / 3);
+      doc.fillColor(COLORS.cardBg).roundedRect(54, 270, doc.page.width - 108, 90, 6).fill();
+      const kpis = [
+        { label: "SELOS ANUAIS", value: `${badges.length} ano${badges.length === 1 ? "" : "s"} completo${badges.length === 1 ? "" : "s"}` },
+        { label: "SELOS INTERMEDIÁRIOS", value: `${quarters.length + halfYears.length} conquistado${quarters.length + halfYears.length === 1 ? "" : "s"}` },
+        { label: "TOTAL ACUMULADO", value: `${totalSeals} selo${totalSeals === 1 ? "" : "s"}` },
+      ];
+      kpis.forEach((kpi, i) => {
+        const x = 70 + i * (kpiW + 8);
+        doc.fillColor(COLORS.amber).fontSize(8).font("Helvetica-Bold").text(kpi.label, x, 288, { characterSpacing: 1 });
+        doc.fillColor(COLORS.light).fontSize(10).font("Helvetica").text(kpi.value, x, 308, { width: kpiW - 16 });
+      });
+      const encouragement =
+        totalSeals > 0
+          ? `Conquistas acumuladas: ${badges.length} selo${badges.length === 1 ? "" : "s"} de ano completo e ${quarters.length + halfYears.length} selo${quarters.length + halfYears.length === 1 ? "" : "s"} intermediário${quarters.length + halfYears.length === 1 ? "" : "s"} em ${yearsCounted} ano${yearsCounted === 1 ? "" : "s"} acompanhado${yearsCounted === 1 ? "" : "s"}.`
+          : "Nenhuma conquista ainda — cada meta mensal cumprida constrói o próximo selo.";
+      doc.fillColor(totalSeals > 0 ? "#4C9F70" : COLORS.gray).fontSize(10).font("Helvetica-Bold").text(encouragement, 70, 400, { width: doc.page.width - 140 });
+      // ===== Página de selos anuais =====
+      doc.addPage();
+      doc.rect(0, 0, doc.page.width, doc.page.height).fill(COLORS.dark);
+      doc.fillColor(COLORS.amber).fontSize(10).font("Helvetica-Bold").text("SELOS DE ANO COMPLETO", 54, 72, { characterSpacing: 2 });
+      doc.fillColor(COLORS.gray).fontSize(9).text("Todos os meses do ano com a meta cumprida — um selo dourado por ano.", 54, 96);
+      let y = 130;
+      if (badges.length === 0) {
+        doc.fillColor(COLORS.gray).fontSize(10).font("Helvetica-Oblique").text("Nenhum selo de ano completo ainda. Continue a sequência mês a mês.", 70, y);
+      } else {
+        const sorted = [...badges].sort((a, b) => b.year - a.year);
+        sorted.forEach((b) => {
+          if (y > doc.page.height - 40) doc.addPage();
+          doc.fillColor(COLORS.cardBg).roundedRect(70, y, doc.page.width - 140, 44, 4).fill();
+          doc.fillColor(COLORS.amber).fontSize(11).font("Helvetica-Bold").text(`SELO · ANO COMPLETO ${b.year}`, 90, y + 12);
+          doc.fillColor(COLORS.light).fontSize(9).text(`${b.metMonths} metas cumpridas · ${b.published}/${b.annualGoal} publicações no ano`, 90, y + 30);
+          y += 60;
+        });
+      }
+      // ===== Página de selos intermediários (semestres + trimestres) =====
+      doc.addPage();
+      doc.rect(0, 0, doc.page.width, doc.page.height).fill(COLORS.dark);
+      doc.fillColor(COLORS.amber).fontSize(10).font("Helvetica-Bold").text("SELOS INTERMEDIÁRIOS", 54, 72, { characterSpacing: 2 });
+      doc.fillColor(COLORS.gray).fontSize(9).text("Semestres (H1/H2) e trimestres (Q1–Q4) com todas as metas do período cumpridas, organizados por ano.", 54, 96);
+      y = 130;
+      const hByYear = new Map<number, (typeof halfYears)[number][]>();
+      halfYears.forEach((h) => hByYear.set(h.year, [...(hByYear.get(h.year) ?? []), h]));
+      const qByYear = new Map<number, (typeof quarters)[number][]>();
+      quarters.forEach((q) => qByYear.set(q.year, [...(qByYear.get(q.year) ?? []), q]));
+      const years = new Set(Array.from(hByYear.keys()).concat(Array.from(qByYear.keys())));
+      if (years.size === 0) {
+        doc.fillColor(COLORS.gray).fontSize(10).font("Helvetica-Oblique").text("Nenhum selo intermediário ainda. Feche um trimestre ou semestre com todas as metas cumpridas.", 70, y);
+      } else {
+        const sortedYears = Array.from(years).sort((a, b) => b - a);
+        sortedYears.forEach((yr) => {
+          const hSeals = (hByYear.get(yr) ?? []).sort((a, b) => a.half - b.half);
+          const qSeals = (qByYear.get(yr) ?? []).sort((a, b) => a.quarter - b.quarter);
+          if (y > doc.page.height - 70) doc.addPage();
+          doc.fillColor(COLORS.amber).fontSize(9).font("Helvetica-Bold").text(yr.toString(), 70, y, { characterSpacing: 1 });
+          y += 18;
+          const sealLine = (icon: string, label: string, published: number, annualGoal: number) => {
+            if (y > doc.page.height - 40) doc.addPage();
+            doc.fillColor(COLORS.cardBg).roundedRect(70, y, doc.page.width - 140, 34, 4).fill();
+            doc.fillColor(COLORS.light).fontSize(10).font("Helvetica-Bold").text(`${icon} ${label}`, 90, y + 11);
+            doc.fillColor(COLORS.gray).fontSize(8.5).text(`${published}/${annualGoal} publicadas no período`, 90, y + 25);
+            y += 50;
+          };
+          hSeals.forEach((h) => sealLine("MEDAL", h.label, h.published, h.annualGoal));
+          qSeals.forEach((q) => sealLine("Q", q.label, q.published, q.annualGoal));
+        });
+      }
+      doc.fillColor(COLORS.gray).fontSize(8).text(`Total acumulado: ${totalSeals} selo${totalSeals === 1 ? "" : "s"} · ${badges.length} ano${badges.length === 1 ? "" : "s"} completo${badges.length === 1 ? "" : "s"} · ${quarters.length + halfYears.length} intermediário${quarters.length + halfYears.length === 1 ? "" : "s"}`, 54, doc.page.height - 40, { width: doc.page.width - 108 });
+      doc.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
