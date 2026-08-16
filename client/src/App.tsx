@@ -14,6 +14,7 @@ import Monitoring from "./pages/Monitoring";
 import Profile from "./pages/Profile";
 import Result from "./pages/Result";
 import Streaks from "./pages/Streaks";
+import Usage from "./pages/Usage";
 
 function Router() {
   // make sure to consider if you need authentication for certain routes
@@ -27,6 +28,7 @@ function Router() {
       <Route path={"/comparador"} component={Compare} />
       <Route path={"/monitorar"} component={Monitoring} />
       <Route path={"/perfil"} component={Profile} />
+      <Route path={"/uso"} component={Usage} />
       <Route path={"/favoritos"} component={Favorites} />
       <Route path="/streaks" component={Streaks} />
       <Route path={"/404"} component={NotFound} />

@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 import {
   appendRetryEvent,
+  checkAnalysisLimits,
   createAnalysis,
   recordApiUsage,
   deleteAnalysis as dbDeleteAnalysis,
@@ -35,9 +36,15 @@ export const analysisRouter = router({
    */
   run: protectedProcedure.input(inputSchema).mutation(async ({ ctx, input }) => {
     const userId = ctx.user.id;
-    const analysisId = nanoid(14);
     const niche = input.niche;
-
+    // (Rodada 36) Proteção de custos: bloqueia a análise quando qualquer limite
+    // diário do usuário atingiu 100% (análises, tokens LLM ou cota YouTube).
+    const limitCheck = await checkAnalysisLimits(Number(userId));
+    if (limitCheck.blocked) {
+      await createAnalysis({ id: nanoid(14), userId, niche, status: "failed" }).catch(() => undefined);
+      throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: limitCheck.reason });
+    }
+    const analysisId = nanoid(14);
     await createAnalysis({ id: analysisId, userId, niche, status: "running" });
 
     try {
@@ -71,6 +78,12 @@ export const analysisRouter = router({
         throw new TRPCError({ code: "FORBIDDEN", message: "Você não tem acesso a esta análise" });
       }
       const userId = ctx.user.id;
+      // (Rodada 36) O retry também respeita os limites diários.
+      const limitCheck = await checkAnalysisLimits(Number(userId));
+      if (limitCheck.blocked) {
+        await createAnalysis({ id: nanoid(14), userId, niche: row.niche, status: "failed" }).catch(() => undefined);
+        throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: limitCheck.reason });
+      }
       const newId = nanoid(14);
       await createAnalysis({ id: newId, userId, niche: row.niche, status: "running" });
       try {

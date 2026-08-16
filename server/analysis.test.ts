@@ -15,6 +15,8 @@ const db = vi.hoisted(() => ({
   updateAnalysisProgress: vi.fn().mockResolvedValue(undefined),
   getUserStats: vi.fn().mockResolvedValue({ total: 3, completed: 2 }),
   parseRetrySummary: vi.fn().mockReturnValue(null),
+  // (Rodada 36) checagem de limites diários — sem bloqueio nos testes existentes.
+  checkAnalysisLimits: vi.fn().mockResolvedValue({ blocked: false }),
   updateUserProfile: vi.fn().mockImplementation(async (_id: number, patch: { name?: string | null; email?: string | null }) =>
     Promise.resolve({
       id: 1,

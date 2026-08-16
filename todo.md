@@ -320,3 +320,13 @@
 - [x] Frontend: botão "Reconfigurar" ao lado de cada provedor com falha no painel do Verificar tudo (abre o diálogo de configuração direto)
 - [x] Frontend: botão "Exportar histórico CSV" na página /historico incluindo o resumo de retentativas
 - [x] Testes vitest (consumo, export CSV), docs Vercel confirmados, skill, Obsidian rodada-35 e checkpoint final
+
+## Melhorias solicitadas (rodada 36)
+
+- [x] Backend: procedure getUsageDailySeries — série de consumo diário (últimos 30 dias, seletor 7–90) por escopo (llm/youtube: tokens/units/requests) com limite por dia
+- [x] Backend: tabela user_limits + helpers (getUserLimits/setUserLimits/countAnalysesToday/getTodayUsage) e bloqueio no analysis.run e retry (TOO_MANY_REQUESTS com motivo claro; tentativa bloqueada gravada como failed)
+- [x] Backend: limites por escopo (dailyTokenLimit, dailyQuotaLimit) com estado ok/warn(>=80%)/blocked(>=100%) via getLimitStatus
+- [x] Frontend: página /uso com gráficos Recharts de consumo diário (barras, média móvel 7 dias, linha de limite), 4 cards resumo e seletor de período
+- [x] Frontend: botão "Limites" no card Consumo de APIs do perfil com dialog de validação (máximos 50/500k/1M, 0 = ilimitado) e consumo de hoje em %
+- [x] Frontend: LimitAlertsBanner (âmbar 80% / vermelho 100%) no card Consumo de APIs e na página /uso
+- [x] Testes vitest (21 novos em limits.test.ts e analysis-limits.test.ts; 264/264 passando), checkpoint final

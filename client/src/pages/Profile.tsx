@@ -11,7 +11,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { formatDate } from "@/lib/score";
 import { trpc } from "@/lib/trpc";
-import { BarChart3, Clapperboard, Gauge, Loader2, Radar, RefreshCw, Save, ShieldCheck, Settings2, UserRound, Zap } from "lucide-react";
+import { LimitAlertsBanner } from "@/pages/Usage";
+import { BarChart3, Clapperboard, Gauge, Loader2, Radar, RefreshCw, Save, ShieldCheck, Settings2, ShieldAlert, UserRound, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
@@ -133,6 +134,50 @@ export default function Profile() {
     enabled: isAuthenticated,
     staleTime: 60_000,
   });
+
+  // (Rodada 36) Limites diários e estado de alerta (warn >=80% / blocked >=100%)
+  const limitsQuery = trpc.profile.getLimits.useQuery(undefined, {
+    enabled: isAuthenticated,
+    staleTime: 30_000,
+  });
+  const [limitsDialogOpen, setLimitsDialogOpen] = useState(false);
+  const [dailyAnalysisLimit, setDailyAnalysisLimit] = useState("");
+  const [dailyTokenLimit, setDailyTokenLimit] = useState("");
+  const [dailyQuotaLimit, setDailyQuotaLimit] = useState("");
+  useEffect(() => {
+    if (limitsDialogOpen && limitsQuery.data) {
+      const { limit } = limitsQuery.data;
+      setDailyAnalysisLimit(limit.dailyAnalysisLimit > 0 ? String(limit.dailyAnalysisLimit) : "");
+      setDailyTokenLimit(limit.dailyTokenLimit > 0 ? String(limit.dailyTokenLimit) : "");
+      setDailyQuotaLimit(limit.dailyQuotaLimit > 0 ? String(limit.dailyQuotaLimit) : "");
+    }
+  }, [limitsDialogOpen, limitsQuery.data]);
+  const setLimitsMutation = trpc.profile.setLimits.useMutation({
+    onSuccess: () => {
+      utils.profile.getLimits.invalidate();
+      utils.profile.getUsageDailySeries.invalidate();
+      utils.profile.getUsageSummary.invalidate();
+      setLimitsDialogOpen(false);
+      toast.success("Limites atualizados. Novas análises já respeitam os limites configurados.");
+    },
+    onError: (err) => toast.error(err.message),
+  });
+  const handleSaveLimits = () => {
+    const parse = (raw: string, max: number) => {
+      if (!raw.trim()) return 0;
+      const n = Number(raw.trim());
+      if (!Number.isFinite(n) || n < 0) return -1;
+      return Math.min(max, Math.floor(n));
+    };
+    const analyses = parse(dailyAnalysisLimit, 50);
+    const tokens = parse(dailyTokenLimit, 500_000);
+    const quota = parse(dailyQuotaLimit, 1_000_000);
+    if (analyses < 0 || tokens < 0 || quota < 0) {
+      toast.error("Valores inválidos: use números inteiros positivos (0 = ilimitado).");
+      return;
+    }
+    setLimitsMutation.mutate({ dailyAnalysisLimit: analyses, dailyTokenLimit: tokens, dailyQuotaLimit: quota });
+  };
 
   // (Rodada 34) Verificação em lote de todos os provedores
   const testAllMutation = trpc.profile.testAllConnections.useMutation({
@@ -310,7 +355,7 @@ export default function Profile() {
           </Card>
         </div>
 
-        {/* (Rodada 35) Consumo de APIs: tokens LLM e unidades da cota YouTube */}
+        {/* (Rodada 35 + 36) Consumo de APIs: tokens LLM e unidades da cota YouTube + alertas de limite */}
         <Card className="border-border/60">
           <CardHeader className="flex flex-row items-center justify-between gap-4">
             <div>
@@ -321,23 +366,120 @@ export default function Profile() {
               <CardDescription>
                 Tokens de LLM e unidades da cota do YouTube consumidas nas suas análises.
                 Uma análise típica consome ~1.000–3.000 tokens de LLM e ~101 unidades do YouTube.
+                {(limitsQuery.data?.state.analyses === "warn" || limitsQuery.data?.state.tokens === "warn" || limitsQuery.data?.state.quota === "warn") &&
+                  " O consumo de hoje está perto do limite configurado."}
+                {(limitsQuery.data?.state.analyses === "blocked" || limitsQuery.data?.state.tokens === "blocked" || limitsQuery.data?.state.quota === "blocked") &&
+                  " Um limite diário foi atingido: novas análises estão bloqueadas até a meia-noite."}
               </CardDescription>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => usageQuery.refetch()}
-              disabled={usageQuery.isRefetching}
-            >
-              {usageQuery.isRefetching ? (
-                <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <RefreshCw className="mr-2 h-3.5 w-3.5" />
-              )}
-              Atualizar
-            </Button>
+            <div className="flex gap-2">
+              <Dialog open={limitsDialogOpen} onOpenChange={setLimitsDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="sm" disabled={setLimitsMutation.isPending}>
+                    <ShieldAlert className="mr-2 h-3.5 w-3.5" />
+                    Limites
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-lg">
+                  <DialogHeader>
+                    <DialogTitle>Limites e proteção de custos</DialogTitle>
+                    <DialogDescription>
+                      Defina limites diários opcionais para evitar custos excessivos com provedores pagos.
+                      Ao atingir 80% do limite você recebe um alerta visual; em 100% as novas análises são
+                      bloqueadas até a meia-noite (horário do servidor). Use 0 ou deixe vazio para ilimitado.
+                      Máximos: 50 análises, 500.000 tokens e 1.000.000 unidades de cota por dia.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="limit-analyses">Análises por dia</Label>
+                      <Input
+                        id="limit-analyses"
+                        type="number"
+                        min={0}
+                        max={50}
+                        value={dailyAnalysisLimit}
+                        onChange={(e) => setDailyAnalysisLimit(e.target.value)}
+                        placeholder="0 = ilimitado"
+                        disabled={setLimitsMutation.isPending}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        {limitsQuery.data?.today.analyses != null && limitsQuery.data.limit.dailyAnalysisLimit > 0
+                          ? `Hoje: ${limitsQuery.data.today.analyses} de ${limitsQuery.data.limit.dailyAnalysisLimit} análises (${Math.round((limitsQuery.data.today.analyses / limitsQuery.data.limit.dailyAnalysisLimit) * 100)}%)`
+                          : `Hoje: ${limitsQuery.data?.today.analyses ?? 0} análises realizadas.`}
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="limit-tokens">Tokens de LLM por dia</Label>
+                      <Input
+                        id="limit-tokens"
+                        type="number"
+                        min={0}
+                        max={500000}
+                        value={dailyTokenLimit}
+                        onChange={(e) => setDailyTokenLimit(e.target.value)}
+                        placeholder="0 = ilimitado"
+                        disabled={setLimitsMutation.isPending}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        {limitsQuery.data?.today.tokens != null && limitsQuery.data.limit.dailyTokenLimit > 0
+                          ? `Hoje: ${limitsQuery.data.today.tokens.toLocaleString("pt-BR")} de ${limitsQuery.data.limit.dailyTokenLimit.toLocaleString("pt-BR")} tokens (${Math.round((limitsQuery.data.today.tokens / limitsQuery.data.limit.dailyTokenLimit) * 100)}%)`
+                          : `Hoje: ${limitsQuery.data?.today.tokens.toLocaleString("pt-BR") ?? 0} tokens de LLM.`}
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="limit-quota">Cota YouTube por dia (unidades)</Label>
+                      <Input
+                        id="limit-quota"
+                        type="number"
+                        min={0}
+                        max={1000000}
+                        value={dailyQuotaLimit}
+                        onChange={(e) => setDailyQuotaLimit(e.target.value)}
+                        placeholder="0 = ilimitado"
+                        disabled={setLimitsMutation.isPending}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        {limitsQuery.data?.today.quota != null && limitsQuery.data.limit.dailyQuotaLimit > 0
+                          ? `Hoje: ${limitsQuery.data.today.quota.toLocaleString("pt-BR")} de ${limitsQuery.data.limit.dailyQuotaLimit.toLocaleString("pt-BR")} unidades (${Math.round((limitsQuery.data.today.quota / limitsQuery.data.limit.dailyQuotaLimit) * 100)}%)`
+                          : `Hoje: ${limitsQuery.data?.today.quota.toLocaleString("pt-BR") ?? 0} unidades de cota.`}
+                      </p>
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setLimitsDialogOpen(false)} disabled={setLimitsMutation.isPending}>
+                      Cancelar
+                    </Button>
+                    <Button onClick={handleSaveLimits} disabled={setLimitsMutation.isPending}>
+                      {setLimitsMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      <Save className="mr-2 h-4 w-4" />
+                      Salvar limites
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => usageQuery.refetch()}
+                disabled={usageQuery.isRefetching}
+              >
+                {usageQuery.isRefetching ? (
+                  <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="mr-2 h-3.5 w-3.5" />
+                )}
+                Atualizar
+              </Button>
+            </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
+            {(limitsQuery.data?.state.analyses === "warn" ||
+              limitsQuery.data?.state.tokens === "warn" ||
+              limitsQuery.data?.state.quota === "warn") && <LimitAlertsBanner />}
+            {(limitsQuery.data?.state.analyses === "blocked" ||
+              limitsQuery.data?.state.tokens === "blocked" ||
+              limitsQuery.data?.state.quota === "blocked") && <LimitAlertsBanner />}
             <div className="grid gap-3 sm:grid-cols-2">
               <UsageColumn
                 title="LLM (tokens)"
@@ -350,6 +492,10 @@ export default function Profile() {
                 loading={usageQuery.isLoading}
               />
             </div>
+            <Button variant="ghost" size="sm" className="gap-2" onClick={() => navigate("/uso")}>
+              <BarChart3 className="h-4 w-4 text-primary" />
+              Ver página de uso detalhada com gráficos diários →
+            </Button>
           </CardContent>
         </Card>
 

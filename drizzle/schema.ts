@@ -8,6 +8,19 @@ import { bigint, index, int, mysqlEnum, mysqlTable, text, timestamp, varchar } f
  * Extend this file with additional tables as your product grows.
  * Columns use camelCase to match both database fields and generated types.
  */
+// ---------------------------------------------------------------------------
+// (Rodada 36) Limites diários opcionais por usuário (proteção de custos).
+// 0 = ilimitado. Valores em user_limits (migração 0018).
+// ---------------------------------------------------------------------------
+export const userLimits = mysqlTable("user_limits", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  dailyAnalysisLimit: int("daily_analysis_limit").notNull().default(0),
+  dailyTokenLimit: int("daily_token_limit").notNull().default(0),
+  dailyQuotaLimit: int("daily_quota_limit").notNull().default(0),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+});
+
 export const apiUsage = mysqlTable("api_usage", {
   id: int("id").autoincrement().primaryKey(),
   userId: varchar("user_id", { length: 255 }).notNull(),

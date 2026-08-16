@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { getUsageSummary, getUserStats, setProviderSettings, updateLocalCode, updateUserProfile } from "../db";
+import { getLimitStatus, getUsageDailySeries, getUsageSummary, getUserStats, setProviderSettings, setUserLimits, updateLocalCode, updateUserProfile } from "../db";
 import {
   resolveImageConfig,
   resolveLlmConfig,
@@ -215,4 +215,46 @@ export const profileRouter = router({
     const usage = await getUsageSummary(ctx.user.id);
     return usage;
   }),
+
+  /**
+   * (Rodada 36) Série de consumo diário (últimos N dias) por escopo,
+   * para os gráficos da página de uso, incluindo os limites por dia.
+   */
+  getUsageDailySeries: protectedProcedure
+    .input(z.object({ days: z.number().int().min(7).max(90).default(30) }).default({ days: 30 }))
+    .query(async ({ ctx, input }) => {
+      const series = await getUsageDailySeries(ctx.user.id, input.days);
+      return series;
+    }),
+
+  /**
+   * (Rodada 36) Limites diários atuais do usuário e estado de alerta:
+   * "ok" / "warn" (>=80%) / "blocked" (>=100%) por escopo (análises/tokens/quota).
+   */
+  getLimits: protectedProcedure.query(async ({ ctx }) => {
+    const status = await getLimitStatus(ctx.user.id);
+    return status;
+  }),
+
+  /**
+   * (Rodada 36) Define os limites diários opcionais do usuário (proteção de
+   * custos). Valores 0 ou vazios = ilimitado. Máximos defensivos para evitar
+   * inputs absurdos: 50 análises/dia, 500.000 tokens/dia, 1.000.000 unidades/dia.
+   */
+  setLimits: protectedProcedure
+    .input(
+      z.object({
+        dailyAnalysisLimit: z.number().int().min(0).max(50).optional(),
+        dailyTokenLimit: z.number().int().min(0).max(500_000).optional(),
+        dailyQuotaLimit: z.number().int().min(0).max(1_000_000).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await setUserLimits(ctx.user.id, {
+        dailyAnalysisLimit: input.dailyAnalysisLimit ?? 0,
+        dailyTokenLimit: input.dailyTokenLimit ?? 0,
+        dailyQuotaLimit: input.dailyQuotaLimit ?? 0,
+      });
+      return { ok: true } as const;
+    }),
 });

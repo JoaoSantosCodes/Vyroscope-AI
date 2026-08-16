@@ -1,9 +1,11 @@
 import { and, asc, desc, eq, inArray, isNull, not, sql } from "drizzle-orm";
+import { gte, lte } from "drizzle-orm/sql/expressions/conditions";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   apiUsage,
   analysisVideos,
   analyses,
+  userLimits,
   InsertAnalysis,
   InsertAnalysisVideo,
   InsertUser,
@@ -1381,6 +1383,159 @@ function statusLabel(status: string): string {
 }
 
 // ---------- Rastreamento de consumo de APIs ----------
+// ---------- (Rodada 36) Limites diários por usuário (proteção de custos) ----------
+export type UserLimits = {
+  dailyAnalysisLimit: number;
+  dailyTokenLimit: number;
+  dailyQuotaLimit: number;
+};
+export type UsageStatus = {
+  scopes: Record<string, { tokens: number; units: number; requests: number }>;
+  /** Total agregado do dia corrente, por escopo. */
+  aggregated: { llm: { tokens: number; units: number; requests: number }; youtube: { tokens: number; units: number; requests: number } };
+};
+export type DailyPoint = { date: string; tokens: number; units: number; requests: number };
+export type UsageDailySeries = {
+  llm: DailyPoint[];
+  youtube: DailyPoint[];
+  limitByDay: Array<{ date: string; analyses: number; tokens: number; quota: number }>;
+};
+export type LimitStatus = {
+  limit: UserLimits;
+  today: { analyses: number; tokens: number; quota: number };
+  /** analyses/tokens/quota: "ok" | "warn" (>=80%) | "blocked" (>=100%) */
+  state: { analyses: "ok" | "warn" | "blocked"; tokens: "ok" | "warn" | "blocked"; quota: "ok" | "warn" | "blocked" };
+};
+/** Retorna os limites do usuário (0 = ilimitado). */
+export async function getUserLimits(userId: number): Promise<UserLimits> {
+  const db = await getDb();
+  if (!db) return { dailyAnalysisLimit: 0, dailyTokenLimit: 0, dailyQuotaLimit: 0 };
+  const row = await db.select().from(userLimits).where(eq(userLimits.userId, userId)).limit(1);
+  if (!row.length) return { dailyAnalysisLimit: 0, dailyTokenLimit: 0, dailyQuotaLimit: 0 };
+  return {
+    dailyAnalysisLimit: row[0].dailyAnalysisLimit ?? 0,
+    dailyTokenLimit: row[0].dailyTokenLimit ?? 0,
+    dailyQuotaLimit: row[0].dailyQuotaLimit ?? 0,
+  };
+}
+/** Salva os limites diários do usuário (transação upsert simples). */
+export async function setUserLimits(userId: number, limits: UserLimits): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  const clamped = {
+    dailyAnalysisLimit: Math.max(0, Math.floor(limits.dailyAnalysisLimit ?? 0)),
+    dailyTokenLimit: Math.max(0, Math.floor(limits.dailyTokenLimit ?? 0)),
+    dailyQuotaLimit: Math.max(0, Math.floor(limits.dailyQuotaLimit ?? 0)),
+  };
+  await db
+    .insert(userLimits)
+    .values({ ...clamped, userId, updatedAt: Date.now() })
+    .onDuplicateKeyUpdate({ set: { ...clamped, updatedAt: Date.now() } });
+}
+/** Conta análises (qualquer status) realizadas pelo usuário hoje. */
+export async function countAnalysesToday(userId: number): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const startOfDay = new Date(new Date().setHours(0, 0, 0, 0));
+  const endOfDay = new Date(new Date().setHours(23, 59, 59, 999));
+  const rows = await db
+    .select({ id: analyses.id })
+    .from(analyses)
+    .where(and(eq(analyses.userId, userId), gte(analyses.createdAt, startOfDay), lte(analyses.createdAt, endOfDay)));
+  return rows.length;
+}
+/** Consumo agregado de hoje por escopo (llm/youtube). */
+export async function getTodayUsage(userId: number): Promise<{ llm: { tokens: number; units: number; requests: number }; youtube: { tokens: number; units: number; requests: number } }> {
+  const db = await getDb();
+  const empty = { tokens: 0, units: 0, requests: 0 };
+  const result = { llm: { ...empty }, youtube: { ...empty } };
+  if (!db) return result;
+  const today = new Date().toISOString().slice(0, 10);
+  const rows = await db.select().from(apiUsage).where(and(eq(apiUsage.userId, String(userId)), eq(apiUsage.usageDate, today)));
+  for (const row of rows) {
+    const scope = row.scope === "llm" ? "llm" : row.scope === "youtube" ? "youtube" : null;
+    if (!scope) continue;
+    result[scope].tokens += row.tokens ?? 0;
+    result[scope].units += row.units ?? 0;
+    result[scope].requests += row.requests ?? 0;
+  }
+  return result;
+}
+/** Avalia o estado dos limites (ok / warn >=80% / blocked >=100%) contra o consumo de hoje. */
+export async function getLimitStatus(userId: number): Promise<LimitStatus> {
+  const [limit, today] = await Promise.all([getUserLimits(userId), getTodayUsage(userId)]);
+  const analyses = await countAnalysesToday(userId);
+  const quotaUnits = (today.llm.units ?? 0) + (today.youtube.units ?? 0);
+  const evaluate = (value: number, cap: number): "ok" | "warn" | "blocked" => {
+    if (!cap) return "ok";
+    return value >= cap ? "blocked" : value >= Math.floor(cap * 0.8) ? "warn" : "ok";
+  };
+  return {
+    limit,
+    today: { analyses, tokens: today.llm.tokens, quota: quotaUnits },
+    state: {
+      analyses: evaluate(analyses, limit.dailyAnalysisLimit),
+      tokens: evaluate(today.llm.tokens, limit.dailyTokenLimit),
+      quota: evaluate(quotaUnits, limit.dailyQuotaLimit),
+    },
+  };
+}
+/**
+ * Verifica se uma nova análise diária seria bloqueada pelos limites do dia.
+ * Retorna { blocked: true, reason } quando qualquer limite atingiu 100%.
+ */
+export async function checkAnalysisLimits(userId: number): Promise<{ blocked: false } | { blocked: true; reason: string }> {
+  const { limit, today, state } = await getLimitStatus(userId);
+  if (limit.dailyAnalysisLimit > 0 && today.analyses >= limit.dailyAnalysisLimit) {
+    return { blocked: true, reason: `Limite de análises do dia (${limit.dailyAnalysisLimit}) atingido. O contador zera à meia-noite.` };
+  }
+  if (limit.dailyTokenLimit > 0 && state.tokens === "blocked") {
+    return { blocked: true, reason: `Limite diário de tokens de LLM (${limit.dailyTokenLimit.toLocaleString("pt-BR")}) atingido. O contador zera à meia-noite.` };
+  }
+  if (limit.dailyQuotaLimit > 0 && state.quota === "blocked") {
+    return { blocked: true, reason: `Limite diário de cota YouTube (${limit.dailyQuotaLimit.toLocaleString("pt-BR")} unidades) atingido. O contador zera à meia-noite.` };
+  }
+  return { blocked: false };
+}
+/** Série diária (últimos `days` dias) de consumo llm/youtube + limites por dia. */
+export async function getUsageDailySeries(userId: number, days = 30): Promise<UsageDailySeries> {
+  const db = await getDb();
+  const empty: DailyPoint[] = [];
+  const series: UsageDailySeries = { llm: empty, youtube: empty, limitByDay: [] };
+  if (!db) return series;
+  const today = new Date();
+  const rows = await db.select().from(apiUsage).where(eq(apiUsage.userId, String(userId)));
+  const byScopeDay = new Map<string, { tokens: number; units: number; requests: number }>();
+  for (const row of rows) {
+    const scope = row.scope === "llm" || row.scope === "youtube" ? row.scope : null;
+    if (!scope) continue;
+    const key = `${scope}|${row.usageDate}`;
+    const prev = byScopeDay.get(key) ?? { tokens: 0, units: 0, requests: 0 };
+    byScopeDay.set(key, {
+      tokens: prev.tokens + (row.tokens ?? 0),
+      units: prev.units + (row.units ?? 0),
+      requests: prev.requests + (row.requests ?? 0),
+    });
+  }
+  const limit = await getUserLimits(userId);
+  const points: DailyPoint[] = [];
+  const limitByDay: Array<{ date: string; analyses: number; tokens: number; quota: number }> = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(today.getDate() - i);
+    const iso = d.toISOString().slice(0, 10);
+    const llmKey = `llm|${iso}`;
+    const ytKey = `youtube|${iso}`;
+    const llm = byScopeDay.get(llmKey) ?? { tokens: 0, units: 0, requests: 0 };
+    const yt = byScopeDay.get(ytKey) ?? { tokens: 0, units: 0, requests: 0 };
+    points.push({ date: iso, tokens: llm.tokens, units: llm.units, requests: llm.requests });
+    series.llm.push({ date: iso, ...llm });
+    series.youtube.push({ date: iso, ...yt });
+    limitByDay.push({ date: iso, analyses: limit.dailyAnalysisLimit, tokens: limit.dailyTokenLimit, quota: limit.dailyQuotaLimit });
+  }
+  series.limitByDay = limitByDay;
+  return series;
+}
 export type UsagePeriod = { tokens: number; units: number; requests: number };
 export type UsageSummary = {
   llm: { today: UsagePeriod; week: UsagePeriod; month: UsagePeriod };
