@@ -5,6 +5,9 @@ import {
   getBlockedAttempts,
   getLimitStatus,
   getUserLimits,
+  listUnreadUsageAlerts,
+  markUsageAlertRead,
+  purgeReadUsageAlerts,
   getUsageBudgets,
   getUsageDailySeries,
   getUsageSummary,
@@ -261,6 +264,8 @@ export const profileRouter = router({
       monthlyTokenLimit: limits.monthlyTokenLimit,
       monthlyQuotaLimit: limits.monthlyQuotaLimit,
       overrideUntil: limits.overrideUntil,
+      /** (Rodada 38) Análises restantes autorizadas por confirmação de uso único */
+      overrideRemaining: limits.overrideRemaining ?? 0,
       budgets: {
         week: {
           ...budgets.week,
@@ -313,13 +318,30 @@ export const profileRouter = router({
       return { ok: true } as const;
     }),
   /**
-   * (Rodada 37) Confirmação manual de limite: libera o bloqueio diário até a
-   * meia-noite do servidor (modo "apenas avisar").
+   * (Rodada 37/38) Confirmação manual de limite no modo "apenas avisar":
+   * libera o bloqueio APENAS para a próxima análise (uso único) e mantém a
+   * suspensão até a meia-noite como fallback. Retorna o overrideRemaining
+   * atual (número de análises ainda autorizadas).
    */
   confirmLimitOverride: protectedProcedure.mutation(async ({ ctx }) => {
-    const { overrideUntil } = await confirmLimitOverride(ctx.user.id);
-    return { overrideUntil } as const;
+    const { overrideUntil, overrideRemaining } = await confirmLimitOverride(ctx.user.id);
+    return { overrideUntil, overrideRemaining } as const;
   }),
+  /**
+   * (Rodada 38) Alertas proativos de uso não lidos (80% / 100% de limite),
+   * com higiene automática dos lidos antigos (>14 dias).
+   */
+  listUsageAlerts: protectedProcedure.query(async ({ ctx }) => {
+    await purgeReadUsageAlerts(ctx.user.id).catch(() => undefined);
+    return listUnreadUsageAlerts(ctx.user.id);
+  }),
+  /** (Rodada 38) Marca um alerta de uso como lido. */
+  markAlertRead: protectedProcedure
+    .input(z.object({ alertId: z.number().int().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      await markUsageAlertRead(input.alertId);
+      return { ok: true } as const;
+    }),
   /**
    * (Rodada 37) Histórico detalhado de tentativas bloqueadas pelos limites.
    */

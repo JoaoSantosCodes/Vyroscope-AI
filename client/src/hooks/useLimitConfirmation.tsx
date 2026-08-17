@@ -21,11 +21,11 @@ function isLimitError(message: string | undefined): boolean {
 }
 
 /**
- * (Rodada 37) Hook que captura o erro `PRECONDITION_FAILED` emitido pelo
+ * (Rodada 37/38) Hook que captura o erro `PRECONDITION_FAILED` emitido pelo
  * `analysis.run`/`analysis.retry` quando o consumo diário atinge 100% no modo
- * "Apenas avisar". Exibe um dialog de confirmação; ao confirmar, libera o
- * bloqueio manual até a meia-noite (confirmLimitOverride) e dispara o
- * callback de reexecução.
+ * "Apenas avisar". Exibe um dialog de confirmação; ao confirmar, chama
+ * `confirmLimitOverride` — que libera APENAS A PRÓXIMA análise (uso único,
+ * conforme Rodada 38) — e dispara o callback de reexecução.
  */
 export function useLimitConfirmation({
   onConfirm,
@@ -39,10 +39,15 @@ export function useLimitConfirmation({
   const [pending, setPending] = useState<string | null>(message ?? null);
 
   const overrideMutation = trpc.profile.confirmLimitOverride.useMutation({
-    onSuccess: () => {
+    onSuccess: ({ overrideRemaining }) => {
       setPending(null);
-      toast.success("Liberação registrada: você pode rodar análises até a meia-noite.");
+      toast.success(
+        overrideRemaining === 1
+          ? "Confirmado: a próxima análise será executada normalmente."
+          : `Confirmado: ${overrideRemaining} análise(s) autorizada(s) hoje.`
+      );
       void utils.profile.getLimits.invalidate();
+      void utils.profile.listUsageAlerts.invalidate();
       onConfirm();
     },
     onError: (err) => {
@@ -69,8 +74,8 @@ export function useLimitConfirmation({
             {pending
               ? `Sua análise foi interrompida pela proteção de custos: ${pending}`
               : "Uma análise foi interrompida pela proteção de custos."}{" "}
-            Você pode confirmar e prosseguir mesmo assim — a liberação vale até a
-            meia-noite (horário do servidor). Considere revisar seus limites em{" "}
+            Você pode confirmar e prosseguir — a liberação vale apenas para a
+            próxima análise (uso único). Considere revisar seus limites em{" "}
             <span className="font-medium">Limites e proteção de custos</span> no perfil.
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -80,7 +85,7 @@ export function useLimitConfirmation({
             onClick={() => overrideMutation.mutate()}
             disabled={overrideMutation.isPending}
           >
-            {overrideMutation.isPending ? "Confirmando…" : "Sim, executar mesmo assim"}
+            {overrideMutation.isPending ? "Confirmando…" : "Sim, executar esta análise"}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

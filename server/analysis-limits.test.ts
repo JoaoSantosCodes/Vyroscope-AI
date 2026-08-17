@@ -30,6 +30,9 @@ const db = vi.hoisted(() => ({
   }),
   getUsageForBlock: vi.fn().mockResolvedValue(10200),
   recordBlockedAttempt: vi.fn().mockResolvedValue(undefined),
+  // (Rodada 38) vínculo da pendência confirmada à análise autorizada.
+  getLatestBlockedAttemptId: vi.fn().mockResolvedValue(7),
+  confirmBlockedAttempt: vi.fn().mockResolvedValue(undefined),
   // (Rodada 36) checagem de limites diários — a porta de proteção de custos.
   checkAnalysisLimits: vi.fn().mockResolvedValue({ blocked: false }),
 }));
@@ -165,21 +168,29 @@ describe("analysis.run com limites diários (proteção de custos)", () => {
     expect(db.checkAnalysisLimits).not.toHaveBeenCalled();
   });
 
-  it("modo 'apenas avisar': retorna PRECONDITION_FAILED (não bloqueia) e registra a tentativa pendente", async () => {
+  it("modo 'apenas avisar': grava a tentativa confirmada (uso único) e executa a análise", async () => {
     db.checkAnalysisLimits.mockResolvedValue({
       needsConfirmation: true,
       reason: "Limite diário de tokens atingido. Confirme para executar mesmo assim.",
       dimension: "tokens",
     });
+    db.getAnalysisById.mockResolvedValue({ id: "abc", niche: "finanças", status: "completed", retryLog: null });
     const caller = appRouter.createCaller(createContext(sampleUser()));
-    await expect(caller.analysis.run({ niche: "finanças" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
-    // A tentativa fica registrada como pendente (sem confirmação) para o histórico.
+    // (Rodada 38) o override de uso único já foi consumido pelo cliente via
+    // confirmLimitOverride — a análise roda sem erro.
+    const result = await caller.analysis.run({ niche: "finanças" });
+    expect(result.status).toBe("completed");
+    expect(db.getLatestBlockedAttemptId).toHaveBeenCalledWith(12, "finanças");
+    expect(db.confirmBlockedAttempt).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({ analysisId: result.id })
+    );
     expect(db.createAnalysis).not.toHaveBeenCalledWith(
       expect.objectContaining({ userId: 12, niche: "finanças", status: "failed" })
     );
   });
 
-  it("o retry também pede confirmação no modo 'apenas avisar'", async () => {
+  it("o retry também grava a tentativa confirmada (uso único) e executa a análise", async () => {
     db.getAnalysisById.mockResolvedValue({
       id: "abc123",
       userId: 12,
@@ -192,8 +203,20 @@ describe("analysis.run com limites diários (proteção de custos)", () => {
       reason: "Limite diário de cota YouTube atingido.",
       dimension: "quota",
     });
+    db.getLatestBlockedAttemptId.mockResolvedValue(9);
+    db.getAnalysisById.mockResolvedValueOnce({
+      id: "abc123",
+      userId: 12,
+      niche: "finanças",
+      status: "failed",
+      retryLog: null,
+    });
+    db.getAnalysisById.mockResolvedValueOnce({ id: "xyz", niche: "finanças", status: "completed", retryLog: null });
     const caller = appRouter.createCaller(createContext(sampleUser()));
-    await expect(caller.analysis.retry({ analysisId: "abc123" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+    // (Rodada 38) uso único: confirmação consumida → retry executa.
+    const result = await caller.analysis.retry({ analysisId: "abc123" });
+    expect(result.status).toBe("completed");
+    expect(db.confirmBlockedAttempt).toHaveBeenCalledWith(9, expect.objectContaining({ analysisId: result.id }));
   });
 });
 

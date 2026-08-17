@@ -31,7 +31,43 @@ export const userLimits = mysqlTable("user_limits", {
   /** (Rodada 37) Confirmação manual do usuário válida até a meia-noite
    * (epoch ms). Quando >= agora, o bloqueio diário é temporariamente liberado. */
   overrideUntil: bigint("override_until", { mode: "number" }).notNull().default(0),
+  /** (Rodada 38) Override de uso único: número de análises ainda autorizadas
+   * por confirmação no modo "apenas avisar" (1 quando confirmado, consome 1 a
+   * cada análise autorizada; 0 = sem override de uso único ativo). */
+  overrideRemaining: int("override_remaining").notNull().default(0),
 });
+
+/**
+ * (Rodada 38) Alertas proativos de uso: notificações in-app geradas quando o
+ * consumo diário de uma dimensão atinge 80% (warn) ou 100% (blocked), para
+ * avisar o usuário sem depender da abertura do perfil.
+ */
+export const usageAlerts = mysqlTable("usage_alerts", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  /** Dimensão: analyses | tokens | quota | weekly_tokens | monthly_tokens */
+  dimension: varchar("dimension", { length: 20 }).notNull(),
+  /** Nível: "warn" (>=80%) | "blocked" (>=100%) */
+  level: mysqlEnum("level", ["warn", "blocked"]).notNull(),
+  /** Chave diária do alerta (YYYY-MM-DD + dimensão) para deduplicar um alerta por dia/dimensão */
+  dayKey: varchar("day_key", { length: 30 }).notNull(),
+  /** Consumo no momento do alerta */
+  currentUsage: int("current_usage").notNull().default(0),
+  /** Limite que disparou o alerta */
+  limitValue: int("limit_value").notNull().default(0),
+  /** Mensagem pt-BR exibida */
+  message: text("message"),
+  readAt: bigint("read_at", { mode: "number" }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const usageAlertsUserLevelIndex = index("idx_usage_alerts_user_level").on(
+  usageAlerts.userId,
+  usageAlerts.level
+);
+
+export type UsageAlert = typeof usageAlerts.$inferSelect;
+export type InsertUsageAlert = typeof usageAlerts.$inferInsert;
 
 export const apiUsage = mysqlTable("api_usage", {
   id: int("id").autoincrement().primaryKey(),

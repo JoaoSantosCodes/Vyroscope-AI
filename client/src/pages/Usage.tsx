@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { exportUsagePdf } from "@/lib/export";
 import { formatDate } from "@/lib/score";
 import { trpc } from "@/lib/trpc";
 import {
@@ -170,6 +171,20 @@ export default function Usage() {
                 <RefreshCw className="mr-2 h-3.5 w-3.5" />
               )}
               Atualizar
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                try {
+                  await exportUsagePdf(days);
+                  toast.success("Relatório de uso exportado em PDF.");
+                } catch {
+                  toast.error("Falha ao gerar o PDF de uso.");
+                }
+              }}
+            >
+              Exportar PDF
             </Button>
           </div>
         </div>

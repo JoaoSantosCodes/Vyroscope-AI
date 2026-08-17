@@ -104,6 +104,26 @@ export async function exportAgendaPdf(agenda: ContentAgenda) {
 }
 
 /**
+ * (Rodada 38) Exporta o relatório de uso (consumo diário, limites, projeções
+ * e tentativas bloqueadas) como PDF. Delega a geração ao servidor
+ * (rota /api/export-usage-pdf); o download é disparado no navegador.
+ */
+export async function exportUsagePdf(days = 30) {
+  const response = await fetch("/api/export-usage-pdf", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ days }),
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: "unknown" }));
+    throw new Error(typeof err?.error === "string" ? err.error : `PDF generation failed: ${response.status}`);
+  }
+  const blob = await response.blob();
+  downloadBlob(blob, `vyroscope-relatorio-uso-${days}d.pdf`);
+}
+
+/**
  * Exporta a galeria de favoritos (organizada por pastas) como PDF.
  * Delega a geração ao servidor (rota /api/export-favorites-pdf); o download
  * é disparado no navegador.

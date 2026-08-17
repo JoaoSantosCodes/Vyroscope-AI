@@ -20,6 +20,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import { UsageAlertsBanner } from "@/components/UsageAlertsBanner";
 import { useTheme } from "@/contexts/ThemeContext";
 import { LogIn, LogOut, Moon, Radar, ShieldCheck, Sun, User } from "lucide-react";
 import { Link, useLocation } from "wouter";
@@ -173,6 +174,9 @@ export default function SiteLayout({ children }: { children: React.ReactNode }) 
           </div>
         </div>
       </header>
+
+      {/* (Rodada 38) Alertas proativos de consumo (80% / 100% dos limites) */}
+      <UsageAlertsBanner />
 
       <main className="min-h-[calc(100vh-4rem)]">{children}</main>
 

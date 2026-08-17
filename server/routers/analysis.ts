@@ -8,6 +8,8 @@ import {
   getUserLimits,
   getUsageForBlock,
   recordApiUsage,
+  confirmBlockedAttempt,
+  getLatestBlockedAttemptId,
   recordBlockedAttempt,
   deleteAnalysis as dbDeleteAnalysis,
   getAnalysisById,
@@ -32,7 +34,7 @@ async function recordBlockedAttemptFor(
   userId: number,
   niche: string,
   check: { blocked: true; reason: string; dimension: "analyses" | "tokens" | "quota" } | { needsConfirmation: true; reason: string; dimension: "analyses" | "tokens" | "quota" }
-): Promise<void> {
+): Promise<number | null> {
   const limits = await getUserLimits(Number(userId));
   const limitValue =
     check.dimension === "analyses"
@@ -41,15 +43,22 @@ async function recordBlockedAttemptFor(
         ? limits.dailyTokenLimit
         : limits.dailyQuotaLimit;
   const currentUsage = await getUsageForBlock(Number(userId), check.dimension);
-  await recordBlockedAttempt({
-    userId: Number(userId),
-    dimension: check.dimension,
-    limitValue,
-    currentUsage,
-    reason: check.reason,
-    attemptedAt: Date.now(),
-    niche,
-  }).catch(() => undefined);
+  try {
+    await recordBlockedAttempt({
+      userId: Number(userId),
+      dimension: check.dimension,
+      limitValue,
+      currentUsage,
+      reason: check.reason,
+      attemptedAt: Date.now(),
+      niche,
+    });
+    // Recupera o id da tentativa recém-registrada (última do usuário/nicho).
+    const latest = await getLatestBlockedAttemptId(Number(userId), niche);
+    return latest;
+  } catch {
+    return null;
+  }
 }
 
 const inputSchema = z.object({
@@ -75,8 +84,22 @@ export const analysisRouter = router({
       throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: limitCheck.reason });
     }
     if ("needsConfirmation" in limitCheck && limitCheck.needsConfirmation) {
-      await recordBlockedAttemptFor(userId, niche, limitCheck);
-      throw new TRPCError({ code: "PRECONDITION_FAILED", message: limitCheck.reason });
+      const pendingId = await recordBlockedAttemptFor(userId, niche, limitCheck);
+      // (Rodada 38) Override de uso único autoriza a próxima análise: registra
+      // a pendência confirmada (analysisId) e executa normalmente.
+      const newAnalysisId = nanoid(14);
+      if (pendingId !== null) {
+        await confirmBlockedAttempt(pendingId, { confirmedAt: Date.now(), analysisId: newAnalysisId }).catch(() => undefined);
+      }
+      await createAnalysis({ id: newAnalysisId, userId, niche, status: "running" });
+      try {
+        const [llmConfig, imageConfig] = await Promise.all([resolveLlmConfig(userId), resolveImageConfig(userId)]);
+        await runAnalysisAsync(newAnalysisId, niche, { llmConfig, imageConfig, userId: Number(userId) });
+      } catch {
+        /* erros já gravados via updateAnalysis */
+      }
+      const final = await getAnalysisById(newAnalysisId);
+      return { id: newAnalysisId, niche, status: final?.status ?? ("failed" as const) };
     }
     const analysisId = nanoid(14);
     await createAnalysis({ id: analysisId, userId, niche, status: "running" });
@@ -120,8 +143,21 @@ export const analysisRouter = router({
         throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: limitCheck.reason });
       }
       if ("needsConfirmation" in limitCheck && limitCheck.needsConfirmation) {
-        await recordBlockedAttemptFor(userId, row.niche, limitCheck);
-        throw new TRPCError({ code: "PRECONDITION_FAILED", message: limitCheck.reason });
+        const pendingId = await recordBlockedAttemptFor(userId, row.niche, limitCheck);
+        // (Rodada 38) Override de uso único autoriza a próxima análise.
+        const newId2 = nanoid(14);
+        if (pendingId !== null) {
+          await confirmBlockedAttempt(pendingId, { confirmedAt: Date.now(), analysisId: newId2 }).catch(() => undefined);
+        }
+        await createAnalysis({ id: newId2, userId, niche: row.niche, status: "running" });
+        try {
+          const [llmConfig, imageConfig] = await Promise.all([resolveLlmConfig(userId), resolveImageConfig(userId)]);
+          await runAnalysisAsync(newId2, row.niche, { llmConfig, imageConfig, userId: Number(userId) });
+        } catch {
+          /* erros já gravados via updateAnalysis */
+        }
+        const final = await getAnalysisById(newId2);
+        return { id: newId2, niche: row.niche, status: final?.status ?? ("failed" as const) };
       }
       const newId = nanoid(14);
       await createAnalysis({ id: newId, userId, niche: row.niche, status: "running" });

@@ -342,3 +342,12 @@
 - [x] Frontend: seção "Tentativas bloqueadas" na /uso com tabela detalhada (data, dimensão, limite, consumo no momento, status confirmada/bloqueada, motivo com tooltip)
 - [x] Frontend: opção de escolha block/apenas-avisar no dialog Limites do perfil (persistida em user_limits.limitAction)
 - [x] Testes vitest (13 novos em limits-r37.test.ts e analysis-limits.test.ts; 277/277 passando), docs, skill, Obsidian rodada-37 e checkpoint final
+
+## Melhorias solicitadas (rodada 38)
+- [x] Backend: `user_limits.override_remaining` (usos restantes, 0 = nenhum) — confirmação no modo "apenas avisar" libera APENAS a próxima análise (uso único); o override consome-se após cada análise autorizada (consumeLimitOverride + getLatestBlockedAttemptId/confirmBlockedAttempt no run/retry)
+- [x] Backend: alertas proativos — tabela `usage_alerts` (dimensão, nível warn/blocked, leitura) + emitUsageAlerts (80%/100%, dedup por dia/dimensão), listUnreadUsageAlerts, markUsageAlertRead, purgeReadUsageAlerts; emitido em getLimitStatus/checkAnalysisLimits
+- [x] Backend: procedure exportUsagePdf — relatório de uso (período, resumos hoje/semana/mês, projeções semanais/mensais, limites diários, tabela diária, tentativas bloqueadas) em pdfkit
+- [x] Frontend: UsageAlertsBanner no SiteLayout (toast proativo + banners âmbar/vermelho com dismiss e link /uso) via listUsageAlerts (refetch 60s)
+- [x] Frontend: botão "Exportar PDF" na página /uso (exportUsagePdf)
+- [x] Frontend: dialog de confirmação indica uso único; toast com overrideRemaining (1 análise)
+- [x] Testes vitest (7 novos em usagePdf.test.ts + 2 corrigidos em analysis-limits.test.ts; 284/284 passando), docs, skill, Obsidian rodada-38 e checkpoint final

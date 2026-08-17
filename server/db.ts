@@ -7,9 +7,11 @@ import {
   analyses,
   blockedAttempts,
   userLimits,
+  usageAlerts,
   InsertAnalysis,
   InsertAnalysisVideo,
   InsertBlockedAttempt,
+  InsertUsageAlert,
   InsertUser,
   userSettings,
   users,
@@ -1398,6 +1400,9 @@ export type UserLimits = {
   monthlyQuotaLimit: number;
   /** (Rodada 37) Override manual válido até (epoch ms; 0 ou ausente = sem override) */
   overrideUntil?: number;
+  /** (Rodada 38) Override de uso único: análises restantes autorizadas por
+   * confirmação no modo "apenas avisar" (0 = sem override de uso único ativo) */
+  overrideRemaining?: number;
 };
 export type UsageStatus = {
   scopes: Record<string, { tokens: number; units: number; requests: number }>;
@@ -1443,6 +1448,7 @@ export async function getUserLimits(userId: number): Promise<UserLimits> {
     monthlyTokenLimit: r.monthlyTokenLimit ?? 0,
     monthlyQuotaLimit: r.monthlyQuotaLimit ?? 0,
     overrideUntil: r.overrideUntil ?? 0,
+    overrideRemaining: r.overrideRemaining ?? 0,
   };
 }
 /** Salva os limites diários do usuário (transação upsert simples). */
@@ -1464,38 +1470,66 @@ export async function setUserLimits(userId: number, limits: UserLimits): Promise
     .values({ ...clamped, userId, updatedAt: Date.now() })
     .onDuplicateKeyUpdate({ set: { ...clamped, updatedAt: Date.now() } });
 }
-/** (Rodada 37) Registro manual de confirmação: libera o bloqueio diário até a
- * meia-noite do servidor. Retorna o override gerado (epoch de validação). */
-export async function confirmLimitOverride(userId: number): Promise<{ overrideUntil: number }> {
+/** (Rodada 38) Registro manual de confirmação no modo "apenas avisar":
+ * libera o bloqueio APENAS para a próxima análise (uso único). O contador
+ * `override_remaining` é incrementado em 1; cada análise autorizada consome 1
+ * até zerar. Retorna o overrideRemaining resultante. */
+export async function confirmLimitOverride(userId: number): Promise<{ overrideUntil: number; overrideRemaining: number }> {
   const db = await getDb();
   const midnight = new Date();
   midnight.setHours(24, 0, 0, 0);
   const overrideUntil = midnight.getTime();
-  if (db) {
-    await db
-      .insert(userLimits)
-      .values({
-        userId,
-        updatedAt: Date.now(),
-        overrideUntil,
-        limitAction: "block",
-        dailyAnalysisLimit: 0,
-        dailyTokenLimit: 0,
-        dailyQuotaLimit: 0,
-        weeklyTokenLimit: 0,
-        weeklyQuotaLimit: 0,
-        monthlyTokenLimit: 0,
-        monthlyQuotaLimit: 0,
-      })
-      .onDuplicateKeyUpdate({ set: { overrideUntil, updatedAt: Date.now() } });
-  }
-  return { overrideUntil };
+  if (!db) return { overrideUntil, overrideRemaining: 1 };
+  const row = await db.select().from(userLimits).where(eq(userLimits.userId, userId)).limit(1);
+  const remaining = (row[0]?.overrideRemaining ?? 0) + 1;
+  await db
+    .insert(userLimits)
+    .values({
+      userId,
+      updatedAt: Date.now(),
+      overrideUntil,
+      overrideRemaining: remaining,
+      limitAction: "block",
+      dailyAnalysisLimit: 0,
+      dailyTokenLimit: 0,
+      dailyQuotaLimit: 0,
+      weeklyTokenLimit: 0,
+      weeklyQuotaLimit: 0,
+      monthlyTokenLimit: 0,
+      monthlyQuotaLimit: 0,
+    })
+    .onDuplicateKeyUpdate({ set: { overrideUntil, overrideRemaining: remaining, updatedAt: Date.now() } });
+  return { overrideUntil, overrideRemaining: remaining };
+}
+/** (Rodada 38) Consome 1 override de uso único autorizado. Executa apenas
+ * quando há override pendente (overrideRemaining > 0). */
+export async function consumeLimitOverride(userId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  // Decrementa em 1 sem ir abaixo de 0, apenas quando há override pendente.
+  await db
+    .update(userLimits)
+    .set({ overrideRemaining: sql<number>`GREATEST((override_remaining - 1), 0)` })
+    .where(eq(userLimits.userId, userId));
 }
 /** (Rodada 37) Registra uma tentativa bloqueada (ou confirmada depois) pelos limites. */
 export async function recordBlockedAttempt(input: InsertBlockedAttempt): Promise<void> {
   const db = await getDb();
   if (!db) return;
   await db.insert(blockedAttempts).values(input);
+}
+/** (Rodada 38) ID da tentativa bloqueada mais recente do usuário (mesmo nicho),
+ * usada para vincular a análise autorizada ao registro. */
+export async function getLatestBlockedAttemptId(userId: number, niche: string): Promise<number | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db
+    .select({ id: blockedAttempts.id })
+    .from(blockedAttempts)
+    .where(and(eq(blockedAttempts.userId, userId), eq(blockedAttempts.niche, niche)))
+    .orderBy(desc(blockedAttempts.id))
+    .limit(1);
+  return rows[0]?.id ?? null;
 }
 /** Atualiza uma tentativa bloqueada com a confirmação do usuário. */
 export async function confirmBlockedAttempt(
@@ -1588,7 +1622,7 @@ export async function getLimitStatus(userId: number): Promise<LimitStatus> {
     monthlyTokenLimit: limit.monthlyTokenLimit,
     monthlyQuotaLimit: limit.monthlyQuotaLimit,
   };
-  return {
+  const result: LimitStatus = {
     limit: daily,
     today: { analyses, tokens: today.llm.tokens, quota: quotaUnits },
     state: {
@@ -1597,6 +1631,115 @@ export async function getLimitStatus(userId: number): Promise<LimitStatus> {
       quota: evaluate(quotaUnits, limit.dailyQuotaLimit),
     },
   };
+  // (Rodada 38) Emite alerta proativo in-app quando alguma dimensão atinge
+  // 80% ou 100% — deduplicado por dia/dimensão.
+  emitUsageAlerts(userId, result.state, daily, result.today).catch(() => undefined);
+  return result;
+}
+/** (Rodada 38) Emite alertas proativos in-app para as dimensões em `warn`
+ * (>=80%) ou `blocked` (>=100%), deduplicando um alerta por dia/dimensão
+ * (dayKey). Não emite quando todos os limites relevantes são 0 (ilimitado). */
+export async function emitUsageAlerts(
+  userId: number,
+  state: LimitStatus["state"],
+  limit: LimitStatus["limit"],
+  today: LimitStatus["today"]
+): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const checks: Array<{ dimension: string; level: "warn" | "blocked"; value: number; cap: number; msg: string }> = [];
+  if (limit.dailyAnalysisLimit > 0 && state.analyses !== "ok") {
+    checks.push({
+      dimension: "analyses",
+      level: state.analyses === "blocked" ? "blocked" : "warn",
+      value: today.analyses,
+      cap: limit.dailyAnalysisLimit,
+      msg: `Você usou ${today.analyses} de ${limit.dailyAnalysisLimit} análises do dia (${state.analyses === "blocked" ? "100% — bloqueado" : "80% — atenção"}).`,
+    });
+  }
+  if (limit.dailyTokenLimit > 0 && state.tokens !== "ok") {
+    checks.push({
+      dimension: "tokens",
+      level: state.tokens === "blocked" ? "blocked" : "warn",
+      value: today.tokens,
+      cap: limit.dailyTokenLimit,
+      msg: `Tokens de LLM em ${state.tokens === "blocked" ? "100% (bloqueado" : "80%"}: ${today.tokens.toLocaleString("pt-BR")} de ${limit.dailyTokenLimit.toLocaleString("pt-BR")}.`,
+    });
+  }
+  if (limit.dailyQuotaLimit > 0 && state.quota !== "ok") {
+    checks.push({
+      dimension: "quota",
+      level: state.quota === "blocked" ? "blocked" : "warn",
+      value: today.quota,
+      cap: limit.dailyQuotaLimit,
+      msg: `Cota YouTube em ${state.quota === "blocked" ? "100% (bloqueado" : "80%"}: ${today.quota.toLocaleString("pt-BR")} de ${limit.dailyQuotaLimit.toLocaleString("pt-BR")} unidades.`,
+    });
+  }
+  for (const c of checks) {
+    const dayKey = `${todayIso}|${c.dimension}`;
+    const existing = await db
+      .select({ id: usageAlerts.id })
+      .from(usageAlerts)
+      .where(and(eq(usageAlerts.userId, userId), eq(usageAlerts.dayKey, dayKey)))
+      .limit(1);
+    if (existing.length) continue;
+    const row: InsertUsageAlert = {
+      userId,
+      dimension: c.dimension,
+      level: c.level,
+      dayKey,
+      currentUsage: c.value,
+      limitValue: c.cap,
+      message: c.msg,
+    };
+    await db.insert(usageAlerts).values(row).catch(() => undefined);
+  }
+}
+/** (Rodada 38) Alertas não lidos do usuário (mais recentes primeiro). */
+export async function listUnreadUsageAlerts(userId: number, limit = 10): Promise<
+  Array<{
+    id: number;
+    dimension: string;
+    level: string;
+    currentUsage: number;
+    limitValue: number;
+    message: string | null;
+    createdAt: Date;
+  }>
+> {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select({
+      id: usageAlerts.id,
+      dimension: usageAlerts.dimension,
+      level: usageAlerts.level,
+      currentUsage: usageAlerts.currentUsage,
+      limitValue: usageAlerts.limitValue,
+      message: usageAlerts.message,
+      createdAt: usageAlerts.createdAt,
+    })
+    .from(usageAlerts)
+    .where(and(eq(usageAlerts.userId, userId), isNull(usageAlerts.readAt)))
+    .orderBy(desc(usageAlerts.id))
+    .limit(limit);
+}
+/** (Rodada 38) Marca um alerta como lido (opcional: sem id, marca todos). */
+export async function markUsageAlertRead(alertId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(usageAlerts).set({ readAt: Date.now() }).where(eq(usageAlerts.id, alertId));
+}
+/** (Rodada 38) Limpa alertas lidos antigos (mais de 14 dias) para higiene. */
+export async function purgeReadUsageAlerts(userId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  const cutoff = Date.now() - 14 * 86_400_000;
+  await db
+    .delete(usageAlerts)
+    .where(and(eq(usageAlerts.userId, userId), not(isNull(usageAlerts.readAt)), lte(usageAlerts.readAt, cutoff - 1)))
+    .catch(() => undefined);
 }
 /** (Rodada 37) Consumo agregado por período estendido: inclui semana/mês e cota total. */
 export type UsageBudgets = {
@@ -1683,6 +1826,13 @@ export async function checkAnalysisLimits(userId: number): Promise<
 > {
   const { limit, today, state } = await getLimitStatus(userId);
   const limits = await getUserLimits(userId);
+  // (Rodada 38) Override de uso único: uma confirmação autoriza a próxima
+  // análise e o contador consome-se imediatamente.
+  const hasOneTime = (limits.overrideRemaining ?? 0) > 0;
+  if (hasOneTime) {
+    await consumeLimitOverride(userId);
+    return { blocked: false };
+  }
   const hasOverride = (limits.overrideUntil ?? 0) >= Date.now();
   const blockedDims: Array<{ dimension: "analyses" | "tokens" | "quota"; reason: string }> = [];
   if (!hasOverride && limit.dailyAnalysisLimit > 0 && today.analyses >= limit.dailyAnalysisLimit) {
