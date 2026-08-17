@@ -8,6 +8,7 @@ import {
   blockedAttempts,
   userLimits,
   usageAlerts,
+  suggestionThumbnails,
   InsertAnalysis,
   InsertAnalysisVideo,
   InsertBlockedAttempt,
@@ -1398,6 +1399,8 @@ export type UserLimits = {
   weeklyQuotaLimit: number;
   monthlyTokenLimit: number;
   monthlyQuotaLimit: number;
+  /** (Rodada 40) Teto de custo mensal em R$ (0 = sem teto). */
+  monthlyCostCapBrl: number;
   /** (Rodada 37) Override manual válido até (epoch ms; 0 ou ausente = sem override) */
   overrideUntil?: number;
   /** (Rodada 38) Override de uso único: análises restantes autorizadas por
@@ -1436,6 +1439,7 @@ export async function getUserLimits(userId: number): Promise<UserLimits> {
     weeklyQuotaLimit: 0,
     monthlyTokenLimit: 0,
     monthlyQuotaLimit: 0,
+    monthlyCostCapBrl: 0,
   };
   if (!db) return empty;
   const row = await db.select().from(userLimits).where(eq(userLimits.userId, userId)).limit(1);
@@ -1450,6 +1454,7 @@ export async function getUserLimits(userId: number): Promise<UserLimits> {
     weeklyQuotaLimit: r.weeklyQuotaLimit ?? 0,
     monthlyTokenLimit: r.monthlyTokenLimit ?? 0,
     monthlyQuotaLimit: r.monthlyQuotaLimit ?? 0,
+    monthlyCostCapBrl: r.monthlyCostCapBrl ?? 0,
     overrideUntil: r.overrideUntil ?? 0,
     overrideRemaining: r.overrideRemaining ?? 0,
   };
@@ -1467,6 +1472,7 @@ export async function setUserLimits(userId: number, limits: UserLimits): Promise
     weeklyQuotaLimit: Math.max(0, Math.floor(limits.weeklyQuotaLimit ?? 0)),
     monthlyTokenLimit: Math.max(0, Math.floor(limits.monthlyTokenLimit ?? 0)),
     monthlyQuotaLimit: Math.max(0, Math.floor(limits.monthlyQuotaLimit ?? 0)),
+    monthlyCostCapBrl: Math.max(0, Math.floor(limits.monthlyCostCapBrl ?? 0)),
   };
   await db
     .insert(userLimits)
@@ -1624,6 +1630,7 @@ export async function getLimitStatus(userId: number): Promise<LimitStatus> {
     weeklyQuotaLimit: limit.weeklyQuotaLimit,
     monthlyTokenLimit: limit.monthlyTokenLimit,
     monthlyQuotaLimit: limit.monthlyQuotaLimit,
+    monthlyCostCapBrl: limit.monthlyCostCapBrl ?? 0,
   };
   const result: LimitStatus = {
     limit: daily,
@@ -1652,7 +1659,52 @@ export async function getLimitStatus(userId: number): Promise<LimitStatus> {
   // (Rodada 38) Emite alerta proativo in-app quando alguma dimensão atinge
   // 80% ou 100% — deduplicado por dia/dimensão.
   emitUsageAlerts(userId, result.state, daily, result.today).catch(() => undefined);
+  // (Rodada 40) Emite alerta quando o teto de custo mensal (R$) é ultrapassado
+  // pela projeção pro-rata do mês (nível "blocked" a 100% do teto).
+  emitCostCapAlert(userId, limit.monthlyCostCapBrl, budgets).catch(() => undefined);
   return result;
+}
+/** (Rodada 40) Alerta in-app quando a projeção de custo do mês ultrapassa o
+ * teto definido pelo usuário (monthlyCostCapBrl > 0). Emite 1 alerta por dia
+ * (dayKey "cost_cap"); nível "warn" a ≥80% do teto e "blocked" a ≥100%. */
+export async function emitCostCapAlert(userId: number, capBrl: number, budgets: UsageBudgets): Promise<void> {
+  const db = await getDb();
+  if (!db || !capBrl || budgets.month.tokens <= 0) return;
+  let usdBrl = USD_TO_BRL;
+  try {
+    usdBrl = (await getUsdBrlRate()).value;
+  } catch { /* usa o câmbio fixo */ }
+  // Projeção pro-rata do mês: tokens LLM do período com o preço do modelo
+  // efetivo do usuário (proxy padrão do catálogo em caso de falha).
+  const monthTokens = budgets.month.tokens;
+  let avgPriceUsd = LLM_DEFAULT_PRICE_PER_MILLION;
+  try {
+    const price = await resolveLlmPrice(userId);
+    avgPriceUsd = (price.input + price.output) / 2;
+  } catch { /* proxy padrão do catálogo */ }
+  const now = new Date();
+  const daysElapsed = Math.max(1, now.getDate());
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const projectedBrl = monthTokens > 0 ? (monthTokens / 1_000_000) * avgPriceUsd * usdBrl * (daysInMonth / daysElapsed) : 0;
+  const pct = projectedBrl / capBrl;
+  const level: "warn" | "blocked" = pct >= 1 ? "blocked" : "warn";
+  if (pct < 0.8) return;
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const dayKey = `${todayIso}|cost_cap`;
+  const existing = await db.select({ id: usageAlerts.id }).from(usageAlerts).where(and(eq(usageAlerts.userId, userId), eq(usageAlerts.dayKey, dayKey))).limit(1);
+  if (existing.length) return;
+  await db
+    .insert(usageAlerts)
+    .values({
+      userId,
+      dimension: "cost_cap",
+      level,
+      dayKey,
+      currentUsage: Math.round(projectedBrl * 100) / 100,
+      limitValue: capBrl,
+      message: `Projeção de custo do mês (R$ ${projectedBrl.toFixed(2).replace(".", ",")} estimados) ultrapassou ${level === "blocked" ? "100%" : "80%"} do seu teto de R$ ${capBrl.toFixed(2).replace(".", ",")}.`,
+    })
+    .catch(() => undefined);
 }
 /** (Rodada 38) Emite alertas proativos in-app para as dimensões em `warn`
  * (>=80%) ou `blocked` (>=100%), deduplicando um alerta por dia/dimensão
@@ -2100,8 +2152,48 @@ export const LLM_MODEL_PRICES: Record<string, { input: number; output: number }>
 /** Preço padrão usado quando o modelo configurado não está no catálogo
  * (mistura conservadora de entrada/saída em USD por 1M tokens). */
 export const LLM_DEFAULT_PRICE_PER_MILLION = 1.5;
-/** Câmbio fixo USD → BRL usado na projeção de custos (atualizável aqui). */
+/** Câmbio fixo USD → BRL usado na projeção de custos (atualizável aqui
+ * e também fallback quando a API de câmbio falha). */
 export const USD_TO_BRL = 5.4;
+
+// ---------------------------------------------------------------------------
+// (Rodada 40) Câmbio dinâmico USD/BRL via API pública com cache em memória.
+// ---------------------------------------------------------------------------
+/** Cache em memória do câmbio dinâmico (key → { value, fetchedAt }). */
+const fxCache = new Map<string, { value: number; fetchedAt: number }>();
+/** Duração do cache do câmbio em ms (padrão 4h — cotação varia pouco no dia). */
+export const FX_CACHE_TTL_MS = 4 * 3600 * 1000;
+/**
+ * (Rodada 40) Busca o câmbio USD/BRL atualizado via API pública da
+ * AwesomeAPI (Banco Central). Cacheia o resultado por FX_CACHE_TTL_MS e
+ * faz fallback para o câmbio fixo USD_TO_BRL em caso de erro.
+ * O parâmetro `now` facilita testes com fake timers.
+ */
+export async function getUsdBrlRate(now: () => number = () => Date.now()): Promise<{ value: number; source: "api" | "cache" | "fallback" }> {
+  const key = "usd_brl";
+  const cached = fxCache.get(key);
+  if (cached && now() - cached.fetchedAt < FX_CACHE_TTL_MS) {
+    return { value: cached.value, source: "cache" };
+  }
+  try {
+    const res = await fetch("https://economia.awesomeapi.com.br/last/USD-BRL");
+    if (!res.ok) throw new Error(`http_${res.status}`);
+    const json = (await res.json()) as { USDBRL?: { bid?: string } };
+    const bid = Number(json?.USDBRL?.bid);
+    if (!Number.isFinite(bid) || bid <= 0) throw new Error("bad_bid");
+    fxCache.set(key, { value: bid, fetchedAt: now() });
+    return { value: bid, source: "api" };
+  } catch {
+    // Fallback para o câmbio fixo em qualquer falha de rede/API.
+    const value = USD_TO_BRL;
+    fxCache.set(key, { value, fetchedAt: now() });
+    return { value, source: "fallback" };
+  }
+}
+/** Remove o cache do câmbio (usado em testes e em invalidação manual). */
+export function clearFxCache() {
+  fxCache.delete("usd_brl");
+}
 /** Modelo padrão quando nenhum provider/override estiver configurado (Forge). */
 export const LLM_DEFAULT_MODEL = "gpt-4o-mini";
 /** (Rodada 39) Estima o custo de tokens em R$: usa preço médio
@@ -2117,6 +2209,34 @@ export function estimateTokensCostBrl(input: {
   const usdBrl = input.usdBrl ?? USD_TO_BRL;
   const costBrl = (tokens / 1_000_000) * avgPriceUsd * usdBrl;
   return { costBrl, tokensPerMillion: tokens / 1_000_000, avgPriceUsd };
+}
+/** (Rodada 40) Preço estimado por imagem gerada em USD. Thumbnails usam DALL-E
+ * 3 (`dall-e-3` landscape, 1024×1024 — padrão do template e do Forge). */
+export const IMAGE_PRICE_PER_GENERATION_USD = 0.04;
+/** Resolve o modelo de imagem configurado pelo usuário ou o padrão. */
+export async function resolveImageModel(userId: number): Promise<{ model: string; from: "settings" | "default" }> {
+  const settings = await getProviderSettings(userId);
+  if (settings.imageModel) return { model: settings.imageModel, from: "settings" };
+  return { model: "dall-e-3", from: "default" };
+}
+/** Conta as thumbnails geradas no mês corrente (por análise criada no mês). */
+export async function countMonthThumbnails(userId: number): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const monthStart = new Date(Date.UTC(new Date().getFullYear(), new Date().getMonth(), 1));
+  const ids = await db
+    .select({ id: analyses.id })
+    .from(analyses)
+    .where(and(eq(analyses.userId, userId), gte(analyses.createdAt, monthStart)))
+    .limit(500)
+    .catch(() => []);
+  if (!ids.length) return 0;
+  const rows = await db
+    .select({ id: suggestionThumbnails.id })
+    .from(suggestionThumbnails)
+    .where(inArray(suggestionThumbnails.analysisId, ids.map(r => r.id)))
+    .catch(() => []);
+  return rows.length;
 }
 /** Resolve o modelo LLM efetivo do usuário: override por settings, env ou padrão. */
 export async function resolveLlmModel(userId: number): Promise<{ model: string; from: "settings" | "env" | "default" }> {
@@ -2148,14 +2268,31 @@ export async function estimateMonthlyCostBrl(userId: number): Promise<{
   /** Projeção pro-rata do mês inteiro pelo ritmo do dia 1 até hoje */
   projectedMonthCostBrl: number | null;
   daysElapsed: number;
+  /** (Rodada 40) Câmbio efetivo usado na projeção (API dinâmica ou fallback). */
+  usdBrl: number;
+  fxSource: "api" | "cache" | "fallback";
+  /** (Rodada 40) Thumbnails geradas no mês e custo estimado em R$. */
+  monthThumbnails: number;
+  imageCostBrl: number;
+  imageModel: string;
+  imageModelFrom: "settings" | "default";
+  /** (Rodada 40) Custo total do mês até hoje (tokens LLM + thumbnails). */
+  totalMonthCostBrl: number;
 }> {
-  const [budgets, price] = await Promise.all([getUsageBudgets(userId), resolveLlmPrice(userId)]);
+  const [budgets, price, fx] = await Promise.all([
+    getUsageBudgets(userId),
+    resolveLlmPrice(userId),
+    getUsdBrlRate(),
+  ]);
   const monthTokens = budgets.month.tokens;
-  const { costBrl } = estimateTokensCostBrl({ tokens: monthTokens, pricePerMillionInput: price.input, pricePerMillionOutput: price.output });
+  const { costBrl } = estimateTokensCostBrl({ tokens: monthTokens, pricePerMillionInput: price.input, pricePerMillionOutput: price.output, usdBrl: fx.value });
+  const imageModel = await resolveImageModel(userId);
+  const monthThumbnails = await countMonthThumbnails(userId);
+  const imageCostBrl = monthThumbnails * IMAGE_PRICE_PER_GENERATION_USD * fx.value;
   const now = new Date();
   const daysElapsed = Math.max(1, now.getDate());
   const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  const projectedMonthCostBrl = daysElapsed >= daysInMonth ? null : costBrl * (daysInMonth / daysElapsed);
+  const projectedMonthCostBrl = daysElapsed >= daysInMonth ? null : (costBrl + imageCostBrl) * (daysInMonth / daysElapsed);
   return {
     model: price.model,
     priceFrom: price.from,
@@ -2164,5 +2301,14 @@ export async function estimateMonthlyCostBrl(userId: number): Promise<{
     monthCostBrl: costBrl,
     projectedMonthCostBrl,
     daysElapsed,
+    /** (Rodada 40) Câmbio efetivo usado na projeção (API dinâmica ou fallback). */
+    usdBrl: fx.value,
+    fxSource: fx.source,
+    /** (Rodada 40) Thumbnails geradas no mês e custo estimado. */
+    monthThumbnails,
+    imageCostBrl,
+    imageModel: imageModel.model,
+    imageModelFrom: imageModel.from,
+    totalMonthCostBrl: costBrl + imageCostBrl,
   };
 }

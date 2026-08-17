@@ -359,3 +359,11 @@
 - [x] Frontend: card "Custo estimado de LLM (mês corrente)" na /uso (R$ até hoje + projeção do mês, badge do modelo com origem do preço e nota do câmbio 5,40)
 - [x] Frontend: texto do modo "Apenas avisar" no dialog Limites atualizado para mencionar limites semanais e mensais (mesmo aviso, mesmo mecanismo de uso único)
 - [x] Testes vitest (4 novos em limits-r39-pure.test.ts, 13 em limits-r39.test.ts, 4 corrigidos/novos em usagePdf.test.ts + 3 em analysis-limits.test.ts; 305/305 passando), docs, skill, Obsidian rodada-39 e checkpoint final
+
+## Melhorias solicitadas (rodada 40)
+- [x] Backend: câmbio USD/BRL dinâmico via API pública (ex.: awesomeapi.com.br) com cache de N horas e fallback para o câmbio fixo 5,40 (USD_TO_BRL); integrate em estimateTokensCostBrl/estimateMonthlyCostBrl
+- [x] Backend: coluna `monthly_cost_cap_brl` em `user_limits` (0 = sem teto) + procedures getLimits/setLimits; helper de emissão de alerta (reuse usage_alerts com dimension "cost") quando a projeção do mês ultrapassa o teto
+- [x] Backend: custos de thumbnail — agregar custos de geração de imagem do mês (usage_api_log de imagens) e seção "Custos de thumbnail" no buildUsagePdf (contagem, custo estimado por imagem do modelo configurado)
+- [x] Frontend: campo "Teto de custo mensal (R$)" no dialog Limites do perfil (com tooltip explicando o alerta a 100% da projeção)
+- [x] Frontend: banner/toast de alerta quando a projeção do mês ultrapassa o teto (reuso do padrão UsageAlertsBanner/listUsageAlerts)
+- [x] Testes vitest (câmbio com cache/fallback, teto de custo, alerta, PDF com thumbnails), docs, skill, Obsidian rodada-40 e checkpoint final

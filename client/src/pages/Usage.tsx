@@ -130,6 +130,10 @@ export default function Usage() {
     enabled: isAuthenticated,
     staleTime: 30_000,
   });
+  /** (Rodada 40) Teto de custo mensal do usuário e projeção que o ultrapassa. */
+  const costCapBrl = limits?.monthlyCostCapBrl ?? 0;
+  const costProjected = costQuery.data?.projectedMonthCostBrl ?? null;
+  const costOverCapBrl = costProjected !== null && costProjected > costCapBrl ? costProjected : null;
   const isAnalysisWarn = limits?.state.analyses === "warn";
   const isAnalysisBlocked = limits?.state.analyses === "blocked";
   const isTokenWarn = limits?.state.tokens === "warn";
@@ -161,14 +165,16 @@ export default function Usage() {
                 <SelectItem value="90">90 dias</SelectItem>
               </SelectContent>
             </Select>
+            {costOverCapBrl !== null && <CostCapBanner totalBrl={costOverCapBrl} capBrl={costCapBrl ?? 0} />}
             <Button
               variant="outline"
               size="sm"
               onClick={() => {
                 seriesQuery.refetch();
                 limitsQuery.refetch();
+                costQuery.refetch();
               }}
-              disabled={seriesQuery.isRefetching || limitsQuery.isRefetching}
+              disabled={seriesQuery.isRefetching || limitsQuery.isRefetching || costQuery.isRefetching}
             >
               {seriesQuery.isRefetching || limitsQuery.isRefetching ? (
                 <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
@@ -624,6 +630,25 @@ function PeriodCard(props: { icon: React.ReactNode; label: string; value: string
   );
 }
 
+/** (Rodada 40) Banner de alerta: a projeção do custo do mês ultrapassa o teto definido pelo usuário. */
+function CostCapBanner(props: { totalBrl: number; capBrl: number }) {
+  return (
+    <div className="w-full rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3">
+      <div className="flex items-start gap-3">
+        <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-400" />
+        <div className="flex-1">
+          <p className="text-sm font-semibold text-red-300">Projeção de custo acima do seu teto mensal</p>
+          <p className="mt-0.5 text-xs text-red-200/80">
+            Pelo ritmo atual, o custo estimado do mês deve atingir {fmtBrl(props.totalBrl)}, ultrapassando o teto
+            configurado de {fmtBrl(props.capBrl)}. Reduza a frequência das análises ou ajuste o teto em "Limites"
+            para acompanhar de perto.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function formatDayPeak(data: Array<{ fullDate: string; tokens: number }>): string {
   const peak = data.reduce((best, r) => (r.tokens > best.tokens ? r : best), { fullDate: "", tokens: 0 });
   return peak.fullDate ? formatDate(new Date(`${peak.fullDate}T00:00:00`).getTime()) : "—";
@@ -645,18 +670,36 @@ const fmtBrl = (v: number) =>
 
 /** (Rodada 39) Card de custo estimado do consumo de LLM do mês corrente em R$,
  * com projeção pro-rata do mês completo e badge do modelo de preço utilizado. */
-function CostEstimateCard(props: { cost?: { model: string; priceFrom: string; fallback: boolean; monthTokens: number; monthCostBrl: number; projectedMonthCostBrl: number | null; daysElapsed: number }; isLoading: boolean }) {
+function CostEstimateCard(props: {
+  cost?: {
+    model: string;
+    priceFrom: string;
+    fallback: boolean;
+    monthTokens: number;
+    monthCostBrl: number;
+    projectedMonthCostBrl: number | null;
+    daysElapsed: number;
+    usdBrl: number;
+    fxSource: string;
+    monthThumbnails: number;
+    imageCostBrl: number;
+    imageModel: string;
+    imageModelFrom: string;
+    totalMonthCostBrl: number;
+  };
+  isLoading: boolean;
+}) {
   const { cost, isLoading } = props;
   return (
     <Card className="border-border/60">
       <CardHeader className="pb-2">
         <CardTitle className="text-lg flex items-center gap-2">
           <DollarSign className="h-5 w-5 text-emerald-400" />
-          Custo estimado de LLM (mês corrente)
+          Custo estimado do mês corrente
         </CardTitle>
         <CardDescription>
-          Projeção do custo mensal do consumo de tokens de LLM em Reais, com câmbio fixo de referência e o preço de entrada
-          por milhão de tokens do modelo configurado.
+          Projeção do custo mensal do consumo de tokens de LLM e das thumbnails geradas em Reais, com câmbio USD/BRL
+          atualizado automaticamente e o preço de entrada por milhão de tokens do modelo configurado.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -691,10 +734,26 @@ function CostEstimateCard(props: { cost?: { model: string; priceFrom: string; fa
                     : "mês em curso sem projeção pro-rata"}
                 </p>
               </div>
+              <div className="text-right">
+                <p className="text-sm font-semibold">{fmtBrl(cost.totalMonthCostBrl)}</p>
+                <p className="text-xs text-muted-foreground">total até hoje (tokens + thumbnails)</p>
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-lg bg-secondary/60 p-3">
+                <p className="text-xs text-muted-foreground">Tokens de LLM</p>
+                <p className="text-sm font-semibold">{cost.monthTokens.toLocaleString("pt-BR")} tokens</p>
+                <p className="text-xs text-muted-foreground mt-1">{fmtBrl(cost.monthCostBrl)} · modelo {cost.model}</p>
+              </div>
+              <div className="rounded-lg bg-secondary/60 p-3">
+                <p className="text-xs text-muted-foreground">Thumbnails geradas</p>
+                <p className="text-sm font-semibold">{cost.monthThumbnails.toLocaleString("pt-BR")} imagens</p>
+                <p className="text-xs text-muted-foreground mt-1">{fmtBrl(cost.imageCostBrl)} · modelo {cost.imageModel}</p>
+              </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              Tokens consumidos no mês: {cost.monthTokens.toLocaleString("pt-BR")} · câmbio de referência: 1 USD = 5,40 BRL.
-              A cota do YouTube não gera custo variável direto nesta aplicação. Se o modelo não estiver no catálogo
+              Câmbio USD/BRL: 1 USD = {cost.usdBrl.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 4 })} BRL
+              {cost.fxSource === "api" ? " (cotação atualizada via API pública)" : " (referência em caso de indisponibilidade da cotação)"}. A cota do YouTube não gera custo variável direto nesta aplicação. Se o modelo não estiver no catálogo
               interno, um preço estimado é aplicado como fallback.
             </p>
           </>

@@ -14,7 +14,6 @@ import {
   getUserStats,
   projectExhaustion,
   estimateMonthlyCostBrl,
-  USD_TO_BRL,
   LLM_MODEL_PRICES,
   LLM_DEFAULT_PRICE_PER_MILLION,
   setProviderSettings,
@@ -267,6 +266,8 @@ export const profileRouter = router({
       weeklyQuotaLimit: limits.weeklyQuotaLimit,
       monthlyTokenLimit: limits.monthlyTokenLimit,
       monthlyQuotaLimit: limits.monthlyQuotaLimit,
+      /** (Rodada 40) Teto de custo mensal em R$ (0 = sem teto). */
+      monthlyCostCapBrl: limits.monthlyCostCapBrl,
       overrideUntil: limits.overrideUntil,
       /** (Rodada 38) Análises restantes autorizadas por confirmação de uso único */
       overrideRemaining: limits.overrideRemaining ?? 0,
@@ -306,6 +307,8 @@ export const profileRouter = router({
         weeklyQuotaLimit: z.number().int().min(0).max(5_000_000).optional(),
         monthlyTokenLimit: z.number().int().min(0).max(5_000_000).optional(),
         monthlyQuotaLimit: z.number().int().min(0).max(5_000_000).optional(),
+        /** (Rodada 40) Teto de custo mensal em R$ (0 = sem teto). */
+        monthlyCostCapBrl: z.number().int().min(0).max(10_000).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -318,6 +321,7 @@ export const profileRouter = router({
         weeklyQuotaLimit: input.weeklyQuotaLimit ?? 0,
         monthlyTokenLimit: input.monthlyTokenLimit ?? 0,
         monthlyQuotaLimit: input.monthlyQuotaLimit ?? 0,
+        monthlyCostCapBrl: input.monthlyCostCapBrl ?? 0,
       });
       return { ok: true } as const;
     }),
@@ -330,7 +334,6 @@ export const profileRouter = router({
     const cost = await estimateMonthlyCostBrl(ctx.user.id);
     return {
       ...cost,
-      usdBrl: USD_TO_BRL,
       catalog: LLM_MODEL_PRICES,
       fallbackPrice: LLM_DEFAULT_PRICE_PER_MILLION,
     };

@@ -65,7 +65,8 @@ const db = vi.hoisted(() => ({
     daysLeft: 5,
     exhausted: false,
   }),
-  // (Rodada 39) projeção de custo mensal de LLM em R$.
+  // (Rodada 39/40) projeção de custo mensal de LLM em R$, com câmbio dinâmico
+  // e custos de thumbnails.
   estimateMonthlyCostBrl: vi.fn().mockResolvedValue({
     model: "gpt-4.1-mini",
     priceFrom: "catalog",
@@ -74,6 +75,13 @@ const db = vi.hoisted(() => ({
     monthCostBrl: 1.04,
     projectedMonthCostBrl: 2.15,
     daysElapsed: 15,
+    usdBrl: 5.62,
+    fxSource: "api",
+    monthThumbnails: 4,
+    imageCostBrl: 1.22,
+    imageModel: "dall-e-3",
+    imageModelFrom: "default",
+    totalMonthCostBrl: 2.26,
   }),
 }));
 vi.mock("./db", () => db);
@@ -187,6 +195,13 @@ describe("buildUsagePdf (Rodada 38)", () => {
         monthCostBrl: 1.04,
         projectedMonthCostBrl: null,
         daysElapsed: 31,
+        usdBrl: 5.62,
+        fxSource: "api",
+        monthThumbnails: 0,
+        imageCostBrl: 0,
+        imageModel: "dall-e-3",
+        imageModelFrom: "default",
+        totalMonthCostBrl: 1.04,
       });
       const text = pdfText(await buildUsagePdf(12, 30));
       expect(text).toContain("sem projeção pro-rata");
@@ -237,6 +252,46 @@ describe("buildUsagePdf (Rodada 38)", () => {
       });
       const text = pdfText(await buildUsagePdf(12, 30));
       expect(text).toContain("Nenhum consumo registrado no período");
+    });
+  });
+
+  describe("(Rodada 40) custos de thumbnails e câmbio dinâmico", () => {
+    it("inclui a seção de custos de thumbnails no PDF", async () => {
+      const text = pdfText(await buildUsagePdf(12, 30));
+      const compact = text.replace(/[\s ]/g, "").toUpperCase();
+      expect(compact).toContain("CUSTODETHUMBNAILSGERADAS");
+      expect(compact).toContain("DALL-E-3");
+      expect(text).toContain("1,22");
+      expect(text).toContain("2,26");
+      expect(text).toContain("4");
+    });
+
+    it("mostra o câmbio USD/BRL dinâmico quando a cotação vem da API", async () => {
+      const text = pdfText(await buildUsagePdf(12, 30));
+      expect(text).toContain("5,62");
+      expect(text).toContain("via API pública");
+    });
+
+    it("mostra 'fallback' no rodapé do câmbio quando a fonte não é a API", async () => {
+      db.estimateMonthlyCostBrl.mockResolvedValueOnce({
+        model: "gpt-4.1-mini",
+        priceFrom: "catalog",
+        fallback: false,
+        monthTokens: 48000,
+        monthCostBrl: 1.04,
+        projectedMonthCostBrl: 2.15,
+        daysElapsed: 15,
+        usdBrl: 5.4,
+        fxSource: "fallback",
+        monthThumbnails: 0,
+        imageCostBrl: 0,
+        imageModel: "dall-e-3",
+        imageModelFrom: "default",
+        totalMonthCostBrl: 1.04,
+      });
+      const text = pdfText(await buildUsagePdf(12, 30));
+      expect(text).toContain("5,40");
+      expect(text).not.toContain("via API pública");
     });
   });
 });

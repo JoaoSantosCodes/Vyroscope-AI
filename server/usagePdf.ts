@@ -125,6 +125,8 @@ export async function buildUsagePdf(userId: number, days = 30): Promise<Buffer> 
       doc.text(`Consumo do mês: ${cost.monthTokens.toLocaleString("pt-BR")} tokens`, 54, doc.y);
       doc.text(`Custo até hoje: ${fmtBrl(cost.monthCostBrl)}`, 300, doc.y);
       doc.y += 16;
+      doc.fillColor(COLORS.gray).fontSize(9).text(`Câmbio USD/BRL: ${cost.usdBrl.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 4 })} (cotação atualizada${cost.fxSource === "api" ? ": via API pública" : ""} · fallback: 5,40)`, 54, doc.y);
+      doc.y += 16;
       const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
       if (cost.projectedMonthCostBrl !== null) {
         doc.fillColor(COLORS.amber).fontSize(10).text(
@@ -136,10 +138,27 @@ export async function buildUsagePdf(userId: number, days = 30): Promise<Buffer> 
       } else {
         doc.fillColor(COLORS.gray).fontSize(10).text("Fim do mês: sem projeção pro-rata.", 54, doc.y);
       }
-      doc.y += 22;
+      doc.y += 20;
+
+      // ===== Custos de thumbnails (Rodada 40) =====
+      doc.fillColor(COLORS.dark).rect(0, doc.y + 24, doc.page.width, 36).fill();
+      doc.fillColor(COLORS.amber).fontSize(13).font("Helvetica-Bold").text("Custo de thumbnails geradas (mês corrente)", 54, doc.y + 34);
+      doc.y += 74;
+      doc.fillColor(COLORS.light).fontSize(10).text("Modelo de imagem: " + cost.imageModel + (cost.imageModelFrom === "settings" ? " (configurado por você)" : " (padrão dall-e-3)"), 54, doc.y);
+      doc.y += 16;
+      doc.text(`Thumbnails geradas no mês: ${cost.monthThumbnails.toLocaleString("pt-BR")}`, 54, doc.y);
+      doc.text(`Custo estimado: ${fmtBrl(cost.imageCostBrl)} (USD 0,04/geração)`, 300, doc.y);
+      doc.y += 16;
+      doc.fillColor(COLORS.amber).fontSize(10).text(
+        `Custo total do mês até hoje (tokens LLM + thumbnails): ${fmtBrl(cost.totalMonthCostBrl)}`,
+        54,
+        doc.y,
+        { width: doc.page.width - 108 }
+      );
+      doc.y += 26;
 
       // ===== Gráfico de consumo diário (Rodada 39) =====
-      if (doc.y > doc.page.height - 180) doc.addPage();
+      if (doc.y > doc.page.height - 200) doc.addPage();
       doc.fillColor(COLORS.dark).rect(0, doc.y + 24, doc.page.width, 36).fill();
       doc.fillColor(COLORS.amber).fontSize(13).font("Helvetica-Bold").text("Gráfico de consumo diário", 54, doc.y + 34);
       doc.y += 74;

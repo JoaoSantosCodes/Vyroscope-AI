@@ -28,6 +28,9 @@ export const userLimits = mysqlTable("user_limits", {
   weeklyQuotaLimit: int("weekly_quota_limit").notNull().default(0),
   monthlyTokenLimit: int("monthly_token_limit").notNull().default(0),
   monthlyQuotaLimit: int("monthly_quota_limit").notNull().default(0),
+  /** (Rodada 40) Teto de custo mensal em R$ (0 = sem teto): a projeção de
+   * custo do mês >= 80%/100% do teto dispara alerta in-app (dimensão cost_cap). */
+  monthlyCostCapBrl: int("monthly_cost_cap_brl").notNull().default(0),
   /** (Rodada 37) Confirmação manual do usuário válida até a meia-noite
    * (epoch ms). Quando >= agora, o bloqueio diário é temporariamente liberado. */
   overrideUntil: bigint("override_until", { mode: "number" }).notNull().default(0),

@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { formatDate } from "@/lib/score";
 import { trpc } from "@/lib/trpc";
 import { LimitAlertsBanner } from "@/pages/Usage";
-import { BarChart3, Clapperboard, Gauge, Loader2, Radar, RefreshCw, Save, ShieldCheck, Settings2, ShieldAlert, UserRound, Zap } from "lucide-react";
+import { BarChart3, Clapperboard, DollarSign, Gauge, Loader2, Radar, RefreshCw, Save, ShieldCheck, Settings2, ShieldAlert, UserRound, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
@@ -149,6 +149,8 @@ export default function Profile() {
   const [weeklyQuotaLimit, setWeeklyQuotaLimit] = useState("");
   const [monthlyTokenLimit, setMonthlyTokenLimit] = useState("");
   const [monthlyQuotaLimit, setMonthlyQuotaLimit] = useState("");
+  /** (Rodada 40) Teto de custo mensal em R$ (0 = sem teto). */
+  const [monthlyCostCapBrl, setMonthlyCostCapBrl] = useState("");
   const [limitAction, setLimitAction] = useState<"block" | "warn">("block");
   useEffect(() => {
     if (limitsDialogOpen && limitsQuery.data) {
@@ -160,6 +162,7 @@ export default function Profile() {
       setWeeklyQuotaLimit(limit.weeklyQuotaLimit > 0 ? String(limit.weeklyQuotaLimit) : "");
       setMonthlyTokenLimit(limit.monthlyTokenLimit > 0 ? String(limit.monthlyTokenLimit) : "");
       setMonthlyQuotaLimit(limit.monthlyQuotaLimit > 0 ? String(limit.monthlyQuotaLimit) : "");
+      setMonthlyCostCapBrl((limit.monthlyCostCapBrl ?? 0) > 0 ? String(limit.monthlyCostCapBrl) : "");
       setLimitAction(limit.limitAction ?? "block");
     }
   }, [limitsDialogOpen, limitsQuery.data]);
@@ -187,8 +190,9 @@ export default function Profile() {
     const wQuota = parse(weeklyQuotaLimit, 5_000_000);
     const mTokens = parse(monthlyTokenLimit, 5_000_000);
     const mQuota = parse(monthlyQuotaLimit, 5_000_000);
-    if ([analyses, tokens, quota, wTokens, wQuota, mTokens, mQuota].some((n) => n < 0)) {
-      toast.error("Valores inválidos: use números inteiros positivos (0 = ilimitado).");
+    const mCap = parse(monthlyCostCapBrl, 10_000);
+    if ([analyses, tokens, quota, wTokens, wQuota, mTokens, mQuota, mCap].some((n) => n < 0)) {
+      toast.error("Valores inválidos: use números inteiros positivos (0 = ilimitado/sem teto).");
       return;
     }
     setLimitsMutation.mutate({
@@ -200,6 +204,7 @@ export default function Profile() {
       weeklyQuotaLimit: wQuota,
       monthlyTokenLimit: mTokens,
       monthlyQuotaLimit: mQuota,
+      monthlyCostCapBrl: mCap,
     });
   };
 
@@ -567,6 +572,27 @@ export default function Profile() {
                         />
                         <p className="text-xs text-muted-foreground">
                           Acompanhado na página de uso (do dia 1 ao dia de hoje) com projeção de esgotamento.
+                        </p>
+                      </div>
+                      {/* (Rodada 40) Teto de custo mensal em R$ */}
+                      <div className="space-y-2 sm:col-span-2">
+                        <Label htmlFor="limit-monthly-cost-cap" className="flex items-center gap-2">
+                          <DollarSign className="h-4 w-4 text-emerald-400" />
+                          Teto de custo mensal (R$)
+                        </Label>
+                        <Input
+                          id="limit-monthly-cost-cap"
+                          type="number"
+                          min={0}
+                          max={10000}
+                          value={monthlyCostCapBrl}
+                          onChange={(e) => setMonthlyCostCapBrl(e.target.value)}
+                          placeholder="0 = sem teto"
+                          disabled={setLimitsMutation.isPending}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Quando a projeção do custo do mês (tokens LLM + thumbnails) ultrapassar este teto, a página
+                          de uso exibe um alerta visual. Use 0 ou deixe vazio para desativar. Máximo: R$ 10.000.
                         </p>
                       </div>
                     </div>
