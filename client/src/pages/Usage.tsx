@@ -39,9 +39,12 @@ import { useMemo, useState } from "react";
 import {
   Bar,
   CartesianGrid,
+  Cell,
   ComposedChart,
   Legend,
   Line,
+  Pie,
+  PieChart,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -50,6 +53,9 @@ import {
 } from "recharts";
 import { toast } from "sonner";
 import SiteLayout from "../components/SiteLayout";
+
+/** (Rodada 44) Paleta fixa para o gráfico de proporção semanal por modelo. */
+const WEEK_MODEL_COLORS = ["#E8A33D", "#3D6FE8", "#4C9F70", "#C75454", "#8A8A95", "#B088E8"];
 
 type DaysRange = 7 | 14 | 30 | 60 | 90;
 
@@ -880,10 +886,57 @@ function WeeklyCostCapCard(props: {
                   ? `${fmt(totalWeekCostBrl)} — 80% do teto alcançado (${Math.round(pct)}%). Ajuste o teto ou aguarde a janela deslizar.` :
                   `${fmt(totalWeekCostBrl)} — ${Math.round(pct)}% do teto semanal.`}
             </p>
-            {/* (Rodada 43) Detalhamento visual do custo semanal por modelo de IA. */}
+            {/* (Rodada 43/44) Detalhamento visual do custo semanal por modelo de IA
+              * + gráfico de proporção (donut) dos gastos entre os modelos. */}
             {weekCostByModel.length > 0 && (
               <>
                 <p className="pt-2 text-xs font-semibold text-foreground">Detalhamento semanal por modelo de IA</p>
+                {/* (Rodada 44) Proporção dos gastos semanais entre os modelos. */}
+                {weekCostByModel.filter((m) => m.costBrl > 0).length > 0 && (
+                  <div className="flex flex-col items-center gap-2 pt-1">
+                    <ResponsiveContainer width="100%" height={180}>
+                      <PieChart>
+                        <Pie
+                          data={weekCostByModel.map((m) => ({ name: m.model, value: m.costBrl }))}
+                          dataKey="value"
+                          nameKey="name"
+                          innerRadius={48}
+                          outerRadius={72}
+                          paddingAngle={2}
+                          stroke="transparent"
+                          label={(entry: { name?: string; percent?: number }) =>
+                            entry.percent != null ? `${(entry.percent * 100).toFixed(0)}%` : ""
+                          }
+                          labelLine={false}
+                        >
+                          {weekCostByModel.map((m, i) => (
+                            <Cell key={m.model} fill={WEEK_MODEL_COLORS[i % WEEK_MODEL_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          formatter={(value: number, name: string) => [
+                            value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
+                            name,
+                          ]}
+                          contentStyle={{ backgroundColor: "#16161D", border: "1px solid #2a2a36", borderRadius: 8 }}
+                          itemStyle={{ color: "#E9E9EE" }}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <p className="text-[10px] text-muted-foreground">Proporção dos gastos semanais por modelo (R$).</p>
+                    <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 pt-1">
+                      {weekCostByModel.map((m, i) => (
+                        <span key={m.model} className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                          <span
+                            className="inline-block h-2.5 w-2.5 rounded-full"
+                            style={{ backgroundColor: WEEK_MODEL_COLORS[i % WEEK_MODEL_COLORS.length] }}
+                          />
+                          {m.model}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <Table>
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">

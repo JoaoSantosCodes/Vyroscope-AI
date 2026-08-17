@@ -39,6 +39,10 @@ export const userLimits = mysqlTable("user_limits", {
    * "block" bloqueia novas gerações automaticamente; "warn" pede confirmação
    * de uso único; "alert" apenas notifica sem bloquear. */
   weeklyCostCapAction: varchar("weekly_cost_cap_action", { length: 8 }).default("warn").notNull(),
+  /** (Rodada 44) Limite de custo por análise individual em R$ (0 = sem limite):
+   * quando o custo real de uma análise concluída ultrapassa o limite, um alerta
+   * in-app é registrado (dimensão "analysis_cost"). */
+  analysisCostCapBrl: int("analysis_cost_cap_brl").notNull().default(0),
   /** (Rodada 41) Ação ao atingir o teto de custo mensal (100% da projeção):
    * "block" bloqueia novas gerações automaticamente; "warn" pede confirmação
    * de uso único (padrão da R38/R39); "alert" apenas notifica sem bloquear. */

@@ -287,6 +287,8 @@ export const profileRouter = router({
       /** (Rodada 42) Ação do teto de custo semanal: "block" = bloqueia automaticamente;
        * "warn" = pede confirmação; "alert" = apenas notifica. */
       weeklyCostCapAction: limits.weeklyCostCapAction,
+      /** (Rodada 44) Limite de custo por análise individual em R$ (0 = sem limite). */
+      analysisCostCapBrl: limits.analysisCostCapBrl ?? 0,
       overrideUntil: limits.overrideUntil,
       /** (Rodada 38) Análises restantes autorizadas por confirmação de uso único */
       overrideRemaining: limits.overrideRemaining ?? 0,
@@ -336,6 +338,10 @@ export const profileRouter = router({
         /** (Rodada 42) Ação do teto de custo semanal: "block" = bloqueia automaticamente;
          * "warn" = pede confirmação; "alert" = apenas notifica. */
         weeklyCostCapAction: z.enum(["block", "warn", "alert"]).optional(),
+        /** (Rodada 44) Limite de custo por análise individual em R$ (0 = sem limite):
+         * quando o custo real de uma análise ultrapassa o limite, um alerta in-app
+         * é registrado (dimensão "analysis_cost"). */
+        analysisCostCapBrl: z.number().int().min(0).max(1_000).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -352,6 +358,7 @@ export const profileRouter = router({
         costCapAction: input.costCapAction ?? "warn",
         weeklyCostCapBrl: input.weeklyCostCapBrl ?? 0,
         weeklyCostCapAction: input.weeklyCostCapAction ?? "warn",
+        analysisCostCapBrl: input.analysisCostCapBrl ?? 0,
       });
       return { ok: true } as const;
     }),
@@ -379,6 +386,8 @@ export const profileRouter = router({
       weekFxSource: week.fxSource,
       catalog: LLM_MODEL_PRICES,
       fallbackPrice: LLM_DEFAULT_PRICE_PER_MILLION,
+      /** (Rodada 44) Limite de custo por análise individual em R$ (0 = sem limite). */
+      analysisCostCapBrl: (await getUserLimits(ctx.user.id)).analysisCostCapBrl ?? 0,
     };
   }),
   /**

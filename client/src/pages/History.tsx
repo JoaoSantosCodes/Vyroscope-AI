@@ -31,6 +31,10 @@ export default function History() {
 
   const listQuery = trpc.analysis.list.useQuery(undefined, { enabled: isAuthenticated });
 
+  /** (Rodada 44) Limite de custo por análise individual para o alerta visual. */
+  const costQuery = trpc.profile.getUsageCost.useQuery(undefined, { enabled: isAuthenticated });
+  const analysisCostCapBrl = costQuery.data?.analysisCostCapBrl ?? 0;
+
   // (Rodada 43) Ordenação e filtro de faixa de custo do histórico. A escolha é
   // persistida em localStorage para sobreviver a recargas da página.
   type CostSort = "recent" | "highest" | "lowest";
@@ -294,6 +298,13 @@ export default function History() {
                         </TooltipTrigger>
                         <TooltipContent side="bottom" className="max-w-sm space-y-1">
                           <p className="text-xs">{row.costDetail ?? "Custo estimado da análise"}</p>
+                          {/* (Rodada 44) Alerta quando a análise ultrapassa o limite de custo por análise. */}
+                          {analysisCostCapBrl > 0 && (row.costBrl ?? 0) > analysisCostCapBrl && (
+                            <p className="text-[11px] font-semibold text-amber-400">
+                              Acima do seu limite de custo por análise (R${" "}
+                              {analysisCostCapBrl.toFixed(2).replace(".", ",")})
+                            </p>
+                          )}
                           {/* (Rodada 43) Custo exato de cada thumbnail gerada */}
                           {(row.thumbnails ?? []).length > 0 && (
                             <div className="border-t border-border/50 pt-1.5">

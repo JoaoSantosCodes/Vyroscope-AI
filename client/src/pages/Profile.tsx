@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { formatDate } from "@/lib/score";
 import { trpc } from "@/lib/trpc";
 import { LimitAlertsBanner } from "@/pages/Usage";
-import { BarChart3, CalendarClock, Clapperboard, DollarSign, Gauge, Loader2, Radar, RefreshCw, Save, ShieldCheck, Settings2, ShieldAlert, UserRound, Zap } from "lucide-react";
+import { BarChart3, CalendarClock, ChartNoAxesCombined, Clapperboard, DollarSign, Gauge, Loader2, Radar, RefreshCw, Save, ShieldCheck, Settings2, ShieldAlert, UserRound, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
@@ -157,6 +157,8 @@ export default function Profile() {
   const [weeklyCostCapBrl, setWeeklyCostCapBrl] = useState("");
   /** (Rodada 42) Ação ao ultrapassar o teto de custo semanal. */
   const [weeklyCostCapAction, setWeeklyCostCapAction] = useState<"block" | "warn" | "alert">("warn");
+  /** (Rodada 44) Limite de custo por análise individual em R$ (0 = sem limite). */
+  const [analysisCostCapBrl, setAnalysisCostCapBrl] = useState("");
   const [limitAction, setLimitAction] = useState<"block" | "warn">("block");
   useEffect(() => {
     if (limitsDialogOpen && limitsQuery.data) {
@@ -172,9 +174,18 @@ export default function Profile() {
       setCostCapAction(limit.costCapAction ?? "warn");
       setWeeklyCostCapBrl((limit.weeklyCostCapBrl ?? 0) > 0 ? String(limit.weeklyCostCapBrl) : "");
       setWeeklyCostCapAction(limit.weeklyCostCapAction ?? "warn");
+      setAnalysisCostCapBrl((limit.analysisCostCapBrl ?? 0) > 0 ? String(limit.analysisCostCapBrl) : "");
       setLimitAction(limit.limitAction ?? "block");
     }
   }, [limitsDialogOpen, limitsQuery.data]);
+  /** (Rodada 44) Analisa valores decimais (até `dec` casas) para os limites de custo em R$. */
+  const parseDecimal = (raw: string, max: number, dec: number): number => {
+    if (!raw.trim()) return 0;
+    const n = Number(raw.trim());
+    if (!Number.isFinite(n) || n < 0) return -1;
+    return Math.min(max, Number(n.toFixed(dec)));
+  };
+
   const setLimitsMutation = trpc.profile.setLimits.useMutation({
     onSuccess: () => {
       utils.profile.getLimits.invalidate();
@@ -201,7 +212,8 @@ export default function Profile() {
     const mQuota = parse(monthlyQuotaLimit, 5_000_000);
     const mCap = parse(monthlyCostCapBrl, 10_000);
     const wCap = parse(weeklyCostCapBrl, 5_000);
-    if ([analyses, tokens, quota, wTokens, wQuota, mTokens, mQuota, mCap, wCap].some((n) => n < 0)) {
+    const aCap = parseDecimal(analysisCostCapBrl, 1_000, 2);
+    if ([analyses, tokens, quota, wTokens, wQuota, mTokens, mQuota, mCap, wCap, aCap].some((n) => n < 0)) {
       toast.error("Valores inválidos: use números inteiros positivos (0 = ilimitado/sem teto).");
       return;
     }
@@ -218,6 +230,7 @@ export default function Profile() {
       costCapAction,
       weeklyCostCapBrl: wCap,
       weeklyCostCapAction,
+      analysisCostCapBrl: aCap,
     });
   };
 
@@ -668,6 +681,29 @@ export default function Profile() {
                           </Select>
                           <p className="text-xs text-muted-foreground">
                             Mesmo mecanismo do teto mensal: bloqueia, pede confirmação de uso único ou apenas notifica.
+                          </p>
+                        </div>
+                        {/* (Rodada 44) Limite de custo por análise individual. */}
+                        <div className="space-y-2 sm:col-span-2">
+                          <Label htmlFor="limit-analysis-cost-cap" className="flex items-center gap-2">
+                            <ChartNoAxesCombined className="h-4 w-4 text-emerald-400" />
+                            Limite de custo por análise (R$)
+                          </Label>
+                          <Input
+                            id="limit-analysis-cost-cap"
+                            type="number"
+                            min={0}
+                            max={1000}
+                            step="0.01"
+                            value={analysisCostCapBrl}
+                            onChange={(e) => setAnalysisCostCapBrl(e.target.value)}
+                            placeholder="0 = sem limite"
+                            disabled={setLimitsMutation.isPending}
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Quando o custo exato de uma única análise (tokens LLM + thumbnails) ultrapassar este valor,
+                            um alerta visual aparece na interface e no histórico. Não bloqueia análises — é um aviso de
+                            acompanhamento. Máximo: R$ 1.000.
                           </p>
                         </div>
                       </div>

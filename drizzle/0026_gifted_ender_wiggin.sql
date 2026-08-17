@@ -1,0 +1,1 @@
+ALTER TABLE `user_limits` ADD `analysis_cost_cap_brl` int DEFAULT 0 NOT NULL;

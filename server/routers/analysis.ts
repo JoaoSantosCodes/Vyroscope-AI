@@ -228,7 +228,17 @@ export const analysisRouter = router({
    */
   exportHistoryCsv: protectedProcedure.query(async ({ ctx }) => {
     const rows = await listAnalysesByUser(ctx.user.id);
-    const content = buildAnalysisHistoryCsv(rows);
+    // (Rodada 44) Anexa as thumbnails de cada análise com o custo individual.
+    const withThumbs = await Promise.all(
+      rows.map(async (r) => {
+        const raw = await getThumbnailsByAnalysis(r.id).catch(() => []);
+        return {
+          ...r,
+          thumbnails: raw.map((t) => ({ title: t.suggestionTitle, url: t.imageUrl, createdAt: t.createdAt, costBrl: t.costBrl, costDetail: t.costDetail })),
+        };
+      })
+    );
+    const content = buildAnalysisHistoryCsv(withThumbs);
     const when = new Date().toISOString().slice(0, 19).replace(/:/g, "-");
     return {
       filename: `vyroscope-historico-${when}.csv`,

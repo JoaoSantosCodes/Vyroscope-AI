@@ -203,6 +203,13 @@
       "when": 1786937206425,
       "tag": "0025_steady_ogun",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "5",
+      "when": 1786938258012,
+      "tag": "0026_gifted_ender_wiggin",
+      "breakpoints": true
     }
   ]
 }

@@ -107,7 +107,39 @@ const db = vi.hoisted(() => ({
     projectedWeekCostBrl: null,
     usdBrl: 5.62,
     fxSource: "api",
+    /** (Rodada 43/44) Detalhamento do custo semanal por modelo de IA. */
+    costByModel: [
+      {
+        model: "gpt-4.1-mini",
+        tokens: 12000,
+        inputTokens: 10000,
+        outputTokens: 2000,
+        costBrl: 0.26,
+      },
+    ],
   }),
+  // (Rodada 44) Análises e thumbnails do período para a seção de custo por análise.
+  listAnalysesByUser: vi.fn().mockResolvedValue([
+    {
+      id: "a1",
+      userId: 12,
+      niche: "finanças",
+      status: "completed",
+      result: null,
+      retryLog: null,
+      costBrl: 0.35,
+      costDetail: "gpt-4.1-mini · 14.000 tokens",
+      createdAt: new Date("2026-08-15T12:00:00Z"),
+    },
+  ]),
+  getThumbnailsByAnalysis: vi.fn().mockResolvedValue([
+    {
+      suggestionTitle: "Thumb de finanças",
+      imageUrl: "https://example.com/t.png",
+      costBrl: 0.22,
+      costDetail: "dall-e-3 · R$ 0,22",
+    },
+  ]),
 }));
 vi.mock("./db", () => db);
 

@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray, isNull, not, sql } from "drizzle-orm";
 import { gte, lte } from "drizzle-orm/sql/expressions/conditions";
 import { drizzle } from "drizzle-orm/mysql2";
+
 import {
   apiUsage,
   analysisVideos,
@@ -1335,7 +1336,9 @@ export async function getProviderSettings(
 }
 
 // ---------- Exportação CSV do histórico de análises ----------
-/** Monta o conteúdo CSV do histórico de análises com resumo de retentativas (Rodada 35). */
+/** Monta o conteúdo CSV do histórico de análises com resumo de retentativas (Rodada 35)
+ * e, quando as linhas trazem o custo exato (Rodada 42/44), as colunas de custo,
+ * detalhamento e thumbnails geradas com custo individual. */
 export function buildAnalysisHistoryCsv(
   rows: Array<{
     id: string;
@@ -1344,8 +1347,23 @@ export function buildAnalysisHistoryCsv(
     result: string | null;
     retryLog: string | null;
     createdAt: Date;
+    /** (Rodada 44) Custo exato da análise em R$ (opcional p/ compatibilidade). */
+    costBrl?: number | null;
+    /** (Rodada 44) Detalhamento do custo (modelo, tokens, cota). */
+    costDetail?: string | null;
+    /** (Rodada 44) Thumbnails geradas pela análise, com custo individual. */
+    thumbnails?: Array<{
+      title?: string | null;
+      url?: string | null;
+      createdAt?: Date | number | null;
+      costBrl?: number | null;
+      costDetail?: string | null;
+    }>;
   }>
 ): string {
+  const first = rows[0];
+  const hasCost = first && typeof first.costBrl !== "undefined";
+  const hasThumbs = hasCost && Array.isArray(first?.thumbnails);
   const header = [
     "Data",
     "Nicho",
@@ -1355,6 +1373,8 @@ export function buildAnalysisHistoryCsv(
     "Desistiu",
     "Score médio",
     "Títulos das sugestões",
+    ...(hasCost ? ["Custo (R$)", "Detalhamento do custo"] : []),
+    ...(hasThumbs ? ["Thumbnails (título;url;custo)"] : []),
   ].join(";");
   const body = rows.map((r) => {
     const summary = parseRetrySummary(r.retryLog);
@@ -1375,6 +1395,19 @@ export function buildAnalysisHistoryCsv(
       const escaped = value.split('"').join('""');
       return /[;\n"]/.test(value) ? '"' + escaped + '"' : value;
     };
+    const costCell = hasCost && r.costBrl != null ? `R$ ${Number(r.costBrl).toFixed(2).replace(".", ",")}` : "";
+    const detailCell = hasCost && r.costDetail ? r.costDetail : "";
+    const thumbsCell = hasThumbs
+      ? (r.thumbnails ?? [])
+          .map((t) => {
+            const tsCost =
+              typeof t.costBrl === "number"
+                ? `R$ ${Number(t.costBrl).toFixed(2).replace(".", ",")}`
+                : "";
+            return [t.title ?? "", t.url ?? "", tsCost].join(";");
+          })
+          .join(" |")
+      : "";
     return [
       cell(new Date(r.createdAt).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })),
       cell(r.niche),
@@ -1384,6 +1417,8 @@ export function buildAnalysisHistoryCsv(
       cell(summary?.gaveUp ? "Sim" : "Não"),
       cell(avgScore),
       cell(titles),
+      ...(hasCost ? [cell(costCell), cell(detailCell)] : []),
+      ...(hasThumbs ? [cell(thumbsCell)] : []),
     ].join(";");
   });
   return [header, ...body].join("\n");
@@ -1426,6 +1461,8 @@ export type UserLimits = {
    * "block" = bloqueia automaticamente; "warn" = pede confirmação;
    * "alert" = apenas notifica (sem bloqueio). */
   weeklyCostCapAction: "block" | "warn" | "alert";
+  /** (Rodada 44) Limite de custo por análise individual em R$ (0 = sem limite). */
+  analysisCostCapBrl: number;
   /** (Rodada 37) Override manual válido até (epoch ms; 0 ou ausente = sem override) */
   overrideUntil?: number;
   /** (Rodada 38) Override de uso único: análises restantes autorizadas por
@@ -1468,6 +1505,7 @@ export async function getUserLimits(userId: number): Promise<UserLimits> {
     costCapAction: "warn",
     weeklyCostCapBrl: 0,
     weeklyCostCapAction: "warn",
+    analysisCostCapBrl: 0,
   };
   if (!db) return empty;
   const row = await db.select().from(userLimits).where(eq(userLimits.userId, userId)).limit(1);
@@ -1492,6 +1530,7 @@ export async function getUserLimits(userId: number): Promise<UserLimits> {
       r.weeklyCostCapAction === "block" || r.weeklyCostCapAction === "warn" || r.weeklyCostCapAction === "alert"
         ? r.weeklyCostCapAction
         : "warn",
+    analysisCostCapBrl: r.analysisCostCapBrl ?? 0,
     overrideUntil: r.overrideUntil ?? 0,
     overrideRemaining: r.overrideRemaining ?? 0,
   };
@@ -1519,6 +1558,7 @@ export async function setUserLimits(userId: number, limits: UserLimits): Promise
       limits.weeklyCostCapAction === "block" || limits.weeklyCostCapAction === "warn" || limits.weeklyCostCapAction === "alert"
         ? limits.weeklyCostCapAction
         : "warn",
+    analysisCostCapBrl: Math.max(0, Math.floor(limits.analysisCostCapBrl ?? 0)),
   };
   await db
     .insert(userLimits)
@@ -1679,6 +1719,7 @@ export async function getLimitStatus(userId: number): Promise<LimitStatus> {
     monthlyCostCapBrl: limit.monthlyCostCapBrl ?? 0,
     costCapAction: limit.costCapAction,
     weeklyCostCapBrl: limit.weeklyCostCapBrl ?? 0,
+    analysisCostCapBrl: limit.analysisCostCapBrl ?? 0,
     weeklyCostCapAction: limit.weeklyCostCapAction,
   };
   const result: LimitStatus = {
@@ -2565,6 +2606,36 @@ export async function recordAnalysisCostFor(
   const tokensFmt = llmTokens.toLocaleString("pt-BR");
   const costDetail = `${model} · ${tokensFmt} tokens LLM · ${youtubeUnits.toLocaleString("pt-BR")} cota YouTube · R$ ${costBrl.toFixed(2).replace(".", ",")}`;
   await updateAnalysis(analysisId, { costBrl, costDetail });
+  // (Rodada 44) Alerta in-app quando o custo real da análise ultrapassa o
+  // limite individual configurado pelo usuário (dedup: 1 alerta/dia).
+  import("./alerts").then((a) => a.emitAnalysisCostAlert(userId, costBrl)).catch(() => undefined);
+}
+/** (Rodada 44) Registra um alerta in-app deduplicando um por dia/dimensão
+ * (dayKey `${YYYY-MM-DD}|${dimension}`). Separado de emitAnalysisCostAlert
+ * para ser testável em isolamento. */
+export async function recordUsageAlert(
+  userId: number,
+  dimension: string,
+  level: "warn" | "blocked",
+  currentUsage: number,
+  limitValue: number,
+  message: string
+): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const dayKey = `${todayIso}|${dimension}`;
+  const existing = await db
+    .select({ id: usageAlerts.id })
+    .from(usageAlerts)
+    .where(and(eq(usageAlerts.userId, userId), eq(usageAlerts.dayKey, dayKey)))
+    .limit(1)
+    .catch(() => []);
+  if (existing.length) return;
+  await db
+    .insert(usageAlerts)
+    .values({ userId, dimension, level, dayKey, currentUsage, limitValue, message })
+    .catch(() => undefined);
 }
 /** (Rodada 42) Conta thumbnails geradas na semana (últimos 7 dias) pelo
  * usuário — espelho de countMonthThumbnails com janela semanal. */

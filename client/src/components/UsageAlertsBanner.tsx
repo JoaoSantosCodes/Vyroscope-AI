@@ -96,13 +96,15 @@ const DIM_LABEL: Record<string, string> = {
   quota: "Cota YouTube do dia",
   cost_cap: "Custo mensal (R$)",
   weekly_cost_cap: "Custo semanal (R$)",
+  /** (Rodada 44) Alerta quando o custo de uma análise individual ultrapassa o limite configurado. */
+  analysis_cost: "Custo de análise (R$)",
 };
 /** (Rodada 42) Mensagens por dimensão: os tetos de custo usam moeda (R$) em
  * vez de contagens, então o consumo/limite é formatado como valor monetário. */
 function formatConsumption(dimension: string, value: number, limitValue: number): string {
   const fmt = (v: number) =>
     v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  if (dimension === "cost_cap" || dimension === "weekly_cost_cap") {
+  if (dimension === "cost_cap" || dimension === "weekly_cost_cap" || dimension === "analysis_cost") {
     return `${fmt(value)} de ${fmt(limitValue)}`;
   }
   return `${value.toLocaleString("pt-BR")} de ${limitValue.toLocaleString("pt-BR")}`;

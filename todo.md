@@ -394,4 +394,10 @@
 - [x] Frontend: tabela "Detalhamento semanal por modelo de IA" no card Teto de custo semanal da /uso
 - [x] Frontend: histórico mostra o custo exato de cada thumbnail (valores individuais na coluna custo / tooltip)
 - [x] Frontend: filtro/ordenação do histórico por custo (maior custo primeiro, filtro por faixa)
-- [ ] Testes vitest (rodada 43), docs, skill, Obsidian rodada-43 e checkpoint final
+- [x] Testes vitest (rodada 43), docs, skill, Obsidian rodada-43 e checkpoint final
+## Melhorias solicitadas (rodada 44)
+- [x] Backend: PDF e CSV exportam o detalhamento semanal por modelo e o custo exato de cada thumbnail
+- [x] Backend: limite de custo por análise individual (`analysisCostCapBrl` em `user_limits`) com alerta registrado quando ultrapassado
+- [x] Frontend: alerta visual quando o custo de uma análise ultrapassar o limite individual
+- [x] Frontend: gráfico de proporção dos gastos semanais por modelo de IA na /uso (donut Recharts)
+- [x] Testes vitest (rodada 44: 7 testes em limits-r44.test.ts, suíte 355/355), docs, skill, Obsidian rodada-44 e checkpoint final

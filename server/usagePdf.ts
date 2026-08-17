@@ -8,8 +8,10 @@ import {
   getUsageBudgets,
   getUsageDailySeries,
   getUsageSummary,
+  listAnalysesByUser,
   projectExhaustion,
 } from "./db";
+import { getThumbnailsByAnalysis } from "./db";
 import type { LimitStatus } from "./db";
 
 const COLORS = {
@@ -187,7 +189,34 @@ export async function buildUsagePdf(userId: number, days = 30): Promise<Buffer> 
         doc.y,
         { width: doc.page.width - 108 }
       );
-      doc.y += 26;
+      doc.y += 20;
+
+      // ===== (Rodada 44) Detalhamento semanal por modelo de IA =====
+      const weekCostByModel = Array.isArray(weekCost.costByModel) ? weekCost.costByModel : [];
+      if (weekCostByModel.length > 0) {
+        doc.fillColor(COLORS.light).fontSize(9).font("Helvetica-Bold").text("Detalhamento semanal por modelo de IA", 54, doc.y);
+        doc.y += 14;
+        doc.fillColor(COLORS.light).fontSize(9).font("Helvetica-Bold").text("Modelo", 54, doc.y);
+        doc.text("Tokens", 300, doc.y);
+        doc.text("Custo", 420, doc.y);
+        doc.moveTo(54, doc.y + 14).lineTo(doc.page.width - 54, doc.y + 14).strokeColor(COLORS.gray).lineWidth(0.5).stroke();
+        doc.y += 22;
+        let weekModelTotal = 0;
+        for (const m of weekCostByModel) {
+          if (doc.y > doc.page.height - 30) doc.addPage();
+          weekModelTotal += m.costBrl;
+          doc.fillColor(COLORS.light).fontSize(9).text(m.model, 54, doc.y, { width: 240 });
+          doc.text(m.tokens.toLocaleString("pt-BR"), 300, doc.y);
+          doc.text(fmtBrl(m.costBrl), 420, doc.y);
+          doc.y += 16;
+        }
+        if (weekModelTotal > 0) {
+          doc.fillColor(COLORS.amber).fontSize(9).font("Helvetica-Bold").text("Total semanal", 54, doc.y);
+          doc.text("", 300, doc.y);
+          doc.text(fmtBrl(Math.round(weekModelTotal * 100) / 100), 420, doc.y);
+        }
+        doc.y += 20;
+      }
 
       // ===== Custo por modelo de IA (Rodada 41) =====
       if (doc.y > doc.page.height - 150) doc.addPage();
@@ -230,6 +259,54 @@ export async function buildUsagePdf(userId: number, days = 30): Promise<Buffer> 
           { width: doc.page.width - 108 }
         );
         doc.y += 18;
+      }
+
+      // ===== (Rodada 44) Custo por análise e thumbnail do período =====
+      if (doc.y > doc.page.height - 200) doc.addPage();
+      doc.fillColor(COLORS.dark).rect(0, doc.y + 24, doc.page.width, 36).fill();
+      doc.fillColor(COLORS.amber).fontSize(13).font("Helvetica-Bold").text(`Custo por análise e thumbnail (últimos ${days} dias)`, 54, doc.y + 34);
+      doc.y += 74;
+      const nowMs = Date.now();
+      const sinceMs = nowMs - days * 24 * 60 * 60 * 1000;
+      const recent = (await listAnalysesByUser(userId)).filter((a) => a.createdAt.getTime() >= sinceMs);
+      if (recent.length === 0) {
+        doc.fillColor(COLORS.gray).fontSize(10).text("Nenhuma análise concluída no período.", 54, doc.y);
+        doc.y += 18;
+      }
+      for (const a of recent) {
+        if (doc.y > doc.page.height - 120) {
+          doc.addPage();
+          doc.fillColor(COLORS.dark).rect(0, 0, doc.page.width, 36).fill();
+          doc.fillColor(COLORS.amber).fontSize(13).font("Helvetica-Bold").text(`Custo por análise e thumbnail (últimos ${days} dias — continuação)`, 54, 14);
+          doc.y = 60;
+        }
+        doc.fillColor(COLORS.light).fontSize(10).font("Helvetica-Bold").text(
+          `${new Date(a.createdAt).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })} — ${a.niche}${a.costBrl != null ? ` · R$ ${Number(a.costBrl).toFixed(2).replace(".", ",")}` : ""}`,
+          54,
+          doc.y
+        );
+        doc.y += 14;
+        if (a.costDetail) {
+          doc.fillColor(COLORS.gray).fontSize(8.5).text(String(a.costDetail), 54, doc.y, { width: doc.page.width - 108 });
+          doc.y += 12;
+        }
+        let aThumbs: Array<{ suggestionTitle?: string | null; url?: string | null; costBrl?: number | null; costDetail?: string | null }> = [];
+        try {
+          aThumbs = await getThumbnailsByAnalysis(a.id);
+        } catch {
+          aThumbs = [];
+        }
+        for (const t of aThumbs) {
+          if (doc.y > doc.page.height - 40) doc.addPage();
+          doc.fillColor(COLORS.gray).fontSize(8.5).text(
+            `· ${t.suggestionTitle ?? "thumbnail"}${typeof t.costBrl === "number" ? ` — R$ ${Number(t.costBrl).toFixed(2).replace(".", ",")}` : ""}`,
+            66,
+            doc.y,
+            { width: doc.page.width - 120 }
+          );
+          doc.y += 12;
+        }
+        doc.y += 6;
       }
 
       // ===== Gráfico de consumo diário (Rodada 39) =====
