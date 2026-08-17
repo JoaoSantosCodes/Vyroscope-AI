@@ -367,3 +367,13 @@
 - [x] Frontend: campo "Teto de custo mensal (R$)" no dialog Limites do perfil (com tooltip explicando o alerta a 100% da projeção)
 - [x] Frontend: banner/toast de alerta quando a projeção do mês ultrapassa o teto (reuso do padrão UsageAlertsBanner/listUsageAlerts)
 - [x] Testes vitest (câmbio com cache/fallback, teto de custo, alerta, PDF com thumbnails), docs, skill, Obsidian rodada-40 e checkpoint final
+
+## Melhorias solicitadas (rodada 41)
+- [x] Backend: bloqueio automático de novas gerações quando o teto de custo mensal for atingido — nova dimensão `monthly_cost` no `checkAnalysisLimitsExtended` (100% da projeção vs. cap: block/blocked; warn mantém confirmação de uso único; alert ignora o cap) + registro em `blocked_attempts`
+- [x] Backend: histórico de cotações do dólar — tabela `fx_rate_history` (migração 0022) com snapshot diário da taxa usada (snapshotFxRate) e procedure getFxRateHistory que retorna a série (7–90 dias, validado por zod), cache 4h
+- [x] Backend: detalhamento de custos por modelo de IA — colunas `model` e `modelFrom` em `api_usage` (migração 0023), `groupMonthTokensByModel` por escopo, `estimateMonthlyCostBrl` retorna `costByModel` (R$ por modelo) + custo de thumbnails por modelo
+- [x] Frontend: gráfico histórico da cotação do dólar na página /uso (FxRateCard Recharts área/linha, mesma faixa 7–90 dias do painel de consumo) com mín./máx./média/valor atual no resumo
+- [x] Frontend: tabela "Detalhamento por modelo de IA" no card Custo estimado da /uso (tokens, custo R$ por modelo: LLM e thumbnails, com fallback "outros")
+- [x] Frontend: seletor de ação do teto de custo (Bloquear/Apenas avisar/Informar) no dialog Limites do perfil (`costCapAction`, persistido em user_limits)
+- [x] PDF: seção "Custo por modelo de IA" (LLM por modelo + thumbnails por modelo) + resumo da cotação USD/BRL (mín/máx/média/atual e valores diários) em buildUsagePdf
+- [x] Testes vitest (limits-r41.test.ts: 17 testes — bloqueio do teto block/warn/alert, série da cotação com normalização de dias, custo por modelo e fluxo do router; 337/337 passando no total), docs, skill, Obsidian rodada-41 e checkpoint final

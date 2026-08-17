@@ -82,7 +82,21 @@ const db = vi.hoisted(() => ({
     imageModel: "dall-e-3",
     imageModelFrom: "default",
     totalMonthCostBrl: 2.26,
+    costByModel: [
+      {
+        model: "gpt-4.1-mini",
+        tokens: 48000,
+        inputTokens: 40000,
+        outputTokens: 8000,
+        costBrl: 1.04,
+      },
+    ],
   }),
+  // (Rodada 41) histórico da cotação USD/BRL registrado pela snapshotFxRate
+  getFxRateHistory: vi.fn().mockResolvedValue([
+    { date: "2026-08-14", rate: 5.58, source: "api" },
+    { date: "2026-08-15", rate: 5.62, source: "api" },
+  ]),
 }));
 vi.mock("./db", () => db);
 

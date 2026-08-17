@@ -14,6 +14,7 @@ import {
   getUserStats,
   projectExhaustion,
   estimateMonthlyCostBrl,
+  getFxRateHistory as getFxRateHistoryDb,
   LLM_MODEL_PRICES,
   LLM_DEFAULT_PRICE_PER_MILLION,
   setProviderSettings,
@@ -246,6 +247,15 @@ export const profileRouter = router({
       const series = await getUsageDailySeries(ctx.user.id, input.days);
       return series;
     }),
+  /**
+   * (Rodada 41) Série diária da cotação USD/BRL (últimos N dias), alimentada
+   * automaticamente a cada consulta de câmbio (AwesomeAPI ou fallback).
+   */
+  getFxRateHistory: protectedProcedure
+    .input(z.object({ days: z.number().int().min(7).max(90).default(30) }).default({ days: 30 }))
+    .query(async ({ ctx, input }) => {
+      return getFxRateHistoryDb(input.days);
+    }),
 
   /**
    * (Rodada 36) Limites diários atuais do usuário e estado de alerta:
@@ -268,6 +278,9 @@ export const profileRouter = router({
       monthlyQuotaLimit: limits.monthlyQuotaLimit,
       /** (Rodada 40) Teto de custo mensal em R$ (0 = sem teto). */
       monthlyCostCapBrl: limits.monthlyCostCapBrl,
+      /** (Rodada 41) Ação do teto de custo: "block" = bloqueia automaticamente;
+       * "warn" = pede confirmação; "alert" = apenas notifica. */
+      costCapAction: limits.costCapAction,
       overrideUntil: limits.overrideUntil,
       /** (Rodada 38) Análises restantes autorizadas por confirmação de uso único */
       overrideRemaining: limits.overrideRemaining ?? 0,
@@ -309,6 +322,9 @@ export const profileRouter = router({
         monthlyQuotaLimit: z.number().int().min(0).max(5_000_000).optional(),
         /** (Rodada 40) Teto de custo mensal em R$ (0 = sem teto). */
         monthlyCostCapBrl: z.number().int().min(0).max(10_000).optional(),
+        /** (Rodada 41) Ação do teto de custo: "block" = bloqueia automaticamente;
+         * "warn" = pede confirmação; "alert" = apenas notifica. */
+        costCapAction: z.enum(["block", "warn", "alert"]).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -322,6 +338,7 @@ export const profileRouter = router({
         monthlyTokenLimit: input.monthlyTokenLimit ?? 0,
         monthlyQuotaLimit: input.monthlyQuotaLimit ?? 0,
         monthlyCostCapBrl: input.monthlyCostCapBrl ?? 0,
+        costCapAction: input.costCapAction ?? "warn",
       });
       return { ok: true } as const;
     }),

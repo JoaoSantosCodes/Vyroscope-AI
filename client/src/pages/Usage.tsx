@@ -79,6 +79,11 @@ export default function Usage() {
     enabled: isAuthenticated,
     staleTime: 60_000,
   });
+  /** (Rodada 41) Série histórica da cotação USD/BRL para o gráfico de contexto. */
+  const fxQuery = trpc.profile.getFxRateHistory.useQuery(
+    { days: 30 },
+    { enabled: isAuthenticated, staleTime: 4 * 60 * 60_000 }
+  );
 
   const chartData = useMemo(() => {
     const series = seriesQuery.data;
@@ -173,10 +178,11 @@ export default function Usage() {
                 seriesQuery.refetch();
                 limitsQuery.refetch();
                 costQuery.refetch();
+                fxQuery.refetch();
               }}
-              disabled={seriesQuery.isRefetching || limitsQuery.isRefetching || costQuery.isRefetching}
+              disabled={seriesQuery.isRefetching || limitsQuery.isRefetching || costQuery.isRefetching || fxQuery.isRefetching}
             >
-              {seriesQuery.isRefetching || limitsQuery.isRefetching ? (
+              {seriesQuery.isRefetching || limitsQuery.isRefetching || fxQuery.isRefetching ? (
                 <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
               ) : (
                 <RefreshCw className="mr-2 h-3.5 w-3.5" />
@@ -249,6 +255,9 @@ export default function Usage() {
 
         {/* (Rodada 39) Custo estimado de LLM em R$ para o mês corrente */}
         <CostEstimateCard cost={costQuery.data} isLoading={costQuery.isLoading} />
+
+        {/* (Rodada 41) Gráfico histórico da cotação do dólar */}
+        <FxRateCard data={fxQuery.data} usdBrl={costQuery.data?.usdBrl ?? null} isLoading={fxQuery.isLoading} />
 
         {/* Gráfico de tokens LLM */}
         <Card className="border-border/60">
@@ -659,7 +668,8 @@ function formatUnitPeak(data: Array<{ fullDate: string; units: number }>): strin
   return peak.fullDate ? formatDate(new Date(`${peak.fullDate}T00:00:00`).getTime()) : "—";
 }
 
-function formatTooltipRow(name: string, value: number | string): [string, string] {
+function formatTooltipRow(name: string, value: number | string, opts?: { isFx?: boolean }): [string, string] {
+  if (opts?.isFx) return [name, `${Number(value).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 4 })} BRL/USD`];
   if (name.includes("Média")) return [name, `${value.toLocaleString("pt-BR")}/dia`];
   if (name.includes("YouTube")) return [name, `${value.toLocaleString("pt-BR")} unidades`];
   return [name, `${value.toLocaleString("pt-BR")} tokens`];
@@ -686,6 +696,7 @@ function CostEstimateCard(props: {
     imageModel: string;
     imageModelFrom: string;
     totalMonthCostBrl: number;
+    costByModel: Array<{ model: string; tokens: number; costBrl: number }>;
   };
   isLoading: boolean;
 }) {
@@ -756,6 +767,140 @@ function CostEstimateCard(props: {
               {cost.fxSource === "api" ? " (cotação atualizada via API pública)" : " (referência em caso de indisponibilidade da cotação)"}. A cota do YouTube não gera custo variável direto nesta aplicação. Se o modelo não estiver no catálogo
               interno, um preço estimado é aplicado como fallback.
             </p>
+            {cost.costByModel.length > 0 && (
+              <>
+                <p className="pt-2 text-xs font-semibold text-foreground">Detalhamento por modelo de IA</p>
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="w-auto">Modelo</TableHead>
+                      <TableHead className="text-right">Tokens</TableHead>
+                      <TableHead className="text-right">Custo estimado</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {cost.costByModel.map((m) => (
+                      <TableRow key={m.model}>
+                        <TableCell className="max-w-[240px] truncate font-medium">{m.model}</TableCell>
+                        <TableCell className="text-right">{m.tokens.toLocaleString("pt-BR")}</TableCell>
+                        <TableCell className="text-right">{fmtBrl(m.costBrl)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                <p className="-mt-2 text-[10px] text-muted-foreground">
+                  Agregação do consumo de LLM gravado em api_usage; o custo por modelo usa o preço público de referência
+                  de cada modelo. Linhas sem modelo gravado (consumo anterior a esta versão) entram como "efetivo do
+                  período".
+                </p>
+              </>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** (Rodada 41) Gráfico histórico da cotação USD/BRL: dá contexto à projeção de
+ * custos, mostrando a variação cambial do período e a cotação atual usada no
+ * cálculo. */
+function FxRateCard(props: {
+  data?: Array<{ date: string; rate: number; source: string }>;
+  usdBrl: number | null;
+  isLoading: boolean;
+}) {
+  const { data, usdBrl, isLoading } = props;
+  const chartData = useMemo(() => {
+    if (!data || data.length === 0) return [];
+    const sorted = [...data].sort((a, b) => (a.date < b.date ? -1 : 1));
+    const values = sorted.map((d) => d.rate);
+    const avg = values.reduce((a, b) => a + b, 0) / values.length;
+    const avgWindow = values.map((v) => Number(avg.toFixed(2)));
+    return sorted.map((d, i) => ({
+      date: d.date.slice(5),
+      fullDate: d.date,
+      rate: d.rate,
+      avg: avgWindow[i],
+      source: d.source,
+    }));
+  }, [data]);
+
+  const min = chartData.length ? Math.min(...chartData.map((d) => d.rate)) : null;
+  const max = chartData.length ? Math.max(...chartData.map((d) => d.rate)) : null;
+  const avg = chartData.length
+    ? Number((chartData.reduce((a, d) => a + d.rate, 0) / chartData.length).toFixed(2))
+    : null;
+
+  return (
+    <Card className="border-border/60">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-lg flex items-center gap-2">
+          <TrendingUp className="h-5 w-5 text-primary" />
+          Cotação do dólar (USD/BRL)
+        </CardTitle>
+        <CardDescription>
+          Histórico das cotações registradas nos últimos 30 dias. A variação cambial influencia diretamente a projeção
+          de custos do mês.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {isLoading ? (
+          <Skeleton className="h-44 w-full" />
+        ) : chartData.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Nenhuma cotação registrada ainda — a cotação é salva quando o custo é consultado.
+          </p>
+        ) : (
+          <>
+            <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+              {min !== null && (
+                <span>
+                  Mínima: <strong className="text-foreground">{min.toFixed(2)}</strong>
+                </span>
+              )}
+              {max !== null && (
+                <span>
+                  Máxima: <strong className="text-foreground">{max.toFixed(2)}</strong>
+                </span>
+              )}
+              {avg !== null && (
+                <span>
+                  Média: <strong className="text-foreground">{avg.toFixed(2)}</strong>
+                </span>
+              )}
+              {usdBrl !== null && (
+                <span>
+                  Atual: <strong className="text-emerald-400">{usdBrl.toFixed(2)}</strong> (usada na projeção)
+                </span>
+              )}
+            </div>
+            <div className="h-44">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#2a2a35" />
+                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#8A8A95" }} interval="preserveStartEnd" minTickGap={30} />
+                  <YAxis
+                    tick={{ fontSize: 10, fill: "#8A8A95" }}
+                    domain={["auto", "auto"]}
+                    width={44}
+                    tickFormatter={(v) => v.toFixed(2)}
+                  />
+                  <Tooltip
+                    contentStyle={{ background: "#16161D", border: "1px solid #2a2a35", borderRadius: 8, fontSize: 12 }}
+                    labelStyle={{ color: "#E9E9EE" }}
+                    formatter={(value, name) => formatTooltipRow(String(name), typeof value === "number" ? value : Number(value), { isFx: true })}
+                    labelFormatter={(label, payload) => {
+                      const row = payload?.[0]?.payload as { fullDate?: string } | undefined;
+                      return row?.fullDate ? formatDate(new Date(`${row.fullDate}T00:00:00`).getTime()) : String(label);
+                    }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 11 }} formatter={(v) => (v === "rate" ? "Cotação" : "Média do período")} />
+                  <Line type="monotone" dataKey="rate" stroke="#E8A33D" strokeWidth={2} dot={{ r: 2, fill: "#E8A33D" }} />
+                  <Line type="monotone" dataKey="avg" stroke="#8A8A95" strokeWidth={1} strokeDasharray="4 3" dot={false} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
           </>
         )}
       </CardContent>

@@ -9,6 +9,7 @@ import {
   userLimits,
   usageAlerts,
   suggestionThumbnails,
+  fxRateHistory,
   InsertAnalysis,
   InsertAnalysisVideo,
   InsertBlockedAttempt,
@@ -1401,6 +1402,10 @@ export type UserLimits = {
   monthlyQuotaLimit: number;
   /** (Rodada 40) Teto de custo mensal em R$ (0 = sem teto). */
   monthlyCostCapBrl: number;
+  /** (Rodada 41) Ação quando a projeção do custo atinge o teto:
+   * "block" = bloqueia automaticamente; "warn" = pede confirmação;
+   * "alert" = apenas notifica (sem bloqueio). */
+  costCapAction: "block" | "warn" | "alert";
   /** (Rodada 37) Override manual válido até (epoch ms; 0 ou ausente = sem override) */
   overrideUntil?: number;
   /** (Rodada 38) Override de uso único: análises restantes autorizadas por
@@ -1440,6 +1445,7 @@ export async function getUserLimits(userId: number): Promise<UserLimits> {
     monthlyTokenLimit: 0,
     monthlyQuotaLimit: 0,
     monthlyCostCapBrl: 0,
+    costCapAction: "warn",
   };
   if (!db) return empty;
   const row = await db.select().from(userLimits).where(eq(userLimits.userId, userId)).limit(1);
@@ -1455,6 +1461,10 @@ export async function getUserLimits(userId: number): Promise<UserLimits> {
     monthlyTokenLimit: r.monthlyTokenLimit ?? 0,
     monthlyQuotaLimit: r.monthlyQuotaLimit ?? 0,
     monthlyCostCapBrl: r.monthlyCostCapBrl ?? 0,
+    costCapAction:
+      r.costCapAction === "block" || r.costCapAction === "warn" || r.costCapAction === "alert"
+        ? r.costCapAction
+        : "warn",
     overrideUntil: r.overrideUntil ?? 0,
     overrideRemaining: r.overrideRemaining ?? 0,
   };
@@ -1473,6 +1483,10 @@ export async function setUserLimits(userId: number, limits: UserLimits): Promise
     monthlyTokenLimit: Math.max(0, Math.floor(limits.monthlyTokenLimit ?? 0)),
     monthlyQuotaLimit: Math.max(0, Math.floor(limits.monthlyQuotaLimit ?? 0)),
     monthlyCostCapBrl: Math.max(0, Math.floor(limits.monthlyCostCapBrl ?? 0)),
+    costCapAction:
+      limits.costCapAction === "block" || limits.costCapAction === "warn" || limits.costCapAction === "alert"
+        ? limits.costCapAction
+        : "warn",
   };
   await db
     .insert(userLimits)
@@ -1631,6 +1645,7 @@ export async function getLimitStatus(userId: number): Promise<LimitStatus> {
     monthlyTokenLimit: limit.monthlyTokenLimit,
     monthlyQuotaLimit: limit.monthlyQuotaLimit,
     monthlyCostCapBrl: limit.monthlyCostCapBrl ?? 0,
+    costCapAction: limit.costCapAction,
   };
   const result: LimitStatus = {
     limit: daily,
@@ -1853,8 +1868,19 @@ export async function getUsageBudgets(userId: number): Promise<UsageBudgets> {
  * da tentativa em blocked_attempts). */
 export async function getUsageForBlock(
   userId: number,
-  dimension: "analyses" | "tokens" | "quota" | "weekly_tokens" | "weekly_quota" | "monthly_tokens" | "monthly_quota"
+  dimension: "analyses" | "tokens" | "quota" | "weekly_tokens" | "weekly_quota" | "monthly_tokens" | "monthly_quota" | "cost_cap"
 ): Promise<number> {
+  if (dimension === "cost_cap") {
+    // Custo total do mês até hoje em R$ (inteiro), usado apenas no registro
+    // da tentativa bloqueada para contexto; a projeção é calculada em
+    // checkAnalysisLimitsExtended.
+    try {
+      const cost = await estimateMonthlyCostBrl(userId);
+      return Math.round(cost.totalMonthCostBrl);
+    } catch {
+      return 0;
+    }
+  }
   if (dimension === "analyses") return await countAnalysesToday(userId);
   if (dimension === "weekly_tokens" || dimension === "monthly_tokens") {
     const budgets = await getUsageBudgets(userId);
@@ -1928,7 +1954,7 @@ export async function checkAnalysisLimits(userId: number): Promise<
   }
   return { blocked: true, ...blockedDims[0] };
 }
-export type BlockDimension = "analyses" | "tokens" | "quota" | "weekly_tokens" | "weekly_quota" | "monthly_tokens" | "monthly_quota";
+export type BlockDimension = "analyses" | "tokens" | "quota" | "weekly_tokens" | "weekly_quota" | "monthly_tokens" | "monthly_quota" | "cost_cap";
 /** (Rodada 39) Versão do checkAnalysisLimits que considera também os orçamentos
  * semanal e mensal — usada pelo run/retry. Quando o limiteAction é "warn", o
  * primeiro orçamento semanal/mensal atingido retorna needsConfirmation; quando
@@ -1968,6 +1994,17 @@ export async function checkAnalysisLimitsExtended(userId: number): Promise<
   }
   if (!hasOverride && limit.monthlyQuotaLimit > 0 && month && month.quota === "blocked") {
     blockedDims.push({ dimension: "monthly_quota", reason: `Orçamento mensal de cota YouTube (${limit.monthlyQuotaLimit.toLocaleString("pt-BR")} unidades) atingido. Renova no dia 1.` });
+  }
+  // (Rodada 41) Teto de custo mensal (R$): a projeção pro-rata do mês atinge
+  // 100% do cap. costCapAction: "block" bloqueia; "warn" pede confirmação;
+  // "alert" apenas notifica (sem bloqueio).
+  if (!hasOverride && limit.monthlyCostCapBrl > 0 && limits.costCapAction !== "alert") {
+    try {
+      const cost = await estimateMonthlyCostBrl(userId);
+      if (cost.projectedMonthCostBrl !== null && cost.projectedMonthCostBrl >= limit.monthlyCostCapBrl) {
+        blockedDims.push({ dimension: "cost_cap", reason: `Projeção do custo do mês (R$ ${Math.round(cost.projectedMonthCostBrl).toLocaleString("pt-BR")}) atingiu o teto de R$ ${limit.monthlyCostCapBrl.toLocaleString("pt-BR")}. ${cost.daysElapsed === 0 ? "" : ""}O teto só se aplica a este mês.` });
+      }
+    } catch { /* falha na estimativa: não bloqueia */ }
   }
   if (!blockedDims.length) return { blocked: false };
   if (limits.limitAction === "warn") {
@@ -2026,6 +2063,8 @@ export async function recordApiUsage(input: {
   tokens?: number;
   units?: number;
   requests?: number;
+  /** (Rodada 41) Modelo de IA usado na chamada, para detalhamento de custo. */
+  model?: string;
 }): Promise<void> {
   const db = await getDb();
   if (!db) return;
@@ -2039,6 +2078,7 @@ export async function recordApiUsage(input: {
       tokens: Math.max(0, input.tokens ?? 0),
       units: Math.max(0, input.units ?? 0),
       requests: Math.max(0, input.requests ?? 0),
+      model: input.model ? input.model.slice(0, 60) : null,
       updatedAt: Date.now(),
     })
     .onDuplicateKeyUpdate({
@@ -2182,17 +2222,54 @@ export async function getUsdBrlRate(now: () => number = () => Date.now()): Promi
     const bid = Number(json?.USDBRL?.bid);
     if (!Number.isFinite(bid) || bid <= 0) throw new Error("bad_bid");
     fxCache.set(key, { value: bid, fetchedAt: now() });
+    snapshotFxRate(bid, "api").catch(() => undefined);
     return { value: bid, source: "api" };
   } catch {
     // Fallback para o câmbio fixo em qualquer falha de rede/API.
     const value = USD_TO_BRL;
     fxCache.set(key, { value, fetchedAt: now() });
+    snapshotFxRate(value, "fallback").catch(() => undefined);
     return { value, source: "fallback" };
   }
 }
 /** Remove o cache do câmbio (usado em testes e em invalidação manual). */
 export function clearFxCache() {
   fxCache.delete("usd_brl");
+}
+/**
+ * (Rodada 41) Grava a cotação do dia em fx_rate_history (uma linha/dia,
+ * atualização por dia). Chamado após cada obtenção de taxa para alimentar
+ * o histórico exibido no painel e no PDF.
+ */
+export async function snapshotFxRate(rate: number, source: "api" | "cache" | "fallback"): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  const dayKey = new Date().toISOString().slice(0, 10);
+  try {
+    await db.insert(fxRateHistory).values({ dayKey, rate: String(rate.toFixed(4)), source });
+  } catch {
+    // Dia já registrado: atualiza a taxa/source do snapshot mais recente.
+    await db
+      .update(fxRateHistory)
+      .set({ rate: String(rate.toFixed(4)), source })
+      .where(eq(fxRateHistory.dayKey, dayKey))
+      .catch(() => undefined);
+  }
+}
+/** (Rodada 41) Série diária da cotação USD/BRL (últimos `days`, máx. 90). */
+export async function getFxRateHistory(days = 30): Promise<Array<{ date: string; rate: number; source: string }>> {
+  const db = await getDb();
+  if (!db) return [];
+  const n = Math.min(90, Math.max(7, days));
+  const rows = await db
+    .select({ dayKey: fxRateHistory.dayKey, rate: fxRateHistory.rate, source: fxRateHistory.source })
+    .from(fxRateHistory)
+    .orderBy(desc(fxRateHistory.dayKey))
+    .limit(n)
+    .catch(() => []);
+  return rows
+    .map(r => ({ date: r.dayKey, rate: Number(r.rate) || 0, source: r.source }))
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 /** Modelo padrão quando nenhum provider/override estiver configurado (Forge). */
 export const LLM_DEFAULT_MODEL = "gpt-4o-mini";
@@ -2278,6 +2355,10 @@ export async function estimateMonthlyCostBrl(userId: number): Promise<{
   imageModelFrom: "settings" | "default";
   /** (Rodada 40) Custo total do mês até hoje (tokens LLM + thumbnails). */
   totalMonthCostBrl: number;
+  /** (Rodada 41) Consumo e custo do mês agrupados por modelo de IA usado
+   * nas chamadas (agregado de api_usage.model; "efetivo do período" quando
+   * o log do modelo ainda não existia). */
+  costByModel: Array<{ model: string; tokens: number; costBrl: number }>;
 }> {
   const [budgets, price, fx] = await Promise.all([
     getUsageBudgets(userId),
@@ -2289,6 +2370,9 @@ export async function estimateMonthlyCostBrl(userId: number): Promise<{
   const imageModel = await resolveImageModel(userId);
   const monthThumbnails = await countMonthThumbnails(userId);
   const imageCostBrl = monthThumbnails * IMAGE_PRICE_PER_GENERATION_USD * fx.value;
+  // (Rodada 41) Detalhamento do consumo LLM do mês por modelo de IA.
+  const costByModel = await groupMonthTokensByModel(userId, fx.value);
+  costByModel.push({ model: `${imageModel.model} (imagem)`, tokens: 0, costBrl: Math.round(imageCostBrl * 100) / 100 });
   const now = new Date();
   const daysElapsed = Math.max(1, now.getDate());
   const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
@@ -2310,5 +2394,46 @@ export async function estimateMonthlyCostBrl(userId: number): Promise<{
     imageModel: imageModel.model,
     imageModelFrom: imageModel.from,
     totalMonthCostBrl: costBrl + imageCostBrl,
+    costByModel,
   };
+}
+/** (Rodada 41) Agrupa tokens LLM do mês por modelo registrado em api_usage.
+ * Linhas sem modelo gravado entram como "efetivo do período". */
+export async function groupMonthTokensByModel(userId: number, usdBrl?: number): Promise<Array<{ model: string; tokens: number; costBrl: number }>> {
+  const db = await getDb();
+  if (!db) return [];
+  const monthStart = new Date(Date.UTC(new Date().getFullYear(), new Date().getMonth(), 1));
+  const rows = await db
+    .select({ model: apiUsage.model, tokens: apiUsage.tokens })
+    .from(apiUsage)
+    .where(and(eq(apiUsage.userId, String(userId)), eq(apiUsage.scope, "llm"), gte(apiUsage.usageDate, monthStart.toISOString().slice(0, 10))))
+    .catch(() => []);
+  if (!rows.length) return [];
+  // Preço médio por modelo do catálogo (fallback do proxy padrão).
+  const byModel = new Map<string, { tokens: number; price: number }>();
+  for (const row of rows) {
+    const label = row.model || "efetivo do período";
+    const price = LLM_MODEL_PRICES[(row.model || "").toLowerCase()]?.input ?? LLM_DEFAULT_PRICE_PER_MILLION;
+    const prev = byModel.get(label) ?? { tokens: 0, price };
+    byModel.set(label, { tokens: prev.tokens + (row.tokens ?? 0), price });
+  }
+  // Consumo total do mês por api_usage (com ou sem modelo gravado) — garante que
+  // a soma do detalhamento seja igual ao total exibido no painel/PDF.
+  const totalTokens = rows.reduce((acc, r) => acc + (r.tokens ?? 0), 0);
+  const labeledTokens = Array.from(byModel.values()).reduce((acc, v) => acc + v.tokens, 0);
+  const unlabeledTokens = totalTokens - labeledTokens;
+  if (unlabeledTokens > 0) {
+    const label = "efetivo do período";
+    const price = LLM_DEFAULT_PRICE_PER_MILLION;
+    const prev = byModel.get(label) ?? { tokens: 0, price };
+    byModel.set(label, { tokens: prev.tokens + unlabeledTokens, price });
+  }
+  const rate = usdBrl ?? USD_TO_BRL;
+  return Array.from(byModel.entries())
+    .sort((a, b) => b[1].tokens - a[1].tokens)
+    .map(([model, { tokens, price }]) => ({
+      model,
+      tokens,
+      costBrl: Math.round(((tokens / 1_000_000) * price * rate) * 100) / 100,
+    }));
 }

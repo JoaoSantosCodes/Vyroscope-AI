@@ -151,6 +151,8 @@ export default function Profile() {
   const [monthlyQuotaLimit, setMonthlyQuotaLimit] = useState("");
   /** (Rodada 40) Teto de custo mensal em R$ (0 = sem teto). */
   const [monthlyCostCapBrl, setMonthlyCostCapBrl] = useState("");
+  /** (Rodada 41) Ação ao ultrapassar o teto de custo mensal. */
+  const [costCapAction, setCostCapAction] = useState<"block" | "warn" | "alert">("warn");
   const [limitAction, setLimitAction] = useState<"block" | "warn">("block");
   useEffect(() => {
     if (limitsDialogOpen && limitsQuery.data) {
@@ -163,6 +165,7 @@ export default function Profile() {
       setMonthlyTokenLimit(limit.monthlyTokenLimit > 0 ? String(limit.monthlyTokenLimit) : "");
       setMonthlyQuotaLimit(limit.monthlyQuotaLimit > 0 ? String(limit.monthlyQuotaLimit) : "");
       setMonthlyCostCapBrl((limit.monthlyCostCapBrl ?? 0) > 0 ? String(limit.monthlyCostCapBrl) : "");
+      setCostCapAction(limit.costCapAction ?? "warn");
       setLimitAction(limit.limitAction ?? "block");
     }
   }, [limitsDialogOpen, limitsQuery.data]);
@@ -205,6 +208,7 @@ export default function Profile() {
       monthlyTokenLimit: mTokens,
       monthlyQuotaLimit: mQuota,
       monthlyCostCapBrl: mCap,
+      costCapAction,
     });
   };
 
@@ -591,8 +595,29 @@ export default function Profile() {
                           disabled={setLimitsMutation.isPending}
                         />
                         <p className="text-xs text-muted-foreground">
-                          Quando a projeção do custo do mês (tokens LLM + thumbnails) ultrapassar este teto, a página
-                          de uso exibe um alerta visual. Use 0 ou deixe vazio para desativar. Máximo: R$ 10.000.
+                          Quando a projeção do custo do mês (tokens LLM + thumbnails) ultrapassar este teto, o sistema
+                          reage conforme a ação escolhida. Use 0 ou deixe vazio para desativar. Máximo: R$ 10.000.
+                        </p>
+                        <Label htmlFor="limit-cost-cap-action">Ação ao ultrapassar o teto</Label>
+                        <Select
+                          value={costCapAction}
+                          onValueChange={(v) => setCostCapAction(v as "block" | "warn" | "alert")}
+                        >
+                          <SelectTrigger id="limit-cost-cap-action" className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="block">Bloquear automaticamente novas análises</SelectItem>
+                            <SelectItem value="warn">Apenas avisar — pedir confirmação de uso único</SelectItem>
+                            <SelectItem value="alert">Apenas notificar (sem confirmar ou bloquear)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                          <strong>Bloquear:</strong> novas análises são impedidas até o limite ser ajustado.
+                          {" "}
+                          <strong>Avisar:</strong> pede uma confirmação de uso único antes de cada análise.
+                          {" "}
+                          <strong>Notificar:</strong> apenas gera um alerta na interface, sem impedir ou confirmar.
                         </p>
                       </div>
                     </div>

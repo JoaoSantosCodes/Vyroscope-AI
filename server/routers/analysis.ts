@@ -10,6 +10,7 @@ import {
   getUserLimits,
   getUsageForBlock,
   recordApiUsage,
+  resolveLlmModel,
   confirmBlockedAttempt,
   getLatestBlockedAttemptId,
   recordBlockedAttempt,
@@ -360,7 +361,9 @@ async function runAnalysisAsync(
     await updateAnalysis(analysisId, { status: "completed", result: JSON.stringify(result) });
     // (Rodada 35) Registra o consumo para o painel de status das APIs.
     if (userIdNum) {
-      recordApiUsage({ userId: userIdNum, scope: "llm", tokens: result.llmTokens, requests: 1 }).catch(() => undefined);
+      // (Rodada 41) Modelo efetivo da chamada, para o detalhamento de custo por modelo.
+      const modelInfo = await resolveLlmModel(userIdNum);
+      recordApiUsage({ userId: userIdNum, scope: "llm", tokens: result.llmTokens, requests: 1, model: modelInfo.model }).catch(() => undefined);
       recordApiUsage({ userId: userIdNum, scope: "youtube", units: youtubeUnits, requests: 2 }).catch(() => undefined);
     }
     await updateAnalysisProgress(analysisId, 100);

@@ -175,6 +175,20 @@
       "when": 1786930362332,
       "tag": "0021_far_loners",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "5",
+      "when": 1786932896365,
+      "tag": "0022_cheerful_giant_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "5",
+      "when": 1786932946880,
+      "tag": "0023_overjoyed_praxagora",
+      "breakpoints": true
     }
   ]
 }

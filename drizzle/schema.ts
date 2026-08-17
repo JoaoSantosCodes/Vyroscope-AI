@@ -1,4 +1,4 @@
-import { bigint, index, int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { bigint, decimal, index, int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
 
 // Nota: o banco usa text() no modelo (máx. ~64KB) — suficiente para o log de
 // retentativas; a coluna real no banco é MEDIUMTEXT via migração SQL manual.
@@ -31,6 +31,10 @@ export const userLimits = mysqlTable("user_limits", {
   /** (Rodada 40) Teto de custo mensal em R$ (0 = sem teto): a projeção de
    * custo do mês >= 80%/100% do teto dispara alerta in-app (dimensão cost_cap). */
   monthlyCostCapBrl: int("monthly_cost_cap_brl").notNull().default(0),
+  /** (Rodada 41) Ação ao atingir o teto de custo mensal (100% da projeção):
+   * "block" bloqueia novas gerações automaticamente; "warn" pede confirmação
+   * de uso único (padrão da R38/R39); "alert" apenas notifica sem bloquear. */
+  costCapAction: varchar("cost_cap_action", { length: 8 }).default("warn").notNull(),
   /** (Rodada 37) Confirmação manual do usuário válida até a meia-noite
    * (epoch ms). Quando >= agora, o bloqueio diário é temporariamente liberado. */
   overrideUntil: bigint("override_until", { mode: "number" }).notNull().default(0),
@@ -45,6 +49,22 @@ export const userLimits = mysqlTable("user_limits", {
  * consumo diário de uma dimensão atinge 80% (warn) ou 100% (blocked), para
  * avisar o usuário sem depender da abertura do perfil.
  */
+/**
+ * (Rodada 41) Histórico de cotações USD/BRL usadas nas projeções de custo:
+ * uma linha por dia com a taxa efetiva (API pública, cache ou fallback),
+ * alimentado por getUsdBrlRate via snapshot de fim de dia.
+ */
+export const fxRateHistory = mysqlTable("fx_rate_history", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Chave diária da cotação (YYYY-MM-DD) */
+  dayKey: varchar("day_key", { length: 10 }).notNull(),
+  /** Taxa USD→BRL registrada no dia (AwesomeAPI bid, cache ou fallback) */
+  rate: decimal("rate", { precision: 8, scale: 4 }).notNull(),
+  /** Origem da taxa: "api" | "cache" | "fallback" */
+  source: varchar("source", { length: 10 }).notNull().default("fallback"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 export const usageAlerts = mysqlTable("usage_alerts", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("user_id").notNull(),
@@ -80,7 +100,9 @@ export const apiUsage = mysqlTable("api_usage", {
   tokens: int("tokens").notNull().default(0),
   units: int("units").notNull().default(0),
   requests: int("requests").notNull().default(0),
-  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(0),
+  /** (Rodada 41) Modelo de IA usado na chamada, para detalhamento de custo. */
+  model: varchar("model", { length: 60 }),
 });
 
 export const users = mysqlTable("users", {

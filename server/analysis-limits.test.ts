@@ -35,6 +35,8 @@ const db = vi.hoisted(() => ({
   confirmBlockedAttempt: vi.fn().mockResolvedValue(undefined),
   // (Rodada 36) checagem de limites — a porta de proteção de custos.
   checkAnalysisLimitsExtended: vi.fn().mockResolvedValue({ blocked: false }),
+  // (Rodada 41) modelo efetivo para o detalhamento de custo por modelo.
+  resolveLlmModel: vi.fn().mockResolvedValue({ model: "gpt-4.1-mini", from: "env" as const }),
 }));
 vi.mock("./db", () => db);
 vi.mock("./providers", () => ({

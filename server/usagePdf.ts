@@ -2,6 +2,7 @@ import PDFDocument from "pdfkit";
 import {
   estimateMonthlyCostBrl,
   getBlockedAttempts,
+  getFxRateHistory,
   getUserLimits,
   getUsageBudgets,
   getUsageDailySeries,
@@ -44,13 +45,14 @@ export async function buildUsagePdf(userId: number, days = 30): Promise<Buffer> 
 
       const todayIso = new Date().toISOString().slice(0, 10);
 
-      const [summary, series, limits, budgets, blocked, cost] = await Promise.all([
+      const [summary, series, limits, budgets, blocked, cost, fxSeries] = await Promise.all([
         getUsageSummary(userId),
         getUsageDailySeries(userId, Math.min(days, 90)),
         getUserLimits(userId),
         getUsageBudgets(userId),
         getBlockedAttempts(userId, 100),
         estimateMonthlyCostBrl(userId),
+        getFxRateHistory(90),
       ]);
 
       const llmT = summary.llm;
@@ -156,6 +158,49 @@ export async function buildUsagePdf(userId: number, days = 30): Promise<Buffer> 
         { width: doc.page.width - 108 }
       );
       doc.y += 26;
+
+      // ===== Custo por modelo de IA (Rodada 41) =====
+      if (doc.y > doc.page.height - 150) doc.addPage();
+      doc.fillColor(COLORS.dark).rect(0, doc.y + 24, doc.page.width, 36).fill();
+      doc.fillColor(COLORS.amber).fontSize(13).font("Helvetica-Bold").text("Custo por modelo de IA (mês corrente)", 54, doc.y + 34);
+      doc.y += 74;
+      doc.fillColor(COLORS.light).fontSize(9).font("Helvetica-Bold").text("Modelo", 54, doc.y);
+      doc.text("Tokens", 300, doc.y);
+      doc.text("Custo estimado", 420, doc.y);
+      doc.moveTo(54, doc.y + 14).lineTo(doc.page.width - 54, doc.y + 14).strokeColor(COLORS.gray).lineWidth(0.5).stroke();
+      doc.y += 22;
+      const costByModel = Array.isArray(cost.costByModel) ? cost.costByModel : [];
+      if (costByModel.length === 0) {
+        doc.fillColor(COLORS.gray).fontSize(9).text("Nenhum consumo de LLM registrado neste mês.", 54, doc.y);
+        doc.y += 16;
+      }
+      for (const m of costByModel) {
+        if (doc.y > doc.page.height - 30) doc.addPage();
+        doc.fillColor(COLORS.light).fontSize(9).text(m.model, 54, doc.y, { width: 240 });
+        doc.text(m.tokens.toLocaleString("pt-BR"), 300, doc.y);
+        doc.text(fmtBrl(m.costBrl), 420, doc.y);
+        doc.y += 16;
+      }
+      doc.y += 10;
+      const fxMin = fxSeries.length ? Math.min(...fxSeries.map((f) => f.rate)) : null;
+      const fxMax = fxSeries.length ? Math.max(...fxSeries.map((f) => f.rate)) : null;
+      const fxAvg = fxSeries.length ? fxSeries.reduce((acc, f) => acc + f.rate, 0) / fxSeries.length : null;
+      if (fxMin !== null && fxMax !== null && fxAvg !== null) {
+        doc.fillColor(COLORS.gray).fontSize(9).text(
+          `Cotações do período (90 dias): mínima ${fxMin.toFixed(2)} · máxima ${fxMax.toFixed(2)} · média ${fxAvg.toFixed(2)} BRL/USD`,
+          54,
+          doc.y,
+          { width: doc.page.width - 108 }
+        );
+        doc.y += 14;
+        doc.text(
+          `Custo total do mês até hoje: ${fmtBrl(cost.totalMonthCostBrl)}`,
+          54,
+          doc.y,
+          { width: doc.page.width - 108 }
+        );
+        doc.y += 18;
+      }
 
       // ===== Gráfico de consumo diário (Rodada 39) =====
       if (doc.y > doc.page.height - 200) doc.addPage();
