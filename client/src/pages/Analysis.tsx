@@ -19,6 +19,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useLocation, useSearchParams } from "wouter";
+import { useLimitConfirmation } from "@/hooks/useLimitConfirmation";
 
 const STEPS = [
   { label: "Buscando vídeos em alta no nicho", icon: Compass },
@@ -59,12 +60,20 @@ export default function Analysis() {
 
   const [doneAnalysisId, setDoneAnalysisId] = useState<string | null>(null);
 
+  // (Rodada 37) Modo "apenas avisar": erro PRECONDITION_FAILED abre o dialog de
+  // confirmação; ao confirmar, o bloqueio é liberado até a meia-noite.
+  const { handleLimitError, dialog: limitDialog } = useLimitConfirmation({
+    onConfirm: () => runMutation.mutate({ niche: activeNiche }),
+    message: null,
+  });
+
   const runMutation = trpc.analysis.run.useMutation({
     onSuccess: (data) => {
       // Execução síncrona concluída: mostra o progresso completo e navega ao resultado
       setDoneAnalysisId(data.id);
     },
     onError: (err) => {
+      if (handleLimitError(err)) return;
       toast.error(err.message || "Não foi possível concluir a análise. Tente novamente.");
     },
   });
@@ -123,6 +132,7 @@ export default function Analysis() {
             onRetry={handleReanalyze}
           />
         )}
+        {limitDialog}
       </div>
     </SiteLayout>
   );

@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { formatDate } from "@/lib/score";
@@ -144,12 +145,22 @@ export default function Profile() {
   const [dailyAnalysisLimit, setDailyAnalysisLimit] = useState("");
   const [dailyTokenLimit, setDailyTokenLimit] = useState("");
   const [dailyQuotaLimit, setDailyQuotaLimit] = useState("");
+  const [weeklyTokenLimit, setWeeklyTokenLimit] = useState("");
+  const [weeklyQuotaLimit, setWeeklyQuotaLimit] = useState("");
+  const [monthlyTokenLimit, setMonthlyTokenLimit] = useState("");
+  const [monthlyQuotaLimit, setMonthlyQuotaLimit] = useState("");
+  const [limitAction, setLimitAction] = useState<"block" | "warn">("block");
   useEffect(() => {
     if (limitsDialogOpen && limitsQuery.data) {
       const { limit } = limitsQuery.data;
       setDailyAnalysisLimit(limit.dailyAnalysisLimit > 0 ? String(limit.dailyAnalysisLimit) : "");
       setDailyTokenLimit(limit.dailyTokenLimit > 0 ? String(limit.dailyTokenLimit) : "");
       setDailyQuotaLimit(limit.dailyQuotaLimit > 0 ? String(limit.dailyQuotaLimit) : "");
+      setWeeklyTokenLimit(limit.weeklyTokenLimit > 0 ? String(limit.weeklyTokenLimit) : "");
+      setWeeklyQuotaLimit(limit.weeklyQuotaLimit > 0 ? String(limit.weeklyQuotaLimit) : "");
+      setMonthlyTokenLimit(limit.monthlyTokenLimit > 0 ? String(limit.monthlyTokenLimit) : "");
+      setMonthlyQuotaLimit(limit.monthlyQuotaLimit > 0 ? String(limit.monthlyQuotaLimit) : "");
+      setLimitAction(limit.limitAction ?? "block");
     }
   }, [limitsDialogOpen, limitsQuery.data]);
   const setLimitsMutation = trpc.profile.setLimits.useMutation({
@@ -172,11 +183,24 @@ export default function Profile() {
     const analyses = parse(dailyAnalysisLimit, 50);
     const tokens = parse(dailyTokenLimit, 500_000);
     const quota = parse(dailyQuotaLimit, 1_000_000);
-    if (analyses < 0 || tokens < 0 || quota < 0) {
+    const wTokens = parse(weeklyTokenLimit, 5_000_000);
+    const wQuota = parse(weeklyQuotaLimit, 5_000_000);
+    const mTokens = parse(monthlyTokenLimit, 5_000_000);
+    const mQuota = parse(monthlyQuotaLimit, 5_000_000);
+    if ([analyses, tokens, quota, wTokens, wQuota, mTokens, mQuota].some((n) => n < 0)) {
       toast.error("Valores inválidos: use números inteiros positivos (0 = ilimitado).");
       return;
     }
-    setLimitsMutation.mutate({ dailyAnalysisLimit: analyses, dailyTokenLimit: tokens, dailyQuotaLimit: quota });
+    setLimitsMutation.mutate({
+      dailyAnalysisLimit: analyses,
+      dailyTokenLimit: tokens,
+      dailyQuotaLimit: quota,
+      limitAction,
+      weeklyTokenLimit: wTokens,
+      weeklyQuotaLimit: wQuota,
+      monthlyTokenLimit: mTokens,
+      monthlyQuotaLimit: mQuota,
+    });
   };
 
   // (Rodada 34) Verificação em lote de todos os provedores
@@ -384,10 +408,12 @@ export default function Profile() {
                   <DialogHeader>
                     <DialogTitle>Limites e proteção de custos</DialogTitle>
                     <DialogDescription>
-                      Defina limites diários opcionais para evitar custos excessivos com provedores pagos.
-                      Ao atingir 80% do limite você recebe um alerta visual; em 100% as novas análises são
-                      bloqueadas até a meia-noite (horário do servidor). Use 0 ou deixe vazio para ilimitado.
-                      Máximos: 50 análises, 500.000 tokens e 1.000.000 unidades de cota por dia.
+                      Defina limites opcionais para evitar custos excessivos com provedores pagos.
+                      Ao atingir 80% do limite você recebe um alerta visual. Em 100%, o modo "Bloquear"
+                      interrompe novas análises até a meia-noite (horário do servidor) e o modo "Apenas
+                      avisar" pede uma confirmação sua, válida até a meia-noite. Use 0 ou deixe vazio para
+                      ilimitado. Máximos: 50 análises/dia, 500.000 tokens/dia, 1.000.000 unidades/dia e
+                      5.000.000 nos orçamentos semanal/mensal.
                     </DialogDescription>
                   </DialogHeader>
                   <div className="space-y-4">
@@ -444,6 +470,105 @@ export default function Profile() {
                           ? `Hoje: ${limitsQuery.data.today.quota.toLocaleString("pt-BR")} de ${limitsQuery.data.limit.dailyQuotaLimit.toLocaleString("pt-BR")} unidades (${Math.round((limitsQuery.data.today.quota / limitsQuery.data.limit.dailyQuotaLimit) * 100)}%)`
                           : `Hoje: ${limitsQuery.data?.today.quota.toLocaleString("pt-BR") ?? 0} unidades de cota.`}
                       </p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Quando atingir 100% do limite diário</Label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button
+                          type="button"
+                          variant={limitAction === "block" ? "default" : "outline"}
+                          size="sm"
+                          className="h-auto flex-col gap-1 py-2"
+                          disabled={setLimitsMutation.isPending}
+                          onClick={() => setLimitAction("block")}
+                        >
+                          <ShieldAlert className="h-4 w-4" />
+                          Bloquear
+                        </Button>
+                        <Button
+                          type="button"
+                          variant={limitAction === "warn" ? "default" : "outline"}
+                          size="sm"
+                          className="h-auto flex-col gap-1 py-2"
+                          disabled={setLimitsMutation.isPending}
+                          onClick={() => setLimitAction("warn")}
+                        >
+                          <ShieldCheck className="h-4 w-4" />
+                          Apenas avisar
+                        </Button>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {limitAction === "block"
+                          ? "Novas análises são interrompidas automaticamente até a meia-noite."
+                          : "Você recebe uma janela de confirmação e pode executar mesmo assim (liberação válida até a meia-noite)."}
+                      </p>
+                    </div>
+                    <Separator />
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="limit-weekly-tokens">Tokens de LLM por semana</Label>
+                        <Input
+                          id="limit-weekly-tokens"
+                          type="number"
+                          min={0}
+                          max={5000000}
+                          value={weeklyTokenLimit}
+                          onChange={(e) => setWeeklyTokenLimit(e.target.value)}
+                          placeholder="0 = ilimitado"
+                          disabled={setLimitsMutation.isPending}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Acompanhado na página de uso (últimos 7 dias) com projeção de esgotamento.
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="limit-weekly-quota">Cota YouTube por semana (unidades)</Label>
+                        <Input
+                          id="limit-weekly-quota"
+                          type="number"
+                          min={0}
+                          max={5000000}
+                          value={weeklyQuotaLimit}
+                          onChange={(e) => setWeeklyQuotaLimit(e.target.value)}
+                          placeholder="0 = ilimitado"
+                          disabled={setLimitsMutation.isPending}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Acompanhado na página de uso (últimos 7 dias) com projeção de esgotamento.
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="limit-monthly-tokens">Tokens de LLM por mês</Label>
+                        <Input
+                          id="limit-monthly-tokens"
+                          type="number"
+                          min={0}
+                          max={5000000}
+                          value={monthlyTokenLimit}
+                          onChange={(e) => setMonthlyTokenLimit(e.target.value)}
+                          placeholder="0 = ilimitado"
+                          disabled={setLimitsMutation.isPending}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Acompanhado na página de uso (do dia 1 ao dia de hoje) com projeção de esgotamento.
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="limit-monthly-quota">Cota YouTube por mês (unidades)</Label>
+                        <Input
+                          id="limit-monthly-quota"
+                          type="number"
+                          min={0}
+                          max={5000000}
+                          value={monthlyQuotaLimit}
+                          onChange={(e) => setMonthlyQuotaLimit(e.target.value)}
+                          placeholder="0 = ilimitado"
+                          disabled={setLimitsMutation.isPending}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Acompanhado na página de uso (do dia 1 ao dia de hoje) com projeção de esgotamento.
+                        </p>
+                      </div>
                     </div>
                   </div>
                   <DialogFooter>

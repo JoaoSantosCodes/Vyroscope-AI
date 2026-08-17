@@ -1,6 +1,20 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { getLimitStatus, getUsageDailySeries, getUsageSummary, getUserStats, setProviderSettings, setUserLimits, updateLocalCode, updateUserProfile } from "../db";
+import {
+  confirmLimitOverride,
+  getBlockedAttempts,
+  getLimitStatus,
+  getUserLimits,
+  getUsageBudgets,
+  getUsageDailySeries,
+  getUsageSummary,
+  getUserStats,
+  projectExhaustion,
+  setProviderSettings,
+  setUserLimits,
+  updateLocalCode,
+  updateUserProfile,
+} from "../db";
 import {
   resolveImageConfig,
   resolveLlmConfig,
@@ -232,8 +246,38 @@ export const profileRouter = router({
    * "ok" / "warn" (>=80%) / "blocked" (>=100%) por escopo (análises/tokens/quota).
    */
   getLimits: protectedProcedure.query(async ({ ctx }) => {
-    const status = await getLimitStatus(ctx.user.id);
-    return status;
+    const [status, limits, budgets] = await Promise.all([
+      getLimitStatus(ctx.user.id),
+      getUserLimits(ctx.user.id),
+      getUsageBudgets(ctx.user.id),
+    ]);
+    const todayIso = new Date().toISOString().slice(0, 10);
+    return {
+      ...status,
+      /** (Rodada 37) */
+      limitAction: limits.limitAction,
+      weeklyTokenLimit: limits.weeklyTokenLimit,
+      weeklyQuotaLimit: limits.weeklyQuotaLimit,
+      monthlyTokenLimit: limits.monthlyTokenLimit,
+      monthlyQuotaLimit: limits.monthlyQuotaLimit,
+      overrideUntil: limits.overrideUntil,
+      budgets: {
+        week: {
+          ...budgets.week,
+          tokenLimit: limits.weeklyTokenLimit,
+          quotaLimit: limits.weeklyQuotaLimit,
+          tokenProjection: projectExhaustion({ consumed: budgets.week.tokens, cap: limits.weeklyTokenLimit, windowStartIso: budgets.weekStartIso, todayIso }),
+          quotaProjection: projectExhaustion({ consumed: budgets.week.quota, cap: limits.weeklyQuotaLimit, windowStartIso: budgets.weekStartIso, todayIso }),
+        },
+        month: {
+          ...budgets.month,
+          tokenLimit: limits.monthlyTokenLimit,
+          quotaLimit: limits.monthlyQuotaLimit,
+          tokenProjection: projectExhaustion({ consumed: budgets.month.tokens, cap: limits.monthlyTokenLimit, windowStartIso: budgets.monthStartIso, todayIso }),
+          quotaProjection: projectExhaustion({ consumed: budgets.month.quota, cap: limits.monthlyQuotaLimit, windowStartIso: budgets.monthStartIso, todayIso }),
+        },
+      },
+    };
   }),
 
   /**
@@ -247,6 +291,12 @@ export const profileRouter = router({
         dailyAnalysisLimit: z.number().int().min(0).max(50).optional(),
         dailyTokenLimit: z.number().int().min(0).max(500_000).optional(),
         dailyQuotaLimit: z.number().int().min(0).max(1_000_000).optional(),
+        /** (Rodada 37) "block" = bloqueia em 100%; "warn" = pede confirmação (apenas-avisar) */
+        limitAction: z.enum(["block", "warn"]).optional(),
+        weeklyTokenLimit: z.number().int().min(0).max(5_000_000).optional(),
+        weeklyQuotaLimit: z.number().int().min(0).max(5_000_000).optional(),
+        monthlyTokenLimit: z.number().int().min(0).max(5_000_000).optional(),
+        monthlyQuotaLimit: z.number().int().min(0).max(5_000_000).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -254,7 +304,26 @@ export const profileRouter = router({
         dailyAnalysisLimit: input.dailyAnalysisLimit ?? 0,
         dailyTokenLimit: input.dailyTokenLimit ?? 0,
         dailyQuotaLimit: input.dailyQuotaLimit ?? 0,
+        limitAction: input.limitAction ?? "block",
+        weeklyTokenLimit: input.weeklyTokenLimit ?? 0,
+        weeklyQuotaLimit: input.weeklyQuotaLimit ?? 0,
+        monthlyTokenLimit: input.monthlyTokenLimit ?? 0,
+        monthlyQuotaLimit: input.monthlyQuotaLimit ?? 0,
       });
       return { ok: true } as const;
     }),
+  /**
+   * (Rodada 37) Confirmação manual de limite: libera o bloqueio diário até a
+   * meia-noite do servidor (modo "apenas avisar").
+   */
+  confirmLimitOverride: protectedProcedure.mutation(async ({ ctx }) => {
+    const { overrideUntil } = await confirmLimitOverride(ctx.user.id);
+    return { overrideUntil } as const;
+  }),
+  /**
+   * (Rodada 37) Histórico detalhado de tentativas bloqueadas pelos limites.
+   */
+  listBlockedAttempts: protectedProcedure.query(async ({ ctx }) => {
+    return getBlockedAttempts(ctx.user.id);
+  }),
 });

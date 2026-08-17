@@ -2,6 +2,15 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
@@ -19,6 +28,7 @@ import {
   Loader2,
   RefreshCw,
   ShieldAlert,
+  ShieldCheck,
   TrendingUp,
   Video,
 } from "lucide-react";
@@ -110,6 +120,10 @@ export default function Usage() {
   const peakUnits = useMemo(() => Math.max(0, ...chartData.map((r) => r.units)), [chartData]);
 
   const limits = limitsQuery.data;
+  const blockedAttemptsQuery = trpc.profile.listBlockedAttempts.useQuery(undefined, {
+    enabled: isAuthenticated,
+    staleTime: 30_000,
+  });
   const isAnalysisWarn = limits?.state.analyses === "warn";
   const isAnalysisBlocked = limits?.state.analyses === "blocked";
   const isTokenWarn = limits?.state.tokens === "warn";
@@ -190,6 +204,20 @@ export default function Usage() {
             label="Pico de cota/dia"
             value={peakUnits.toLocaleString("pt-BR")}
             hint={formatUnitPeak(chartData)}
+          />
+        </div>
+
+        {/* Orçamentos semanal e mensal com projeção de esgotamento */}
+        <div className="grid gap-4 lg:grid-cols-2">
+          <BudgetCard
+            title="Orçamento semanal"
+            hint="Últimos 7 dias — tokens LLM e cota YouTube somados"
+            budgets={limits?.budgets?.week}
+          />
+          <BudgetCard
+            title="Orçamento mensal"
+            hint="Do dia 1 do mês até hoje — tokens LLM e cota YouTube somados"
+            budgets={limits?.budgets?.month}
           />
         </div>
 
@@ -337,10 +365,17 @@ export default function Usage() {
           </CardContent>
         </Card>
 
+        {/* Histórico de tentativas bloqueadas */}
+        <BlockedAttemptsSection
+          attempts={blockedAttemptsQuery.data ?? []}
+          isLoading={blockedAttemptsQuery.isLoading}
+        />
+
         <p className="text-xs text-muted-foreground">
-          O limite de 80% exibe um alerta visual no perfil; ao atingir 100% as novas análises são bloqueadas até a
-          meia-noite (horário do servidor). O contador de análises do dia considera todas as execuções realizadas,
-          independentemente do status final.
+          O limite de 80% exibe um alerta visual no perfil. No modo "Bloquear", novas análises são interrompidas ao
+          atingir 100%; no modo "Apenas avisar", uma confirmação é solicitada (válida até a meia-noite). O contador de
+          análises do dia considera todas as execuções realizadas, independentemente do status final. As tentativas
+          bloqueadas ficam registradas nesta página para transparência.
         </p>
       </div>
     </SiteLayout>
@@ -385,6 +420,165 @@ export function LimitAlertsBanner() {
         </div>
       ))}
     </div>
+  );
+}
+
+const DIM_LABEL: Record<string, string> = {
+  analyses: "Análises/dia",
+  tokens: "Tokens LLM",
+  quota: "Cota YouTube",
+};
+
+type Projection = { exhausted?: boolean; estimatedDayIso?: string | null; daysLeft?: number | null; pct?: number | null } | null;
+
+function ProjectionRow(props: { projection: Projection }) {
+  const { projection } = props;
+  if (!projection || !projection.estimatedDayIso) {
+    return <p className="mt-3 text-xs text-muted-foreground">Sem ritmo de consumo suficiente para projetar.</p>;
+  }
+  const date = formatDate(new Date(`${projection.estimatedDayIso}T00:00:00`).getTime());
+  return (
+    <div className={`mt-3 flex items-center gap-2 text-xs ${projection.exhausted ? "text-red-400" : "text-amber-300"}`}>
+      <TrendingUp className="h-3.5 w-3.5 shrink-0" />
+      <span>
+        {projection.exhausted
+          ? "Limite atingido pelo ritmo atual."
+          : `No ritmo atual, o limite será atingido em ${date}${projection.daysLeft !== undefined ? ` (${projection.daysLeft} ${projection.daysLeft === 1 ? "dia" : "dias"})` : ""}.`}
+      </span>
+    </div>
+  );
+}
+
+function BudgetCard(props: {
+  title: string;
+  hint: string;
+  budgets?: { tokens: number; quota: number; tokenLimit?: number; quotaLimit?: number; tokenProjection?: Projection; quotaProjection?: Projection };
+}) {
+  const { budgets } = props;
+  const hasLimits = Boolean((budgets?.tokenLimit ?? 0) || (budgets?.quotaLimit ?? 0));
+  return (
+    <Card className="border-border/60">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-lg flex items-center gap-2">
+          <Gauge className="h-5 w-5 text-primary" />
+          {props.title}
+        </CardTitle>
+        <CardDescription>{props.hint}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {!hasLimits ? (
+          <p className="text-sm text-muted-foreground">
+            Nenhum orçamento configurado. Defina limites semanais ou mensais em{" "}
+            <span className="font-medium">Limites e proteção de custos</span> no perfil para ativar o acompanhamento
+            e a projeção de esgotamento.
+          </p>
+        ) : (
+          <>
+            <BudgetRow
+              label="Tokens LLM"
+              consumed={budgets?.tokens ?? 0}
+              cap={budgets?.tokenLimit ?? 0}
+              projection={budgets?.tokenProjection ?? null}
+            />
+            <BudgetRow
+              label="Cota YouTube (unidades)"
+              consumed={budgets?.quota ?? 0}
+              cap={budgets?.quotaLimit ?? 0}
+              projection={budgets?.quotaProjection ?? null}
+            />
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function BudgetRow(props: { label: string; consumed: number; cap: number; projection: Projection }) {
+  const pct = props.cap > 0 ? Math.min(100, Math.round((props.consumed / props.cap) * 100)) : 0;
+  const tone = props.cap > 0 && pct >= 80 ? ("red" as const) : ("primary" as const);
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-baseline justify-between text-sm">
+        <span className="text-foreground/90">{props.label}</span>
+        {props.cap > 0 ? (
+          <span className="text-muted-foreground">
+            <span className="font-semibold text-foreground">{props.consumed.toLocaleString("pt-BR")}</span> /{" "}
+            {props.cap.toLocaleString("pt-BR")} ({pct}%)
+          </span>
+        ) : (
+          <span className="text-muted-foreground">{props.consumed.toLocaleString("pt-BR")} (ilimitado)</span>
+        )}
+      </div>
+      <Progress value={pct} className={tone === "red" ? "h-2 [&>div]:bg-red-500" : "h-2"} />
+      <ProjectionRow projection={props.projection} />
+    </div>
+  );
+}
+
+function BlockedAttemptsSection(props: { attempts: Array<{ id: number; dimension: string; limitValue: number; currentUsage: number; reason: string | null; attemptedAt: number; niche: string | null; confirmedAt: number | null; analysisId: string | null }>; isLoading: boolean }) {
+  const { attempts, isLoading } = props;
+  return (
+    <Card className="border-border/60">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-lg flex items-center gap-2">
+          <ShieldCheck className="h-5 w-5 text-primary" />
+          Tentativas bloqueadas
+        </CardTitle>
+        <CardDescription>
+          Histórico de análises interrompidas pela proteção de custos, incluindo as confirmadas manualmente no modo
+          "Apenas avisar".
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <Skeleton className="h-32 w-full" />
+        ) : attempts.length === 0 ? (
+          <div className="flex h-32 flex-col items-center justify-center gap-2 text-muted-foreground">
+            <ShieldCheck className="h-8 w-8 opacity-50" />
+            <p className="text-sm">Nenhuma tentativa bloqueada registrada. Os limites estão saudáveis.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="text-xs">Data</TableHead>
+                  <TableHead className="text-xs">Dimensão</TableHead>
+                  <TableHead className="text-xs text-right">Limite</TableHead>
+                  <TableHead className="text-xs text-right">Consumo no momento</TableHead>
+                  <TableHead className="text-xs">Status</TableHead>
+                  <TableHead className="text-xs">Motivo</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {attempts.map((a) => (
+                  <TableRow key={a.id}>
+                    <TableCell className="whitespace-nowrap text-xs">{formatDate(a.attemptedAt)}</TableCell>
+                    <TableCell className="text-xs">{DIM_LABEL[a.dimension] ?? a.dimension}</TableCell>
+                    <TableCell className="text-right text-xs">{a.limitValue.toLocaleString("pt-BR")}</TableCell>
+                    <TableCell className="text-right text-xs">{a.currentUsage.toLocaleString("pt-BR")}</TableCell>
+                    <TableCell>
+                      {a.confirmedAt ? (
+                        <Badge variant="outline" className="text-[10px] border-emerald-500/50 text-emerald-400">
+                          Confirmada
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-[10px] border-red-500/50 text-red-400">
+                          Bloqueada
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="max-w-[220px] text-xs text-muted-foreground" title={a.reason ?? undefined}>
+                      {a.reason}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

@@ -330,3 +330,15 @@
 - [x] Frontend: botão "Limites" no card Consumo de APIs do perfil com dialog de validação (máximos 50/500k/1M, 0 = ilimitado) e consumo de hoje em %
 - [x] Frontend: LimitAlertsBanner (âmbar 80% / vermelho 100%) no card Consumo de APIs e na página /uso
 - [x] Testes vitest (21 novos em limits.test.ts e analysis-limits.test.ts; 264/264 passando), checkpoint final
+
+## Melhorias solicitadas (rodada 37)
+
+- [x] Backend: modo "apenas avisar" (limitAction warn|block em user_limits; padrão block) — checkAnalysisLimits retorna needsConfirmation em 100% quando warn
+- [x] Backend: tentativa bloqueada/confirmada gravada em blocked_attempts (dimensão, limite, consumo, motivo, confirmedAt); análise confirmada roda normalmente com overrideUntil até a meia-noite (confirmLimitOverride)
+- [x] Backend: orçamentos semanal e mensal (weeklyTokenLimit, weeklyQuotaLimit, monthlyTokenLimit, monthlyQuotaLimit, 0 = ilimitado) + getUsageBudgets (últimos 7 dias / do dia 1 ao dia de hoje) e projectExhaustion (ritmo médio diário → dia estimado de atingir o limite)
+- [x] Backend: procedures getBlockedAttempts (listBlockedAttempts.query), setLimits com novos campos, getLimits com budgets+projeções+limitAction+overrideUntil
+- [x] Frontend: hook useLimitConfirmation + dialog de confirmação (AlertDialog) no analysis.run (Analysis.tsx) e analysis.retry (Result.tsx); ao confirmar, libera override e reexecuta
+- [x] Frontend: cards de orçamento semanal/mensal na /uso (consumido vs limite, %, Progress) e projeção de esgotamento (data estimada + dias restantes)
+- [x] Frontend: seção "Tentativas bloqueadas" na /uso com tabela detalhada (data, dimensão, limite, consumo no momento, status confirmada/bloqueada, motivo com tooltip)
+- [x] Frontend: opção de escolha block/apenas-avisar no dialog Limites do perfil (persistida em user_limits.limitAction)
+- [x] Testes vitest (13 novos em limits-r37.test.ts e analysis-limits.test.ts; 277/277 passando), docs, skill, Obsidian rodada-37 e checkpoint final

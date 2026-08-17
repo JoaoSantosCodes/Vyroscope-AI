@@ -5,9 +5,11 @@ import {
   apiUsage,
   analysisVideos,
   analyses,
+  blockedAttempts,
   userLimits,
   InsertAnalysis,
   InsertAnalysisVideo,
+  InsertBlockedAttempt,
   InsertUser,
   userSettings,
   users,
@@ -1388,6 +1390,14 @@ export type UserLimits = {
   dailyAnalysisLimit: number;
   dailyTokenLimit: number;
   dailyQuotaLimit: number;
+  /** (Rodada 37) "block" = bloqueia em 100%; "warn" = pede confirmação (apenas-avisar) */
+  limitAction: "block" | "warn";
+  weeklyTokenLimit: number;
+  weeklyQuotaLimit: number;
+  monthlyTokenLimit: number;
+  monthlyQuotaLimit: number;
+  /** (Rodada 37) Override manual válido até (epoch ms; 0 ou ausente = sem override) */
+  overrideUntil?: number;
 };
 export type UsageStatus = {
   scopes: Record<string, { tokens: number; units: number; requests: number }>;
@@ -1409,13 +1419,30 @@ export type LimitStatus = {
 /** Retorna os limites do usuário (0 = ilimitado). */
 export async function getUserLimits(userId: number): Promise<UserLimits> {
   const db = await getDb();
-  if (!db) return { dailyAnalysisLimit: 0, dailyTokenLimit: 0, dailyQuotaLimit: 0 };
+  const empty: UserLimits = {
+    dailyAnalysisLimit: 0,
+    dailyTokenLimit: 0,
+    dailyQuotaLimit: 0,
+    limitAction: "block",
+    weeklyTokenLimit: 0,
+    weeklyQuotaLimit: 0,
+    monthlyTokenLimit: 0,
+    monthlyQuotaLimit: 0,
+  };
+  if (!db) return empty;
   const row = await db.select().from(userLimits).where(eq(userLimits.userId, userId)).limit(1);
-  if (!row.length) return { dailyAnalysisLimit: 0, dailyTokenLimit: 0, dailyQuotaLimit: 0 };
+  if (!row.length) return empty;
+  const r = row[0];
   return {
-    dailyAnalysisLimit: row[0].dailyAnalysisLimit ?? 0,
-    dailyTokenLimit: row[0].dailyTokenLimit ?? 0,
-    dailyQuotaLimit: row[0].dailyQuotaLimit ?? 0,
+    dailyAnalysisLimit: r.dailyAnalysisLimit ?? 0,
+    dailyTokenLimit: r.dailyTokenLimit ?? 0,
+    dailyQuotaLimit: r.dailyQuotaLimit ?? 0,
+    limitAction: r.limitAction === "warn" ? "warn" : "block",
+    weeklyTokenLimit: r.weeklyTokenLimit ?? 0,
+    weeklyQuotaLimit: r.weeklyQuotaLimit ?? 0,
+    monthlyTokenLimit: r.monthlyTokenLimit ?? 0,
+    monthlyQuotaLimit: r.monthlyQuotaLimit ?? 0,
+    overrideUntil: r.overrideUntil ?? 0,
   };
 }
 /** Salva os limites diários do usuário (transação upsert simples). */
@@ -1426,11 +1453,92 @@ export async function setUserLimits(userId: number, limits: UserLimits): Promise
     dailyAnalysisLimit: Math.max(0, Math.floor(limits.dailyAnalysisLimit ?? 0)),
     dailyTokenLimit: Math.max(0, Math.floor(limits.dailyTokenLimit ?? 0)),
     dailyQuotaLimit: Math.max(0, Math.floor(limits.dailyQuotaLimit ?? 0)),
+    limitAction: limits.limitAction === "warn" ? ("warn" as const) : ("block" as const),
+    weeklyTokenLimit: Math.max(0, Math.floor(limits.weeklyTokenLimit ?? 0)),
+    weeklyQuotaLimit: Math.max(0, Math.floor(limits.weeklyQuotaLimit ?? 0)),
+    monthlyTokenLimit: Math.max(0, Math.floor(limits.monthlyTokenLimit ?? 0)),
+    monthlyQuotaLimit: Math.max(0, Math.floor(limits.monthlyQuotaLimit ?? 0)),
   };
   await db
     .insert(userLimits)
     .values({ ...clamped, userId, updatedAt: Date.now() })
     .onDuplicateKeyUpdate({ set: { ...clamped, updatedAt: Date.now() } });
+}
+/** (Rodada 37) Registro manual de confirmação: libera o bloqueio diário até a
+ * meia-noite do servidor. Retorna o override gerado (epoch de validação). */
+export async function confirmLimitOverride(userId: number): Promise<{ overrideUntil: number }> {
+  const db = await getDb();
+  const midnight = new Date();
+  midnight.setHours(24, 0, 0, 0);
+  const overrideUntil = midnight.getTime();
+  if (db) {
+    await db
+      .insert(userLimits)
+      .values({
+        userId,
+        updatedAt: Date.now(),
+        overrideUntil,
+        limitAction: "block",
+        dailyAnalysisLimit: 0,
+        dailyTokenLimit: 0,
+        dailyQuotaLimit: 0,
+        weeklyTokenLimit: 0,
+        weeklyQuotaLimit: 0,
+        monthlyTokenLimit: 0,
+        monthlyQuotaLimit: 0,
+      })
+      .onDuplicateKeyUpdate({ set: { overrideUntil, updatedAt: Date.now() } });
+  }
+  return { overrideUntil };
+}
+/** (Rodada 37) Registra uma tentativa bloqueada (ou confirmada depois) pelos limites. */
+export async function recordBlockedAttempt(input: InsertBlockedAttempt): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(blockedAttempts).values(input);
+}
+/** Atualiza uma tentativa bloqueada com a confirmação do usuário. */
+export async function confirmBlockedAttempt(
+  id: number,
+  patch: { confirmedAt: number; analysisId?: string; overrideId?: string }
+): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(blockedAttempts).set({ ...patch }).where(eq(blockedAttempts.id, id));
+}
+/** Histórico de tentativas bloqueadas (mais recentes primeiro). */
+export async function getBlockedAttempts(userId: number, limit = 50): Promise<
+  Array<{
+    id: number;
+    dimension: string;
+    limitValue: number;
+    currentUsage: number;
+    reason: string | null;
+    attemptedAt: number;
+    niche: string | null;
+    confirmedAt: number | null;
+    analysisId: string | null;
+  }>
+> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .select({
+      id: blockedAttempts.id,
+      dimension: blockedAttempts.dimension,
+      limitValue: blockedAttempts.limitValue,
+      currentUsage: blockedAttempts.currentUsage,
+      reason: blockedAttempts.reason,
+      attemptedAt: blockedAttempts.attemptedAt,
+      niche: blockedAttempts.niche,
+      confirmedAt: blockedAttempts.confirmedAt,
+      analysisId: blockedAttempts.analysisId,
+    })
+    .from(blockedAttempts)
+    .where(eq(blockedAttempts.userId, userId))
+    .orderBy(desc(blockedAttempts.id))
+    .limit(limit);
+  return rows;
 }
 /** Conta análises (qualquer status) realizadas pelo usuário hoje. */
 export async function countAnalysesToday(userId: number): Promise<number> {
@@ -1470,8 +1578,18 @@ export async function getLimitStatus(userId: number): Promise<LimitStatus> {
     if (!cap) return "ok";
     return value >= cap ? "blocked" : value >= Math.floor(cap * 0.8) ? "warn" : "ok";
   };
+  const daily: UserLimits = {
+    dailyAnalysisLimit: limit.dailyAnalysisLimit,
+    dailyTokenLimit: limit.dailyTokenLimit,
+    dailyQuotaLimit: limit.dailyQuotaLimit,
+    limitAction: limit.limitAction,
+    weeklyTokenLimit: limit.weeklyTokenLimit,
+    weeklyQuotaLimit: limit.weeklyQuotaLimit,
+    monthlyTokenLimit: limit.monthlyTokenLimit,
+    monthlyQuotaLimit: limit.monthlyQuotaLimit,
+  };
   return {
-    limit,
+    limit: daily,
     today: { analyses, tokens: today.llm.tokens, quota: quotaUnits },
     state: {
       analyses: evaluate(analyses, limit.dailyAnalysisLimit),
@@ -1480,22 +1598,107 @@ export async function getLimitStatus(userId: number): Promise<LimitStatus> {
     },
   };
 }
+/** (Rodada 37) Consumo agregado por período estendido: inclui semana/mês e cota total. */
+export type UsageBudgets = {
+  /** Consumido + limite nos horizontes semana/mês (tokens e cota combinados) */
+  week: { tokens: number; quota: number };
+  month: { tokens: number; quota: number };
+  weekStartIso: string;
+  monthStartIso: string;
+};
+/** Agrega tokens/quota consumidos na semana (últimos 7 dias) e mês (1º dia → hoje). */
+export async function getUsageBudgets(userId: number): Promise<UsageBudgets> {
+  const db = await getDb();
+  const now = new Date();
+  const weekStart = new Date(now);
+  weekStart.setDate(now.getDate() - 6);
+  const monthStart = new Date(now);
+  monthStart.setDate(1);
+  const empty = { tokens: 0, quota: 0 };
+  const result: UsageBudgets = {
+    week: { ...empty },
+    month: { ...empty },
+    weekStartIso: weekStart.toISOString().slice(0, 10),
+    monthStartIso: monthStart.toISOString().slice(0, 10),
+  };
+  if (!db) return result;
+  const weekIso = result.weekStartIso;
+  const monthIso = result.monthStartIso;
+  const rows = await db.select().from(apiUsage).where(and(eq(apiUsage.userId, String(userId)), gte(apiUsage.usageDate, monthIso)));
+  for (const row of rows) {
+    const unit = (row.units ?? 0) + (row.tokens ?? 0);
+    if (row.usageDate >= weekIso) {
+      result.week.tokens += row.tokens ?? 0;
+      result.week.quota += unit;
+    }
+    result.month.tokens += row.tokens ?? 0;
+    result.month.quota += unit;
+  }
+  return result;
+}
+/** (Rodada 37) Consumo atual na dimensão que disparou o bloqueio (para registro
+ * da tentativa em blocked_attempts). */
+export async function getUsageForBlock(
+  userId: number,
+  dimension: "analyses" | "tokens" | "quota"
+): Promise<number> {
+  if (dimension === "analyses") return await countAnalysesToday(userId);
+  const today = await getTodayUsage(userId);
+  if (dimension === "tokens") return today.llm.tokens ?? 0;
+  return (today.llm.units ?? 0) + (today.youtube.units ?? 0);
+}
+
+/** (Rodada 37) Projeção de esgotamento do limite semanal/mensal pelo ritmo médio
+ * diário do período. Retorna null quando o ritmo médio é zero ou o limite é ilimitado. */
+export function projectExhaustion(input: {
+  consumed: number;
+  cap: number;
+  /** Dia 1 da janela (ISO) para calcular dias corridos */
+  windowStartIso: string;
+  todayIso: string;
+}): { exhausted: boolean; estimatedDayIso: string | null; daysLeft: number | null; pct: number } {
+  const { consumed, cap, windowStartIso, todayIso } = input;
+  if (!cap) return { exhausted: false, estimatedDayIso: null, daysLeft: null, pct: 0 };
+  const daysInWindow = Math.max(1, Math.floor((new Date(todayIso).getTime() - new Date(windowStartIso).getTime()) / 86_400_000) + 1);
+  const remaining = cap - consumed;
+  const pct = Math.min(100, Math.round((consumed / cap) * 100));
+  if (remaining <= 0) return { exhausted: true, estimatedDayIso: todayIso, daysLeft: 0, pct };
+  const avgDaily = consumed / daysInWindow;
+  if (avgDaily <= 0) return { exhausted: false, estimatedDayIso: null, daysLeft: null, pct };
+  const daysLeftRaw = Math.ceil(remaining / avgDaily) - 1;
+  const target = new Date(new Date(todayIso + "T00:00:00Z").getTime() + daysLeftRaw * 86_400_000);
+  return { exhausted: false, estimatedDayIso: target.toISOString().slice(0, 10), daysLeft: daysLeftRaw, pct };
+}
 /**
  * Verifica se uma nova análise diária seria bloqueada pelos limites do dia.
- * Retorna { blocked: true, reason } quando qualquer limite atingiu 100%.
+ * Retorna { blocked: true, reason } quando qualquer limite atingiu 100%;
+ * { needsConfirmation: true } quando o usuário escolheu o modo "apenas avisar"
+ * (limitAction "warn") e algum limite diário atingiu 100%.
+ * O overrideUntil (confirmação manual) suspende o bloqueio até a meia-noite.
  */
-export async function checkAnalysisLimits(userId: number): Promise<{ blocked: false } | { blocked: true; reason: string }> {
+export async function checkAnalysisLimits(userId: number): Promise<
+  | { blocked: false }
+  | { blocked: true; reason: string; dimension: "analyses" | "tokens" | "quota" }
+  | { needsConfirmation: true; reason: string; dimension: "analyses" | "tokens" | "quota" }
+> {
   const { limit, today, state } = await getLimitStatus(userId);
-  if (limit.dailyAnalysisLimit > 0 && today.analyses >= limit.dailyAnalysisLimit) {
-    return { blocked: true, reason: `Limite de análises do dia (${limit.dailyAnalysisLimit}) atingido. O contador zera à meia-noite.` };
+  const limits = await getUserLimits(userId);
+  const hasOverride = (limits.overrideUntil ?? 0) >= Date.now();
+  const blockedDims: Array<{ dimension: "analyses" | "tokens" | "quota"; reason: string }> = [];
+  if (!hasOverride && limit.dailyAnalysisLimit > 0 && today.analyses >= limit.dailyAnalysisLimit) {
+    blockedDims.push({ dimension: "analyses", reason: `Limite de análises do dia (${limit.dailyAnalysisLimit}) atingido. O contador zera à meia-noite.` });
   }
-  if (limit.dailyTokenLimit > 0 && state.tokens === "blocked") {
-    return { blocked: true, reason: `Limite diário de tokens de LLM (${limit.dailyTokenLimit.toLocaleString("pt-BR")}) atingido. O contador zera à meia-noite.` };
+  if (!hasOverride && limit.dailyTokenLimit > 0 && state.tokens === "blocked") {
+    blockedDims.push({ dimension: "tokens", reason: `Limite diário de tokens de LLM (${limit.dailyTokenLimit.toLocaleString("pt-BR")}) atingido. O contador zera à meia-noite.` });
   }
-  if (limit.dailyQuotaLimit > 0 && state.quota === "blocked") {
-    return { blocked: true, reason: `Limite diário de cota YouTube (${limit.dailyQuotaLimit.toLocaleString("pt-BR")} unidades) atingido. O contador zera à meia-noite.` };
+  if (!hasOverride && limit.dailyQuotaLimit > 0 && state.quota === "blocked") {
+    blockedDims.push({ dimension: "quota", reason: `Limite diário de cota YouTube (${limit.dailyQuotaLimit.toLocaleString("pt-BR")} unidades) atingido. O contador zera à meia-noite.` });
   }
-  return { blocked: false };
+  if (!blockedDims.length) return { blocked: false };
+  if (limits.limitAction === "warn") {
+    return { needsConfirmation: true, ...blockedDims[0] };
+  }
+  return { blocked: true, ...blockedDims[0] };
 }
 /** Série diária (últimos `days` dias) de consumo llm/youtube + limites por dia. */
 export async function getUsageDailySeries(userId: number, days = 30): Promise<UsageDailySeries> {

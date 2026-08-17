@@ -34,6 +34,7 @@ import {
 import { Calendar as CalendarIcon } from "lucide-react";
 import { exportAgendaPdf, exportAnalysisCsv, exportAnalysisPdf } from "@/lib/export";
 import { useMemo, useState } from "react";
+import { useLimitConfirmation } from "@/hooks/useLimitConfirmation";
 import ScriptDialog from "@/components/ScriptDialog";
 import AlternativeTitlesDialog from "@/components/AlternativeTitlesDialog";
 import { toast } from "sonner";
@@ -275,13 +276,22 @@ function FailedState({
 }) {
   const [, navigate] = useLocation();
   const utils = trpc.useUtils();
+  // (Rodada 37) Modo "apenas avisar": erro PRECONDITION_FAILED abre o dialog de
+  // confirmação; ao confirmar, o bloqueio é liberado até a meia-noite.
+  const { handleLimitError, dialog: limitDialog } = useLimitConfirmation({
+    onConfirm: () => retryMutation.mutate({ analysisId }),
+    message: null,
+  });
   const retryMutation = trpc.analysis.retry.useMutation({
     onSuccess: (res) => {
       toast.success("Nova análise iniciada — você será levado a ela.");
       void utils.analysis.list.invalidate();
       navigate(`/resultado/${res.id}`);
     },
-    onError: (err) => toast.error(err.message),
+    onError: (err) => {
+      if (handleLimitError(err)) return;
+      toast.error(err.message);
+    },
   });
   const hasRetries = retryLog && retryLog.length > 0;
   return (
@@ -313,6 +323,7 @@ function FailedState({
           Nova análise
         </Button>
       </div>
+      {limitDialog}
     </div>
   );
 }

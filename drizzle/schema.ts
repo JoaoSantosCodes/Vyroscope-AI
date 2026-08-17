@@ -19,6 +19,18 @@ export const userLimits = mysqlTable("user_limits", {
   dailyTokenLimit: int("daily_token_limit").notNull().default(0),
   dailyQuotaLimit: int("daily_quota_limit").notNull().default(0),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+  /** (Rodada 37) Comportamento ao atingir 100% do limite: "block" bloqueia
+   * automaticamente; "warn" exibe confirmação antes de prosseguir (apenas-avisar) */
+  limitAction: varchar("limit_action", { length: 8 }).default("block").notNull(),
+  /** (Rodada 37) Orçamentos opcionais: 0 = ilimitado. Semanal = segunda→domingo;
+   * mensal = calendário. */
+  weeklyTokenLimit: int("weekly_token_limit").notNull().default(0),
+  weeklyQuotaLimit: int("weekly_quota_limit").notNull().default(0),
+  monthlyTokenLimit: int("monthly_token_limit").notNull().default(0),
+  monthlyQuotaLimit: int("monthly_quota_limit").notNull().default(0),
+  /** (Rodada 37) Confirmação manual do usuário válida até a meia-noite
+   * (epoch ms). Quando >= agora, o bloqueio diário é temporariamente liberado. */
+  overrideUntil: bigint("override_until", { mode: "number" }).notNull().default(0),
 });
 
 export const apiUsage = mysqlTable("api_usage", {
@@ -81,6 +93,40 @@ export const userSettingsUserKeyIndex = index("idx_user_settings_user_key").on(
 
 export type UserSetting = typeof userSettings.$inferSelect;
 export type InsertUserSetting = typeof userSettings.$inferInsert;
+
+/**
+ * (Rodada 37) Tentativas de análise bloqueadas pelo limite de custos.
+ * Cada linha registra uma tentativa interrompida (ou confirmada) pelo usuário,
+ * detalhando qual dimensão atingiu o limite, quanto foi consumido e se houve
+ * confirmação manual para prosseguir.
+ */
+export const blockedAttempts = mysqlTable("blocked_attempts", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  /** Dimensão que disparou o bloqueio: analyses | tokens | quota | weekly_tokens | monthly_tokens */
+  dimension: varchar("dimension", { length: 20 }).notNull(),
+  /** Valor do limite atingido (0 quando o bloqueio foi por outra dimensão) */
+  limitValue: int("limit_value").notNull().default(0),
+  /** Consumo atual no momento do bloqueio */
+  currentUsage: int("current_usage").notNull().default(0),
+  /** Mensagem pt-BR enviada ao usuário */
+  reason: text("reason"),
+  /** Momento da tentativa bloqueada */
+  attemptedAt: bigint("attempted_at", { mode: "number" }).notNull(),
+  /** Nicho da análise tentada, para contexto */
+  niche: varchar("niche", { length: 120 }),
+  /** Confirmação manual: epoch ms de quando o usuário autorizou a execução.
+   * NULL = tentativa permaneceu bloqueada. */
+  confirmedAt: bigint("confirmed_at", { mode: "number" }),
+  /** ID da análise criada após a confirmação (quando aplicável) */
+  analysisId: varchar("analysis_id", { length: 24 }),
+  /** ID do override que autorizou a execução (para auditoria) */
+  overrideId: varchar("override_id", { length: 40 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type BlockedAttempt = typeof blockedAttempts.$inferSelect;
+export type InsertBlockedAttempt = typeof blockedAttempts.$inferInsert;
 
 /**
  * Análises de viralidade por nicho. Cada linha representa uma análise completa

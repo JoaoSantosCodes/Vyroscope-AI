@@ -16,6 +16,20 @@ const db = vi.hoisted(() => ({
   parseRetrySummary: vi.fn().mockReturnValue(null),
   appendRetryEvent: vi.fn().mockResolvedValue(undefined),
   recordApiUsage: vi.fn().mockResolvedValue(undefined),
+  // (Rodada 37) recordBlockedAttemptFor chama getUserLimits/getUsageForBlock.
+  getUserLimits: vi.fn().mockResolvedValue({
+    dailyAnalysisLimit: 0,
+    dailyTokenLimit: 10000,
+    dailyQuotaLimit: 0,
+    limitAction: "block",
+    weeklyTokenLimit: 0,
+    weeklyQuotaLimit: 0,
+    monthlyTokenLimit: 0,
+    monthlyQuotaLimit: 0,
+    overrideUntil: 0,
+  }),
+  getUsageForBlock: vi.fn().mockResolvedValue(10200),
+  recordBlockedAttempt: vi.fn().mockResolvedValue(undefined),
   // (Rodada 36) checagem de limites diários — a porta de proteção de custos.
   checkAnalysisLimits: vi.fn().mockResolvedValue({ blocked: false }),
 }));
@@ -149,6 +163,37 @@ describe("analysis.run com limites diários (proteção de custos)", () => {
     const caller = appRouter.createCaller(createContext(null));
     await expect(caller.analysis.run({ niche: "finanças" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
     expect(db.checkAnalysisLimits).not.toHaveBeenCalled();
+  });
+
+  it("modo 'apenas avisar': retorna PRECONDITION_FAILED (não bloqueia) e registra a tentativa pendente", async () => {
+    db.checkAnalysisLimits.mockResolvedValue({
+      needsConfirmation: true,
+      reason: "Limite diário de tokens atingido. Confirme para executar mesmo assim.",
+      dimension: "tokens",
+    });
+    const caller = appRouter.createCaller(createContext(sampleUser()));
+    await expect(caller.analysis.run({ niche: "finanças" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+    // A tentativa fica registrada como pendente (sem confirmação) para o histórico.
+    expect(db.createAnalysis).not.toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 12, niche: "finanças", status: "failed" })
+    );
+  });
+
+  it("o retry também pede confirmação no modo 'apenas avisar'", async () => {
+    db.getAnalysisById.mockResolvedValue({
+      id: "abc123",
+      userId: 12,
+      niche: "finanças",
+      status: "failed",
+      retryLog: null,
+    });
+    db.checkAnalysisLimits.mockResolvedValue({
+      needsConfirmation: true,
+      reason: "Limite diário de cota YouTube atingido.",
+      dimension: "quota",
+    });
+    const caller = appRouter.createCaller(createContext(sampleUser()));
+    await expect(caller.analysis.retry({ analysisId: "abc123" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });
 });
 

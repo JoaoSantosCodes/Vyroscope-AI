@@ -154,6 +154,13 @@
       "when": 1786911000000,
       "tag": "0018_reflective_xavin",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1786927878062,
+      "tag": "0019_harsh_king_cobra",
+      "breakpoints": true
     }
   ]
 }

@@ -5,7 +5,10 @@ import {
   appendRetryEvent,
   checkAnalysisLimits,
   createAnalysis,
+  getUserLimits,
+  getUsageForBlock,
   recordApiUsage,
+  recordBlockedAttempt,
   deleteAnalysis as dbDeleteAnalysis,
   getAnalysisById,
   getUserStats,
@@ -23,6 +26,32 @@ import { analyzeNiche, type AnalysisResult } from "../analysis";
 import { resolveImageConfig, resolveLlmConfig } from "../providers";
 import { fetchTrendingVideosForNiche } from "../youtube";
 
+/** (Rodada 37) Grava a tentativa bloqueada (ou pedida de confirmação) com o
+ * limite e o consumo atual da dimensão que disparou o gatilho. */
+async function recordBlockedAttemptFor(
+  userId: number,
+  niche: string,
+  check: { blocked: true; reason: string; dimension: "analyses" | "tokens" | "quota" } | { needsConfirmation: true; reason: string; dimension: "analyses" | "tokens" | "quota" }
+): Promise<void> {
+  const limits = await getUserLimits(Number(userId));
+  const limitValue =
+    check.dimension === "analyses"
+      ? limits.dailyAnalysisLimit
+      : check.dimension === "tokens"
+        ? limits.dailyTokenLimit
+        : limits.dailyQuotaLimit;
+  const currentUsage = await getUsageForBlock(Number(userId), check.dimension);
+  await recordBlockedAttempt({
+    userId: Number(userId),
+    dimension: check.dimension,
+    limitValue,
+    currentUsage,
+    reason: check.reason,
+    attemptedAt: Date.now(),
+    niche,
+  }).catch(() => undefined);
+}
+
 const inputSchema = z.object({
   niche: z.string().trim().min(2, "O nicho deve ter pelo menos 2 caracteres").max(120, "Nicho muito longo"),
 });
@@ -37,12 +66,17 @@ export const analysisRouter = router({
   run: protectedProcedure.input(inputSchema).mutation(async ({ ctx, input }) => {
     const userId = ctx.user.id;
     const niche = input.niche;
-    // (Rodada 36) Proteção de custos: bloqueia a análise quando qualquer limite
-    // diário do usuário atingiu 100% (análises, tokens LLM ou cota YouTube).
+    // (Rodada 36/37) Proteção de custos: bloqueia a análise quando qualquer limite
+    // diário atingiu 100%; no modo "apenas avisar" pede confirmação (needsConfirmation).
     const limitCheck = await checkAnalysisLimits(Number(userId));
-    if (limitCheck.blocked) {
+    if ("blocked" in limitCheck && limitCheck.blocked) {
+      await recordBlockedAttemptFor(userId, niche, limitCheck);
       await createAnalysis({ id: nanoid(14), userId, niche, status: "failed" }).catch(() => undefined);
       throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: limitCheck.reason });
+    }
+    if ("needsConfirmation" in limitCheck && limitCheck.needsConfirmation) {
+      await recordBlockedAttemptFor(userId, niche, limitCheck);
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: limitCheck.reason });
     }
     const analysisId = nanoid(14);
     await createAnalysis({ id: analysisId, userId, niche, status: "running" });
@@ -78,11 +112,16 @@ export const analysisRouter = router({
         throw new TRPCError({ code: "FORBIDDEN", message: "Você não tem acesso a esta análise" });
       }
       const userId = ctx.user.id;
-      // (Rodada 36) O retry também respeita os limites diários.
+      // (Rodada 36/37) O retry também respeita os limites diários.
       const limitCheck = await checkAnalysisLimits(Number(userId));
-      if (limitCheck.blocked) {
+      if ("blocked" in limitCheck && limitCheck.blocked) {
+        await recordBlockedAttemptFor(userId, row.niche, limitCheck);
         await createAnalysis({ id: nanoid(14), userId, niche: row.niche, status: "failed" }).catch(() => undefined);
         throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: limitCheck.reason });
+      }
+      if ("needsConfirmation" in limitCheck && limitCheck.needsConfirmation) {
+        await recordBlockedAttemptFor(userId, row.niche, limitCheck);
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: limitCheck.reason });
       }
       const newId = nanoid(14);
       await createAnalysis({ id: newId, userId, niche: row.niche, status: "running" });
