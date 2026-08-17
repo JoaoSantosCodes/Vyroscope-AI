@@ -97,6 +97,17 @@ const db = vi.hoisted(() => ({
     { date: "2026-08-14", rate: 5.58, source: "api" },
     { date: "2026-08-15", rate: 5.62, source: "api" },
   ]),
+  // (Rodada 42) projeção de custo semanal de LLM + thumbnails em R$.
+  estimateWeeklyCostBrl: vi.fn().mockResolvedValue({
+    weekTokens: 12000,
+    weekCostBrl: 0.26,
+    weekThumbnails: 1,
+    imageCostBrl: 0.22,
+    totalWeekCostBrl: 0.48,
+    projectedWeekCostBrl: null,
+    usdBrl: 5.62,
+    fxSource: "api",
+  }),
 }));
 vi.mock("./db", () => db);
 

@@ -138,6 +138,8 @@ export async function listAnalysesByUser(userId: number) {
       status: analyses.status,
       result: analyses.result,
       retryLog: analyses.retryLog,
+      costBrl: analyses.costBrl,
+      costDetail: analyses.costDetail,
       createdAt: analyses.createdAt,
     })
     .from(analyses)
@@ -1402,10 +1404,16 @@ export type UserLimits = {
   monthlyQuotaLimit: number;
   /** (Rodada 40) Teto de custo mensal em R$ (0 = sem teto). */
   monthlyCostCapBrl: number;
-  /** (Rodada 41) Ação quando a projeção do custo atinge o teto:
+  /** (Rodada 41) Ação quando a projeção do custo mensal atinge o teto:
    * "block" = bloqueia automaticamente; "warn" = pede confirmação;
    * "alert" = apenas notifica (sem bloqueio). */
   costCapAction: "block" | "warn" | "alert";
+  /** (Rodada 42) Teto de custo semanal em R$ (0 = sem teto). */
+  weeklyCostCapBrl: number;
+  /** (Rodada 42) Ação quando a projeção do custo semanal atinge o teto:
+   * "block" = bloqueia automaticamente; "warn" = pede confirmação;
+   * "alert" = apenas notifica (sem bloqueio). */
+  weeklyCostCapAction: "block" | "warn" | "alert";
   /** (Rodada 37) Override manual válido até (epoch ms; 0 ou ausente = sem override) */
   overrideUntil?: number;
   /** (Rodada 38) Override de uso único: análises restantes autorizadas por
@@ -1446,6 +1454,8 @@ export async function getUserLimits(userId: number): Promise<UserLimits> {
     monthlyQuotaLimit: 0,
     monthlyCostCapBrl: 0,
     costCapAction: "warn",
+    weeklyCostCapBrl: 0,
+    weeklyCostCapAction: "warn",
   };
   if (!db) return empty;
   const row = await db.select().from(userLimits).where(eq(userLimits.userId, userId)).limit(1);
@@ -1464,6 +1474,11 @@ export async function getUserLimits(userId: number): Promise<UserLimits> {
     costCapAction:
       r.costCapAction === "block" || r.costCapAction === "warn" || r.costCapAction === "alert"
         ? r.costCapAction
+        : "warn",
+    weeklyCostCapBrl: r.weeklyCostCapBrl ?? 0,
+    weeklyCostCapAction:
+      r.weeklyCostCapAction === "block" || r.weeklyCostCapAction === "warn" || r.weeklyCostCapAction === "alert"
+        ? r.weeklyCostCapAction
         : "warn",
     overrideUntil: r.overrideUntil ?? 0,
     overrideRemaining: r.overrideRemaining ?? 0,
@@ -1486,6 +1501,11 @@ export async function setUserLimits(userId: number, limits: UserLimits): Promise
     costCapAction:
       limits.costCapAction === "block" || limits.costCapAction === "warn" || limits.costCapAction === "alert"
         ? limits.costCapAction
+        : "warn",
+    weeklyCostCapBrl: Math.max(0, Math.floor(limits.weeklyCostCapBrl ?? 0)),
+    weeklyCostCapAction:
+      limits.weeklyCostCapAction === "block" || limits.weeklyCostCapAction === "warn" || limits.weeklyCostCapAction === "alert"
+        ? limits.weeklyCostCapAction
         : "warn",
   };
   await db
@@ -1646,6 +1666,8 @@ export async function getLimitStatus(userId: number): Promise<LimitStatus> {
     monthlyQuotaLimit: limit.monthlyQuotaLimit,
     monthlyCostCapBrl: limit.monthlyCostCapBrl ?? 0,
     costCapAction: limit.costCapAction,
+    weeklyCostCapBrl: limit.weeklyCostCapBrl ?? 0,
+    weeklyCostCapAction: limit.weeklyCostCapAction,
   };
   const result: LimitStatus = {
     limit: daily,
@@ -1677,6 +1699,8 @@ export async function getLimitStatus(userId: number): Promise<LimitStatus> {
   // (Rodada 40) Emite alerta quando o teto de custo mensal (R$) é ultrapassado
   // pela projeção pro-rata do mês (nível "blocked" a 100% do teto).
   emitCostCapAlert(userId, limit.monthlyCostCapBrl, budgets).catch(() => undefined);
+  // (Rodada 42) Idem para o teto de custo semanal (janela fechada de 7 dias).
+  emitWeeklyCostCapAlert(userId, limit.weeklyCostCapBrl).catch(() => undefined);
   return result;
 }
 /** (Rodada 40) Alerta in-app quando a projeção de custo do mês ultrapassa o
@@ -1718,6 +1742,41 @@ export async function emitCostCapAlert(userId: number, capBrl: number, budgets: 
       currentUsage: Math.round(projectedBrl * 100) / 100,
       limitValue: capBrl,
       message: `Projeção de custo do mês (R$ ${projectedBrl.toFixed(2).replace(".", ",")} estimados) ultrapassou ${level === "blocked" ? "100%" : "80%"} do seu teto de R$ ${capBrl.toFixed(2).replace(".", ",")}.`,
+    })
+    .catch(() => undefined);
+}
+/** (Rodada 42) Alerta in-app quando o custo da semana (janela fechada de
+ * 7 dias) ultrapassa o teto semanal (weeklyCostCapBrl > 0). Emite 1 alerta
+ * por dia (dayKey "weekly_cost_cap"); nível "warn" a ≥80% e "blocked" a
+ * ≥100% do teto. */
+export async function emitWeeklyCostCapAlert(userId: number, capBrl: number): Promise<void> {
+  const db = await getDb();
+  if (!db || !capBrl) return;
+  let totalWeekCostBrl = 0;
+  try {
+    const week = await estimateWeeklyCostBrl(userId);
+    totalWeekCostBrl = week.totalWeekCostBrl;
+  } catch {
+    return;
+  }
+  if (totalWeekCostBrl <= 0) return;
+  const pct = totalWeekCostBrl / capBrl;
+  if (pct < 0.8) return;
+  const level: "warn" | "blocked" = pct >= 1 ? "blocked" : "warn";
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const dayKey = `${todayIso}|weekly_cost_cap`;
+  const existing = await db.select({ id: usageAlerts.id }).from(usageAlerts).where(and(eq(usageAlerts.userId, userId), eq(usageAlerts.dayKey, dayKey))).limit(1);
+  if (existing.length) return;
+  await db
+    .insert(usageAlerts)
+    .values({
+      userId,
+      dimension: "weekly_cost_cap",
+      level,
+      dayKey,
+      currentUsage: Math.round(totalWeekCostBrl * 100) / 100,
+      limitValue: capBrl,
+      message: `Custo da semana (R$ ${totalWeekCostBrl.toFixed(2).replace(".", ",")}) ultrapassou ${level === "blocked" ? "100%" : "80%"} do seu teto semanal de R$ ${capBrl.toFixed(2).replace(".", ",")}.`,
     })
     .catch(() => undefined);
 }
@@ -1868,8 +1927,18 @@ export async function getUsageBudgets(userId: number): Promise<UsageBudgets> {
  * da tentativa em blocked_attempts). */
 export async function getUsageForBlock(
   userId: number,
-  dimension: "analyses" | "tokens" | "quota" | "weekly_tokens" | "weekly_quota" | "monthly_tokens" | "monthly_quota" | "cost_cap"
+  dimension: "analyses" | "tokens" | "quota" | "weekly_tokens" | "weekly_quota" | "monthly_tokens" | "monthly_quota" | "cost_cap" | "weekly_cost_cap"
 ): Promise<number> {
+  if (dimension === "weekly_cost_cap") {
+    // Custo total da semana (janela fechada de 7 dias) em R$ (inteiro), usado
+    // apenas no registro da tentativa bloqueada para contexto.
+    try {
+      const weekCost = await estimateWeeklyCostBrl(userId);
+      return Math.round(weekCost.totalWeekCostBrl);
+    } catch {
+      return 0;
+    }
+  }
   if (dimension === "cost_cap") {
     // Custo total do mês até hoje em R$ (inteiro), usado apenas no registro
     // da tentativa bloqueada para contexto; a projeção é calculada em
@@ -1954,7 +2023,7 @@ export async function checkAnalysisLimits(userId: number): Promise<
   }
   return { blocked: true, ...blockedDims[0] };
 }
-export type BlockDimension = "analyses" | "tokens" | "quota" | "weekly_tokens" | "weekly_quota" | "monthly_tokens" | "monthly_quota" | "cost_cap";
+export type BlockDimension = "analyses" | "tokens" | "quota" | "weekly_tokens" | "weekly_quota" | "monthly_tokens" | "monthly_quota" | "cost_cap" | "weekly_cost_cap";
 /** (Rodada 39) Versão do checkAnalysisLimits que considera também os orçamentos
  * semanal e mensal — usada pelo run/retry. Quando o limiteAction é "warn", o
  * primeiro orçamento semanal/mensal atingido retorna needsConfirmation; quando
@@ -2002,7 +2071,19 @@ export async function checkAnalysisLimitsExtended(userId: number): Promise<
     try {
       const cost = await estimateMonthlyCostBrl(userId);
       if (cost.projectedMonthCostBrl !== null && cost.projectedMonthCostBrl >= limit.monthlyCostCapBrl) {
-        blockedDims.push({ dimension: "cost_cap", reason: `Projeção do custo do mês (R$ ${Math.round(cost.projectedMonthCostBrl).toLocaleString("pt-BR")}) atingiu o teto de R$ ${limit.monthlyCostCapBrl.toLocaleString("pt-BR")}. ${cost.daysElapsed === 0 ? "" : ""}O teto só se aplica a este mês.` });
+        blockedDims.push({ dimension: "cost_cap", reason: `Projeção do custo do mês (R$ ${Math.round(cost.projectedMonthCostBrl).toLocaleString("pt-BR")}) atingiu o teto de R$ ${limit.monthlyCostCapBrl.toLocaleString("pt-BR")}. O teto só se aplica a este mês.` });
+      }
+    } catch { /* falha na estimativa: não bloqueia */ }
+  }
+  // (Rodada 42) Teto de custo semanal (R$): a projeção pro-rata da semana
+  // (últimos 7 dias) atinge 100% do cap. Mesma ação configurável por teto:
+  // weeklyCostCapAction "block" bloqueia; "warn" pede confirmação; "alert"
+  // apenas notifica. O teto semanal é avaliado ANTES do mensal (janela menor).
+  if (!hasOverride && limit.weeklyCostCapBrl > 0 && limits.weeklyCostCapAction !== "alert") {
+    try {
+      const weekCost = await estimateWeeklyCostBrl(userId);
+      if (weekCost.projectedWeekCostBrl !== null && weekCost.projectedWeekCostBrl >= limit.weeklyCostCapBrl) {
+        blockedDims.push({ dimension: "weekly_cost_cap", reason: `Projeção do custo da semana (R$ ${Math.round(weekCost.projectedWeekCostBrl).toLocaleString("pt-BR")}) atingiu o teto de R$ ${limit.weeklyCostCapBrl.toLocaleString("pt-BR")}. O teto só se aplica a esta semana.` });
       }
     } catch { /* falha na estimativa: não bloqueia */ }
   }
@@ -2396,6 +2477,136 @@ export async function estimateMonthlyCostBrl(userId: number): Promise<{
     totalMonthCostBrl: costBrl + imageCostBrl,
     costByModel,
   };
+}
+/** (Rodada 42) Custo do consumo semanal em R$ + projeção pro-rata da semana
+ * completa (últimos 7 dias). Mesma lógica do mensal: tokens LLM + thumbnails
+ * da semana, câmbio dinâmico, projeção pelo ritmo diário da semana. */
+export async function estimateWeeklyCostBrl(userId: number): Promise<{
+  weekTokens: number;
+  weekCostBrl: number;
+  /** Projeção pro-rata da semana inteira pelo ritmo de hoje → último dia */
+  projectedWeekCostBrl: number | null;
+  daysElapsed: number;
+  usdBrl: number;
+  fxSource: "api" | "cache" | "fallback";
+  weekThumbnails: number;
+  imageCostBrl: number;
+  totalWeekCostBrl: number;
+  /** (Rodada 42) Consumo e custo da semana agrupados por modelo de IA. */
+  costByModel: Array<{ model: string; tokens: number; costBrl: number }>;
+}> {
+  const [budgets, price, fx] = await Promise.all([
+    getUsageBudgets(userId),
+    resolveLlmPrice(userId),
+    getUsdBrlRate(),
+  ]);
+  const weekTokens = budgets.week.tokens;
+  const { costBrl } = estimateTokensCostBrl({ tokens: weekTokens, pricePerMillionInput: price.input, pricePerMillionOutput: price.output, usdBrl: fx.value });
+  const imageModel = await resolveImageModel(userId);
+  const weekThumbnails = await countWeekThumbnails(userId);
+  const imageCostBrl = weekThumbnails * IMAGE_PRICE_PER_GENERATION_USD * fx.value;
+  const costByModel = await groupWeekTokensByModel(userId, fx.value);
+  costByModel.push({ model: `${imageModel.model} (imagem)`, tokens: 0, costBrl: Math.round(imageCostBrl * 100) / 100 });
+  const now = new Date();
+  const weekStartIso = budgets.weekStartIso;
+  const daysElapsed = Math.max(1, Math.ceil((now.getTime() - new Date(weekStartIso).getTime()) / (24 * 60 * 60 * 1000)) + 1);
+  const projectedWeekCostBrl = daysElapsed >= 7 ? null : (costBrl + imageCostBrl) * (7 / daysElapsed);
+  return {
+    weekTokens,
+    weekCostBrl: costBrl,
+    projectedWeekCostBrl,
+    daysElapsed,
+    usdBrl: fx.value,
+    fxSource: fx.source,
+    weekThumbnails,
+    imageCostBrl,
+    totalWeekCostBrl: costBrl + imageCostBrl,
+    costByModel,
+  };
+}
+/** (Rodada 42) Registra o custo exato da análise concluída: tokens LLM
+ * + cota YouTube do momento da execução, convertidos em R$ com o câmbio e
+ * o preço do modelo efetivo. Grava analyses.costBrl e costDetail para o
+ * histórico (e para o detalhamento de custo por análise). */
+export async function recordAnalysisCostFor(
+  analysisId: string,
+  userId: number,
+  llmTokens: number,
+  youtubeUnits: number,
+  model: string
+): Promise<void> {
+  const [price, fx] = await Promise.all([resolveLlmPrice(userId), getUsdBrlRate()]);
+  const { costBrl: llmCost } = estimateTokensCostBrl({
+    tokens: llmTokens,
+    pricePerMillionInput: price.input,
+    pricePerMillionOutput: price.output,
+    usdBrl: fx.value,
+  });
+  // YouTube: o sistema não precifica unidades do YouTube Data API em USD
+  // (apenas acompanha a cota); o custo em R$ da análise vem do LLM e das
+  // thumbnails. As unidades YouTube aparecem no detalhamento como contexto.
+  const costBrl = Math.round(llmCost * 100) / 100;
+  const tokensFmt = llmTokens.toLocaleString("pt-BR");
+  const costDetail = `${model} · ${tokensFmt} tokens LLM · ${youtubeUnits.toLocaleString("pt-BR")} cota YouTube · R$ ${costBrl.toFixed(2).replace(".", ",")}`;
+  await updateAnalysis(analysisId, { costBrl, costDetail });
+}
+/** (Rodada 42) Conta thumbnails geradas na semana (últimos 7 dias) pelo
+ * usuário — espelho de countMonthThumbnails com janela semanal. */
+export async function countWeekThumbnails(userId: number): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const weekStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const ids = await db
+    .select({ id: analyses.id })
+    .from(analyses)
+    .where(and(eq(analyses.userId, userId), gte(analyses.createdAt, weekStart)))
+    .limit(500)
+    .catch(() => []);
+  if (!ids.length) return 0;
+  const rows = await db
+    .select({ id: suggestionThumbnails.id })
+    .from(suggestionThumbnails)
+    .where(inArray(suggestionThumbnails.analysisId, ids.map(r => r.id)))
+    .catch(() => []);
+  return rows.length;
+}
+/** (Rodada 42) Agrupa tokens LLM da semana (últimos 7 dias) por modelo
+ * registrado em api_usage; linhas sem modelo entram como "efetivo do
+ * período" — espelho de groupMonthTokensByModel com janela semanal. */
+export async function groupWeekTokensByModel(userId: number, usdBrl?: number): Promise<Array<{ model: string; tokens: number; costBrl: number }>> {
+  const db = await getDb();
+  if (!db) return [];
+  const weekStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const rows = await db
+    .select({ model: apiUsage.model, tokens: apiUsage.tokens })
+    .from(apiUsage)
+    .where(and(eq(apiUsage.userId, String(userId)), eq(apiUsage.scope, "llm"), gte(apiUsage.usageDate, weekStart.toISOString().slice(0, 10))))
+    .catch(() => []);
+  if (!rows.length) return [];
+  const byModel = new Map<string, { tokens: number; price: number }>();
+  for (const row of rows) {
+    const label = row.model || "efetivo do período";
+    const price = LLM_MODEL_PRICES[(row.model || "").toLowerCase()]?.input ?? LLM_DEFAULT_PRICE_PER_MILLION;
+    const prev = byModel.get(label) ?? { tokens: 0, price };
+    byModel.set(label, { tokens: prev.tokens + (row.tokens ?? 0), price });
+  }
+  const totalTokens = rows.reduce((acc, r) => acc + (r.tokens ?? 0), 0);
+  const labeledTokens = Array.from(byModel.values()).reduce((acc, v) => acc + v.tokens, 0);
+  const unlabeledTokens = totalTokens - labeledTokens;
+  if (unlabeledTokens > 0) {
+    const label = "efetivo do período";
+    const price = LLM_DEFAULT_PRICE_PER_MILLION;
+    const prev = byModel.get(label) ?? { tokens: 0, price };
+    byModel.set(label, { tokens: prev.tokens + unlabeledTokens, price });
+  }
+  const rate = usdBrl ?? USD_TO_BRL;
+  return Array.from(byModel.entries())
+    .sort((a, b) => b[1].tokens - a[1].tokens)
+    .map(([model, { tokens, price }]) => ({
+      model,
+      tokens,
+      costBrl: Math.round(((tokens / 1_000_000) * price * rate) * 100) / 100,
+    }));
 }
 /** (Rodada 41) Agrupa tokens LLM do mês por modelo registrado em api_usage.
  * Linhas sem modelo gravado entram como "efetivo do período". */

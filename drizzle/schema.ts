@@ -31,6 +31,14 @@ export const userLimits = mysqlTable("user_limits", {
   /** (Rodada 40) Teto de custo mensal em R$ (0 = sem teto): a projeção de
    * custo do mês >= 80%/100% do teto dispara alerta in-app (dimensão cost_cap). */
   monthlyCostCapBrl: int("monthly_cost_cap_brl").notNull().default(0),
+  /** (Rodada 42) Teto de custo semanal em R$ (0 = sem teto): a projeção
+   * pro-rata da semana (últimos 7 dias) >= 80%/100% do teto dispara alerta
+   * in-app (dimensão weekly_cost_cap). */
+  weeklyCostCapBrl: int("weekly_cost_cap_brl").notNull().default(0),
+  /** (Rodada 42) Ação ao atingir o teto de custo semanal (100% da projeção):
+   * "block" bloqueia novas gerações automaticamente; "warn" pede confirmação
+   * de uso único; "alert" apenas notifica sem bloquear. */
+  weeklyCostCapAction: varchar("weekly_cost_cap_action", { length: 8 }).default("warn").notNull(),
   /** (Rodada 41) Ação ao atingir o teto de custo mensal (100% da projeção):
    * "block" bloqueia novas gerações automaticamente; "warn" pede confirmação
    * de uso único (padrão da R38/R39); "alert" apenas notifica sem bloquear. */
@@ -203,6 +211,12 @@ export const analyses = mysqlTable("analyses", {
   errorMessage: text("errorMessage"),
   /** (Rodada 33) Log JSON das retentativas do YouTube durante a coleta */
   retryLog: text("retryLog"),
+  /** (Rodada 42) Custo estimado exato da análise em R$ (tokens LLM + YouTube
+   * + thumbnails do período), com modelo e câmbio usados no momento. */
+  costBrl: int("costBrl").default(0).notNull(),
+  /** (Rodada 42) Tokens LLM e unidades YouTube consumidas pela análise, com
+   * o modelo registrado na gravação (ex.: "gpt-4o-mini · 12.450 tokens · R$ 0,02"). */
+  costDetail: text("costDetail"),
   /** Etapa atual de progresso da análise (0-100) */
   progressStep: int("progressStep").default(0).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),

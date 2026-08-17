@@ -31,7 +31,7 @@ export function UsageAlertsBanner() {
       const dimLabel = dimLabelFor(a.dimension);
       const blocked = a.level === "blocked";
       toast.warning(
-        blocked ? `Limite atingido: ${dimLabel}` : `Atenção: ${dimLabel} atingiu 80% do limite diário.`
+        blocked ? `Limite atingido: ${dimLabel}` : `Atenção: ${dimLabel} atingiu 80% do limite.`,
       );
     }
     if (incoming.length > 0) {
@@ -47,7 +47,7 @@ export function UsageAlertsBanner() {
       {alerts.slice(0, 2).map((a) => {
         const blocked = a.level === "blocked";
         const dimLabel = dimLabelFor(a.dimension);
-        const consumptionLabel = `${a.currentUsage.toLocaleString("pt-BR")} de ${a.limitValue.toLocaleString("pt-BR")}`;
+        const consumptionLabel = formatConsumption(a.dimension, a.currentUsage, a.limitValue);
         return (
           <Alert
             key={a.id}
@@ -60,7 +60,11 @@ export function UsageAlertsBanner() {
                 <span className="font-medium">{blocked ? "Limite atingido — " : "Alerta de uso — "}</span>
                 {dimLabel}. Consumo atual: {consumptionLabel}.{" "}
                 {blocked ? (
-                  <>As análises estão suspensas até a meia-noite. </>
+                  a.dimension === "weekly_cost_cap" ? (
+                    <>Novas análises podem estar suspensas conforme o modo configurado (bloquear, avisar ou notificar). </>
+                  ) : (
+                    <>As análises estão suspensas até a meia-noite. </>
+                  )
                 ) : (
                   <>Você pode atingir o bloqueio em breve. </>
                 )}
@@ -90,7 +94,19 @@ const DIM_LABEL: Record<string, string> = {
   analyses: "Análises do dia",
   tokens: "Tokens LLM do dia",
   quota: "Cota YouTube do dia",
+  cost_cap: "Custo mensal (R$)",
+  weekly_cost_cap: "Custo semanal (R$)",
 };
+/** (Rodada 42) Mensagens por dimensão: os tetos de custo usam moeda (R$) em
+ * vez de contagens, então o consumo/limite é formatado como valor monetário. */
+function formatConsumption(dimension: string, value: number, limitValue: number): string {
+  const fmt = (v: number) =>
+    v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (dimension === "cost_cap" || dimension === "weekly_cost_cap") {
+    return `${fmt(value)} de ${fmt(limitValue)}`;
+  }
+  return `${value.toLocaleString("pt-BR")} de ${limitValue.toLocaleString("pt-BR")}`;
+}
 
 function dimLabelFor(dimension: string): string {
   return DIM_LABEL[dimension] ?? dimension;

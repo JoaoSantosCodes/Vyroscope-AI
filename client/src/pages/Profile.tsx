@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { formatDate } from "@/lib/score";
 import { trpc } from "@/lib/trpc";
 import { LimitAlertsBanner } from "@/pages/Usage";
-import { BarChart3, Clapperboard, DollarSign, Gauge, Loader2, Radar, RefreshCw, Save, ShieldCheck, Settings2, ShieldAlert, UserRound, Zap } from "lucide-react";
+import { BarChart3, CalendarClock, Clapperboard, DollarSign, Gauge, Loader2, Radar, RefreshCw, Save, ShieldCheck, Settings2, ShieldAlert, UserRound, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
@@ -153,6 +153,10 @@ export default function Profile() {
   const [monthlyCostCapBrl, setMonthlyCostCapBrl] = useState("");
   /** (Rodada 41) Ação ao ultrapassar o teto de custo mensal. */
   const [costCapAction, setCostCapAction] = useState<"block" | "warn" | "alert">("warn");
+  /** (Rodada 42) Teto de custo semanal em R$ (0 = sem teto). */
+  const [weeklyCostCapBrl, setWeeklyCostCapBrl] = useState("");
+  /** (Rodada 42) Ação ao ultrapassar o teto de custo semanal. */
+  const [weeklyCostCapAction, setWeeklyCostCapAction] = useState<"block" | "warn" | "alert">("warn");
   const [limitAction, setLimitAction] = useState<"block" | "warn">("block");
   useEffect(() => {
     if (limitsDialogOpen && limitsQuery.data) {
@@ -166,6 +170,8 @@ export default function Profile() {
       setMonthlyQuotaLimit(limit.monthlyQuotaLimit > 0 ? String(limit.monthlyQuotaLimit) : "");
       setMonthlyCostCapBrl((limit.monthlyCostCapBrl ?? 0) > 0 ? String(limit.monthlyCostCapBrl) : "");
       setCostCapAction(limit.costCapAction ?? "warn");
+      setWeeklyCostCapBrl((limit.weeklyCostCapBrl ?? 0) > 0 ? String(limit.weeklyCostCapBrl) : "");
+      setWeeklyCostCapAction(limit.weeklyCostCapAction ?? "warn");
       setLimitAction(limit.limitAction ?? "block");
     }
   }, [limitsDialogOpen, limitsQuery.data]);
@@ -194,7 +200,8 @@ export default function Profile() {
     const mTokens = parse(monthlyTokenLimit, 5_000_000);
     const mQuota = parse(monthlyQuotaLimit, 5_000_000);
     const mCap = parse(monthlyCostCapBrl, 10_000);
-    if ([analyses, tokens, quota, wTokens, wQuota, mTokens, mQuota, mCap].some((n) => n < 0)) {
+    const wCap = parse(weeklyCostCapBrl, 5_000);
+    if ([analyses, tokens, quota, wTokens, wQuota, mTokens, mQuota, mCap, wCap].some((n) => n < 0)) {
       toast.error("Valores inválidos: use números inteiros positivos (0 = ilimitado/sem teto).");
       return;
     }
@@ -209,6 +216,8 @@ export default function Profile() {
       monthlyQuotaLimit: mQuota,
       monthlyCostCapBrl: mCap,
       costCapAction,
+      weeklyCostCapBrl: wCap,
+      weeklyCostCapAction,
     });
   };
 
@@ -619,6 +628,48 @@ export default function Profile() {
                           {" "}
                           <strong>Notificar:</strong> apenas gera um alerta na interface, sem impedir ou confirmar.
                         </p>
+                      </div>
+                      {/* (Rodada 42) Teto de custo semanal com o mesmo mecanismo de ação */}
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label htmlFor="limit-weekly-cost-cap" className="flex items-center gap-2">
+                            <CalendarClock className="h-4 w-4 text-emerald-400" />
+                            Teto de custo semanal (R$)
+                          </Label>
+                          <Input
+                            id="limit-weekly-cost-cap"
+                            type="number"
+                            min={0}
+                            max={5000}
+                            value={weeklyCostCapBrl}
+                            onChange={(e) => setWeeklyCostCapBrl(e.target.value)}
+                            placeholder="0 = sem teto"
+                            disabled={setLimitsMutation.isPending}
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Quando o custo da semana (últimos 7 dias, tokens LLM + thumbnails) ultrapassar este teto,
+                            o sistema reage conforme a ação escolhida. Máximo: R$ 5.000.
+                          </p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="limit-weekly-cost-cap-action">Ação ao ultrapassar o teto semanal</Label>
+                          <Select
+                            value={weeklyCostCapAction}
+                            onValueChange={(v) => setWeeklyCostCapAction(v as "block" | "warn" | "alert")}
+                          >
+                            <SelectTrigger id="limit-weekly-cost-cap-action" className="w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="block">Bloquear automaticamente novas análises</SelectItem>
+                              <SelectItem value="warn">Apenas avisar — pedir confirmação de uso único</SelectItem>
+                              <SelectItem value="alert">Apenas notificar (sem confirmar ou bloquear)</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <p className="text-xs text-muted-foreground">
+                            Mesmo mecanismo do teto mensal: bloqueia, pede confirmação de uso único ou apenas notifica.
+                          </p>
+                        </div>
                       </div>
                     </div>
                   </div>

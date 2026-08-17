@@ -1,6 +1,7 @@
 import PDFDocument from "pdfkit";
 import {
   estimateMonthlyCostBrl,
+  estimateWeeklyCostBrl,
   getBlockedAttempts,
   getFxRateHistory,
   getUserLimits,
@@ -45,13 +46,14 @@ export async function buildUsagePdf(userId: number, days = 30): Promise<Buffer> 
 
       const todayIso = new Date().toISOString().slice(0, 10);
 
-      const [summary, series, limits, budgets, blocked, cost, fxSeries] = await Promise.all([
+      const [summary, series, limits, budgets, blocked, cost, weekCost, fxSeries] = await Promise.all([
         getUsageSummary(userId),
         getUsageDailySeries(userId, Math.min(days, 90)),
         getUserLimits(userId),
         getUsageBudgets(userId),
         getBlockedAttempts(userId, 100),
         estimateMonthlyCostBrl(userId),
+        estimateWeeklyCostBrl(userId),
         getFxRateHistory(90),
       ]);
 
@@ -153,6 +155,34 @@ export async function buildUsagePdf(userId: number, days = 30): Promise<Buffer> 
       doc.y += 16;
       doc.fillColor(COLORS.amber).fontSize(10).text(
         `Custo total do mês até hoje (tokens LLM + thumbnails): ${fmtBrl(cost.totalMonthCostBrl)}`,
+        54,
+        doc.y,
+        { width: doc.page.width - 108 }
+      );
+      doc.y += 26;
+
+      // ===== (Rodada 42) Teto e custo da semana corrente =====
+      if (doc.y > doc.page.height - 150) doc.addPage();
+      doc.fillColor(COLORS.dark).rect(0, doc.y + 24, doc.page.width, 36).fill();
+      doc.fillColor(COLORS.amber).fontSize(13).font("Helvetica-Bold").text("Teto e custo da semana corrente", 54, doc.y + 34);
+      doc.y += 74;
+      doc.fillColor(COLORS.light).fontSize(10).text(
+        `Janela: ${weekIso} até hoje (últimos 7 dias)`,
+        54,
+        doc.y
+      );
+      doc.y += 16;
+      const weekCap = limits.weeklyCostCapBrl ?? 0;
+      doc.text(`Teto de custo semanal: ${weekCap > 0 ? fmtBrl(weekCap) : "não configurado"} ${weekCap > 0 ? `(${limits.weeklyCostCapAction === "block" ? "bloqueia" : limits.weeklyCostCapAction === "warn" ? "avisa" : "notifica"})` : ""}`, 54, doc.y);
+      doc.y += 16;
+      doc.text(`Tokens LLM na semana: ${weekCost.weekTokens.toLocaleString("pt-BR")}`, 54, doc.y);
+      doc.text(`Custo LLM estimado: ${fmtBrl(weekCost.weekCostBrl)}`, 300, doc.y);
+      doc.y += 16;
+      doc.text(`Thumbnails na semana: ${weekCost.weekThumbnails.toLocaleString("pt-BR")}`, 54, doc.y);
+      doc.text(`Custo thumbnails: ${fmtBrl(weekCost.imageCostBrl)}`, 300, doc.y);
+      doc.y += 16;
+      doc.fillColor(COLORS.amber).fontSize(10).text(
+        `Custo total da semana: ${fmtBrl(weekCost.totalWeekCostBrl)}${weekCap > 0 ? ` (${Math.min(100, Math.round((weekCost.totalWeekCostBrl / weekCap) * 100))}% do teto semanal)` : ""}`,
         54,
         doc.y,
         { width: doc.page.width - 108 }

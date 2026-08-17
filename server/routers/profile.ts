@@ -14,6 +14,7 @@ import {
   getUserStats,
   projectExhaustion,
   estimateMonthlyCostBrl,
+  estimateWeeklyCostBrl,
   getFxRateHistory as getFxRateHistoryDb,
   LLM_MODEL_PRICES,
   LLM_DEFAULT_PRICE_PER_MILLION,
@@ -278,9 +279,14 @@ export const profileRouter = router({
       monthlyQuotaLimit: limits.monthlyQuotaLimit,
       /** (Rodada 40) Teto de custo mensal em R$ (0 = sem teto). */
       monthlyCostCapBrl: limits.monthlyCostCapBrl,
-      /** (Rodada 41) Ação do teto de custo: "block" = bloqueia automaticamente;
+      /** (Rodada 41) Ação do teto de custo mensal: "block" = bloqueia automaticamente;
        * "warn" = pede confirmação; "alert" = apenas notifica. */
       costCapAction: limits.costCapAction,
+      /** (Rodada 42) Teto de custo semanal em R$ (0 = sem teto). */
+      weeklyCostCapBrl: limits.weeklyCostCapBrl,
+      /** (Rodada 42) Ação do teto de custo semanal: "block" = bloqueia automaticamente;
+       * "warn" = pede confirmação; "alert" = apenas notifica. */
+      weeklyCostCapAction: limits.weeklyCostCapAction,
       overrideUntil: limits.overrideUntil,
       /** (Rodada 38) Análises restantes autorizadas por confirmação de uso único */
       overrideRemaining: limits.overrideRemaining ?? 0,
@@ -322,9 +328,14 @@ export const profileRouter = router({
         monthlyQuotaLimit: z.number().int().min(0).max(5_000_000).optional(),
         /** (Rodada 40) Teto de custo mensal em R$ (0 = sem teto). */
         monthlyCostCapBrl: z.number().int().min(0).max(10_000).optional(),
-        /** (Rodada 41) Ação do teto de custo: "block" = bloqueia automaticamente;
+        /** (Rodada 41) Ação do teto de custo mensal: "block" = bloqueia automaticamente;
          * "warn" = pede confirmação; "alert" = apenas notifica. */
         costCapAction: z.enum(["block", "warn", "alert"]).optional(),
+        /** (Rodada 42) Teto de custo semanal em R$ (0 = sem teto). */
+        weeklyCostCapBrl: z.number().int().min(0).max(10_000).optional(),
+        /** (Rodada 42) Ação do teto de custo semanal: "block" = bloqueia automaticamente;
+         * "warn" = pede confirmação; "alert" = apenas notifica. */
+        weeklyCostCapAction: z.enum(["block", "warn", "alert"]).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -339,6 +350,8 @@ export const profileRouter = router({
         monthlyQuotaLimit: input.monthlyQuotaLimit ?? 0,
         monthlyCostCapBrl: input.monthlyCostCapBrl ?? 0,
         costCapAction: input.costCapAction ?? "warn",
+        weeklyCostCapBrl: input.weeklyCostCapBrl ?? 0,
+        weeklyCostCapAction: input.weeklyCostCapAction ?? "warn",
       });
       return { ok: true } as const;
     }),
@@ -348,9 +361,20 @@ export const profileRouter = router({
    * do mês completo pelo ritmo diário corrente.
    */
   getUsageCost: protectedProcedure.query(async ({ ctx }) => {
-    const cost = await estimateMonthlyCostBrl(ctx.user.id);
+    const [cost, week] = await Promise.all([
+      estimateMonthlyCostBrl(ctx.user.id),
+      estimateWeeklyCostBrl(ctx.user.id),
+    ]);
     return {
       ...cost,
+      /** (Rodada 42) Semana corrente (janela fechada de 7 dias). */
+      weekTokens: week.weekTokens,
+      weekCostBrl: week.weekCostBrl,
+      totalWeekCostBrl: week.totalWeekCostBrl,
+      imageCostWeekBrl: week.imageCostBrl,
+      /** (Rodada 42) Câmbio usado na janela SEMANAL (o mensal segue em usdBrl/fxSource). */
+      weekUsdBrl: week.usdBrl,
+      weekFxSource: week.fxSource,
       catalog: LLM_MODEL_PRICES,
       fallbackPrice: LLM_DEFAULT_PRICE_PER_MILLION,
     };

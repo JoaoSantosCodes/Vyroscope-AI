@@ -23,6 +23,7 @@ import { exportUsagePdf } from "@/lib/export";
 import { formatDate } from "@/lib/score";
 import { trpc } from "@/lib/trpc";
 import {
+  CalendarClock,
   ChartNoAxesCombined,
   DollarSign,
   Flame,
@@ -255,6 +256,14 @@ export default function Usage() {
 
         {/* (Rodada 39) Custo estimado de LLM em R$ para o mês corrente */}
         <CostEstimateCard cost={costQuery.data} isLoading={costQuery.isLoading} />
+
+        {/* (Rodada 42) Teto de custo semanal com barra de progresso colorida (80%) */}
+        <WeeklyCostCapCard
+          capBrl={limits?.weeklyCostCapBrl ?? 0}
+          capAction={limits?.weeklyCostCapAction ?? "warn"}
+          totalWeekCostBrl={costQuery.data?.totalWeekCostBrl ?? 0}
+          isLoading={limitsQuery.isLoading || costQuery.isLoading}
+        />
 
         {/* (Rodada 41) Gráfico histórico da cotação do dólar */}
         <FxRateCard data={fxQuery.data} usdBrl={costQuery.data?.usdBrl ?? null} isLoading={fxQuery.isLoading} />
@@ -795,6 +804,78 @@ function CostEstimateCard(props: {
                 </p>
               </>
             )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** (Rodada 41) Gráfico histórico da cotação USD/BRL: dá contexto à projeção de
+ * custos, mostrando a variação cambial do período e a cotação atual usada no
+ * cálculo. */
+/** (Rodada 42) Teto de custo semanal (janela fechada de 7 dias) com barra de
+ * progresso colorida: verde <80%, âmbar ≥80%, vermelho ≥100% — a mudança de
+ * cor é o alerta visual pedido quando a projeção atinge 80% do teto. */
+function WeeklyCostCapCard(props: {
+  capBrl: number;
+  capAction: "block" | "warn" | "alert";
+  totalWeekCostBrl: number;
+  isLoading: boolean;
+}) {
+  const { capBrl, capAction, totalWeekCostBrl, isLoading } = props;
+  if (!capBrl || capBrl <= 0) return null;
+  const pct = Math.min(100, (totalWeekCostBrl / capBrl) * 100);
+  const reached80 = pct >= 80;
+  const reached100 = pct >= 100;
+  const barColor = reached100 ? "bg-red-500" : reached80 ? "bg-amber-500" : "bg-emerald-500";
+  const labelColor = reached100 ? "text-red-300" : reached80 ? "text-amber-300" : "text-emerald-300";
+  const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  const actionLabel =
+    capAction === "block"
+      ? "bloqueio automático ao atingir 100%"
+      : capAction === "warn"
+        ? "confirmação de uso único ao atingir 100%"
+        : "apenas notificação";
+  return (
+    <Card className="border-border/60">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-lg flex items-center gap-2">
+          <CalendarClock className="h-5 w-5 text-emerald-400" />
+          Teto de custo semanal
+        </CardTitle>
+        <CardDescription>
+          Custo dos últimos 7 dias (tokens LLM + thumbnails) contra o teto configurado. O modo atual aplica {actionLabel}.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {isLoading ? (
+          <Skeleton className="h-16 w-full" />
+        ) : (
+          <>
+            <div className="flex items-baseline justify-between">
+              <p className="text-2xl font-bold">{fmt(totalWeekCostBrl)}</p>
+              <p className="text-sm font-semibold">
+                {fmt(capBrl)} · <span className="text-muted-foreground font-normal">teto</span>
+              </p>
+            </div>
+            <div
+              role="progressbar"
+              aria-valuenow={Math.round(pct)}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label="Progresso do teto de custo semanal"
+              className="h-3 w-full overflow-hidden rounded-full bg-secondary"
+            >
+              <div className={`h-full ${barColor} transition-all duration-500`} style={{ width: `${pct}%` }} />
+            </div>
+            <p className={`text-xs font-medium ${labelColor}`}>
+              {reached100
+                ? `${fmt(totalWeekCostBrl)} — teto semanal atingido (${Math.round(pct)}%).` :
+                reached80
+                  ? `${fmt(totalWeekCostBrl)} — 80% do teto alcançado (${Math.round(pct)}%). Ajuste o teto ou aguarde a janela deslizar.` :
+                  `${fmt(totalWeekCostBrl)} — ${Math.round(pct)}% do teto semanal.`}
+            </p>
           </>
         )}
       </CardContent>

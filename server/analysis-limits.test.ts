@@ -37,6 +37,8 @@ const db = vi.hoisted(() => ({
   checkAnalysisLimitsExtended: vi.fn().mockResolvedValue({ blocked: false }),
   // (Rodada 41) modelo efetivo para o detalhamento de custo por modelo.
   resolveLlmModel: vi.fn().mockResolvedValue({ model: "gpt-4.1-mini", from: "env" as const }),
+  // (Rodada 42) registro do custo exato por análise.
+  recordAnalysisCostFor: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("./db", () => db);
 vi.mock("./providers", () => ({

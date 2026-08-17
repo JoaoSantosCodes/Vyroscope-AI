@@ -21,6 +21,7 @@ import {
   getVideosByAnalysis,
   buildAnalysisHistoryCsv,
   listAnalysesByUser,
+  recordAnalysisCostFor,
   parseRetrySummary,
   saveVideos,
   updateAnalysis,
@@ -52,7 +53,13 @@ async function recordBlockedAttemptFor(
               ? limits.weeklyQuotaLimit
               : check.dimension === "monthly_tokens"
                 ? limits.monthlyTokenLimit
-                : limits.monthlyQuotaLimit;
+                : check.dimension === "monthly_quota"
+                  ? limits.monthlyQuotaLimit
+                  : check.dimension === "weekly_cost_cap"
+                    ? limits.weeklyCostCapBrl
+                    : check.dimension === "cost_cap"
+                      ? limits.monthlyCostCapBrl
+                      : 0;
   const currentUsage = await getUsageForBlock(Number(userId), check.dimension);
   try {
     await recordBlockedAttempt({
@@ -199,6 +206,9 @@ export const analysisRouter = router({
       niche: r.niche,
       status: r.status,
       retrySummary: parseRetrySummary(r.retryLog),
+      /** (Rodada 42) Custo exato da análise em R$ e detalhamento. */
+      costBrl: r.costBrl ?? 0,
+      costDetail: r.costDetail ?? null,
       createdAt: r.createdAt.getTime(),
     }));
   }),
@@ -365,6 +375,9 @@ async function runAnalysisAsync(
       const modelInfo = await resolveLlmModel(userIdNum);
       recordApiUsage({ userId: userIdNum, scope: "llm", tokens: result.llmTokens, requests: 1, model: modelInfo.model }).catch(() => undefined);
       recordApiUsage({ userId: userIdNum, scope: "youtube", units: youtubeUnits, requests: 2 }).catch(() => undefined);
+      // (Rodada 42) Custeio exato da análise: tokens LLM e unidades YouTube
+      // convertidos em R$ com o câmbio do momento e o modelo efetivo.
+      recordAnalysisCostFor(analysisId, userIdNum, result.llmTokens ?? 0, youtubeUnits ?? 0, modelInfo.model).catch(() => undefined);
     }
     await updateAnalysisProgress(analysisId, 100);
   } catch (error) {

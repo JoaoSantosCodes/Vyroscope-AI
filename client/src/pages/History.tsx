@@ -8,7 +8,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { startLogin } from "@/const";
 import { formatDate } from "@/lib/score";
 import { trpc } from "@/lib/trpc";
-import { Clock, Download, Loader2, Radar, RefreshCcw, Trash2 } from "lucide-react";
+import { Clock, Download, DollarSign, Loader2, Radar, RefreshCcw, Trash2 } from "lucide-react";
 import { useEffect } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
@@ -162,6 +162,29 @@ export default function History() {
                           ? "Falhou"
                           : "Em execução"}
                     </Badge>
+                    {/* (Rodada 42) Custo exato da análise em R$ */}
+                    {(row.costBrl ?? 0) > 0 ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="flex items-center gap-1 text-xs font-medium text-emerald-400">
+                            <DollarSign className="h-3.5 w-3.5" />
+                            R$ {(row.costBrl ?? 0).toFixed(2).replace(".", ",")}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="max-w-sm">
+                          <p className="text-xs">{row.costDetail ?? "Custo estimado da análise"}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : row.costDetail ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="text-[11px] text-muted-foreground">R$ 0,00</span>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="max-w-sm">
+                          <p className="text-xs">{row.costDetail}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : null}
                     {row.retrySummary ? (
                       <Tooltip>
                         <TooltipTrigger asChild>

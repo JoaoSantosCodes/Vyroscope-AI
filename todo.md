@@ -377,3 +377,13 @@
 - [x] Frontend: seletor de ação do teto de custo (Bloquear/Apenas avisar/Informar) no dialog Limites do perfil (`costCapAction`, persistido em user_limits)
 - [x] PDF: seção "Custo por modelo de IA" (LLM por modelo + thumbnails por modelo) + resumo da cotação USD/BRL (mín/máx/média/atual e valores diários) em buildUsagePdf
 - [x] Testes vitest (limits-r41.test.ts: 17 testes — bloqueio do teto block/warn/alert, série da cotação com normalização de dias, custo por modelo e fluxo do router; 337/337 passando no total), docs, skill, Obsidian rodada-41 e checkpoint final
+
+## Melhorias solicitadas (rodada 42)
+- [x] Backend: teto de custo semanal (`weekly_cost_cap_brl` + `weekly_cost_cap_action` em `user_limits`) com o mesmo mecanismo da R41 (bloco em `checkAnalysisLimitsExtended` + registro em `blocked_attempts`)
+- [x] Backend: custo exato por análise individual — registrar tokens/modelo/custo BRL de cada análise (nova coluna `cost_brl` em `analyses` ou helper derivado) e expor no `history/list`
+- [x] Backend: `getLimits`/`setLimits` com os novos campos semanais; alerta ≥80% do teto semanal (reuso `emitCostCapAlert`)
+- [x] Frontend: dialog Limites com campo "Teto de custo semanal (R$)" e seletor de ação do teto semanal (Bloquear/Apenas avisar/Informar)
+- [x] Frontend: histórico (/historico) mostra o custo exato de cada análise (tokens, modelo e valor em R$, tooltip)
+- [x] Frontend: feedback visual de 80% do teto (cor da barra de progresso + banner/toast) na página /uso e no dialog
+- [x] PDF: seção do teto semanal no relatório de uso
+- [x] Testes vitest (bloqueio do teto semanal block/warn/alert, custo por análise, limites; suíte completa), docs, skill, Obsidian rodada-42 e checkpoint final

@@ -21,6 +21,15 @@ const db = vi.hoisted(() => ({
     projectedMonthCostBrl: 2.15,
     daysElapsed: 15,
   }),
+  // --- (Rodada 42) Helpers de custo semanal ---
+  estimateWeeklyCostBrl: vi.fn().mockResolvedValue({
+    weekTokens: 12000,
+    weekCostBrl: 0.26,
+    weekThumbnails: 1,
+    imageCostBrl: 0.22,
+    totalWeekCostBrl: 0.48,
+    projectedWeekCostBrl: null,
+  }),
   // --- Helpers usados por checkAnalysisLimitsExtended (via getLimitStatus) ---
   getUserLimits: vi.fn().mockResolvedValue({
     dailyAnalysisLimit: 0,
