@@ -372,6 +372,8 @@ export const profileRouter = router({
       weekCostBrl: week.weekCostBrl,
       totalWeekCostBrl: week.totalWeekCostBrl,
       imageCostWeekBrl: week.imageCostBrl,
+      /** (Rodada 43) Detalhamento do custo semanal por modelo de IA. */
+      weekCostByModel: week.costByModel,
       /** (Rodada 42) Câmbio usado na janela SEMANAL (o mensal segue em usdBrl/fxSource). */
       weekUsdBrl: week.usdBrl,
       weekFxSource: week.fxSource,

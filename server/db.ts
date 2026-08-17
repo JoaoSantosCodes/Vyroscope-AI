@@ -338,13 +338,25 @@ export async function saveSuggestionThumbnail(row: InsertSuggestionThumbnail) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  await db.insert(stCols).values(row);
+  const result = await db.insert(stCols).values(row);
+  return { id: Number(result[0].insertId) };
 }
 
 export async function getThumbnailsByAnalysis(analysisId: string) {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(stCols).where(eq(stCols.analysisId, analysisId));
+}
+
+/** (Rodada 43) Registra o custo exato de uma thumbnail individual (R$, modelo e câmbio). */
+export async function setThumbnailCost(id: number, costBrl: number, costDetail: string): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db
+    .update(stCols)
+    .set({ costBrl: Math.round(costBrl * 100) / 100, costDetail })
+    .where(eq(stCols.id, id))
+    .catch(() => undefined);
 }
 
 export async function listWatchedVideos(userId: number) {
@@ -2504,7 +2516,11 @@ export async function estimateWeeklyCostBrl(userId: number): Promise<{
   const { costBrl } = estimateTokensCostBrl({ tokens: weekTokens, pricePerMillionInput: price.input, pricePerMillionOutput: price.output, usdBrl: fx.value });
   const imageModel = await resolveImageModel(userId);
   const weekThumbnails = await countWeekThumbnails(userId);
-  const imageCostBrl = weekThumbnails * IMAGE_PRICE_PER_GENERATION_USD * fx.value;
+  // (Rodada 43) Custo das thumbnails da semana: prioriza o custo real
+  // gravado em cada registro (suggestion_thumbnails.costBrl) e recorre ao
+  // preço padrão apenas para registros criados antes desta versão.
+  const weekThumbByModel = await groupWeekThumbnailsByModel(userId, fx.value);
+  const imageCostBrl = weekThumbByModel.reduce((acc, g) => acc + g.costBrl, 0) ?? weekThumbnails * IMAGE_PRICE_PER_GENERATION_USD * fx.value;
   const costByModel = await groupWeekTokensByModel(userId, fx.value);
   costByModel.push({ model: `${imageModel.model} (imagem)`, tokens: 0, costBrl: Math.round(imageCostBrl * 100) / 100 });
   const now = new Date();
@@ -2570,6 +2586,53 @@ export async function countWeekThumbnails(userId: number): Promise<number> {
     .catch(() => []);
   return rows.length;
 }
+/** (Rodada 43) Custo estimado de uma geração de thumbnail individual em R$.
+ * Usa o modelo de imagem configurado do usuário e o câmbio atual; `usdBrl`
+ * pode ser injetado (cotação já obtida pelo chamador) para evitar chamadas
+ * repetidas. */
+export async function thumbnailCostForGeneration(userId: number, usdBrl?: number): Promise<{ costBrl: number; costDetail: string; model: string }> {
+  const [imageModel, fx] = await Promise.all([resolveImageModel(userId), usdBrl ? Promise.resolve({ value: usdBrl, source: "cache" as const, updatedAt: new Date() }) : getUsdBrlRate()]);
+  const costBrl = Math.round(IMAGE_PRICE_PER_GENERATION_USD * fx.value * 100) / 100;
+  const costDetail = `${imageModel.model} (imagem) · R$ ${costBrl.toFixed(2).replace(".", ",")} · câmbio ${fx.value.toFixed(2).replace(".", ",")}`;
+  return { costBrl, costDetail, model: imageModel.model };
+}
+
+/** (Rodada 43) Agrupa o custo das thumbnails geradas na semana (últimos 7
+ * dias) por modelo de imagem. Thumbnails sem custo gravado (geradas antes
+ * desta versão) usam o preço padrão por geração (R$ 0,04). */
+export async function groupWeekThumbnailsByModel(userId: number, usdBrl?: number): Promise<Array<{ model: string; count: number; costBrl: number }>> {
+  const db = await getDb();
+  if (!db) return [];
+  const weekStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const ids = await db
+    .select({ id: analyses.id })
+    .from(analyses)
+    .where(and(eq(analyses.userId, userId), gte(analyses.createdAt, weekStart)))
+    .limit(500)
+    .catch(() => []);
+  if (!ids.length) return [];
+  const rows = await db
+    .select({ id: stCols.id, analysisId: stCols.analysisId, costBrl: stCols.costBrl })
+    .from(stCols)
+    .where(inArray(stCols.analysisId, ids.map(r => r.id)))
+    .catch(() => []);
+  if (!rows.length) return [];
+  // Thumbnails da semana: 100% pertencem ao modelo de imagem configurado.
+  const imageModel = await resolveImageModel(userId);
+  const label = `${imageModel.model} (imagem)`;
+  const fxRate = usdBrl ?? USD_TO_BRL;
+  const recorded = rows.filter(r => (r.costBrl ?? 0) > 0);
+  const unrecorded = rows.length - recorded.length;
+  const recordedCost = recorded.reduce((acc, r) => acc + (r.costBrl ?? 0), 0);
+  return [
+    {
+      model: label,
+      count: rows.length,
+      costBrl: Math.round((recordedCost + unrecorded * IMAGE_PRICE_PER_GENERATION_USD * fxRate) * 100) / 100,
+    },
+  ];
+}
+
 /** (Rodada 42) Agrupa tokens LLM da semana (últimos 7 dias) por modelo
  * registrado em api_usage; linhas sem modelo entram como "efetivo do
  * período" — espelho de groupMonthTokensByModel com janela semanal. */

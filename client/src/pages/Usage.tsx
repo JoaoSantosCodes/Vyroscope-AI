@@ -263,6 +263,8 @@ export default function Usage() {
           capAction={limits?.weeklyCostCapAction ?? "warn"}
           totalWeekCostBrl={costQuery.data?.totalWeekCostBrl ?? 0}
           isLoading={limitsQuery.isLoading || costQuery.isLoading}
+          /** (Rodada 43) Detalhamento do custo semanal por modelo de IA. */
+          weekCostByModel={costQuery.data?.weekCostByModel}
         />
 
         {/* (Rodada 41) Gráfico histórico da cotação do dólar */}
@@ -822,8 +824,10 @@ function WeeklyCostCapCard(props: {
   capAction: "block" | "warn" | "alert";
   totalWeekCostBrl: number;
   isLoading: boolean;
+  /** (Rodada 43) Detalhamento do custo semanal por modelo de IA. */
+  weekCostByModel?: Array<{ model: string; tokens: number; costBrl: number }>;
 }) {
-  const { capBrl, capAction, totalWeekCostBrl, isLoading } = props;
+  const { capBrl, capAction, totalWeekCostBrl, isLoading, weekCostByModel = [] } = props;
   if (!capBrl || capBrl <= 0) return null;
   const pct = Math.min(100, (totalWeekCostBrl / capBrl) * 100);
   const reached80 = pct >= 80;
@@ -876,6 +880,39 @@ function WeeklyCostCapCard(props: {
                   ? `${fmt(totalWeekCostBrl)} — 80% do teto alcançado (${Math.round(pct)}%). Ajuste o teto ou aguarde a janela deslizar.` :
                   `${fmt(totalWeekCostBrl)} — ${Math.round(pct)}% do teto semanal.`}
             </p>
+            {/* (Rodada 43) Detalhamento visual do custo semanal por modelo de IA. */}
+            {weekCostByModel.length > 0 && (
+              <>
+                <p className="pt-2 text-xs font-semibold text-foreground">Detalhamento semanal por modelo de IA</p>
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="w-auto">Modelo</TableHead>
+                      <TableHead className="text-right">Consumo</TableHead>
+                      <TableHead className="text-right">Custo</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {weekCostByModel.map((m) => (
+                      <TableRow key={m.model}>
+                        <TableCell className="max-w-[240px] truncate font-medium">{m.model}</TableCell>
+                        <TableCell className="text-right">{m.tokens.toLocaleString("pt-BR")}</TableCell>
+                        <TableCell className="text-right">{fmt(m.costBrl)}</TableCell>
+                      </TableRow>
+                    ))}
+                    <TableRow className="hover:bg-transparent">
+                      <TableCell className="font-semibold">Total da semana</TableCell>
+                      <TableCell />
+                      <TableCell className="text-right font-semibold">{fmt(totalWeekCostBrl)}</TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+                <p className="-mt-2 text-[10px] text-muted-foreground">
+                  Tokens LLM do período (agregação de api_usage) mais o custo real gravado das thumbnails geradas na
+                  janela de 7 dias; thumbnails antigas (sem custo gravado) usam o preço de referência por geração.
+                </p>
+              </>
+            )}
           </>
         )}
       </CardContent>

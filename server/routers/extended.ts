@@ -107,7 +107,7 @@ export const extendedRouter = router({
   generateThumbnail: protectedProcedure
     .input(z.object({ analysisId: z.string().min(1), suggestionIndex: z.number().int().min(0).max(10) }))
     .mutation(async ({ ctx, input }) => {
-      const { getAnalysisById, saveSuggestionThumbnail } = await import("../db");
+      const { getAnalysisById, saveSuggestionThumbnail, thumbnailCostForGeneration, setThumbnailCost } = await import("../db");
       const analysis = await getAnalysisById(input.analysisId);
       if (!analysis) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Análise não encontrada." });
@@ -136,13 +136,19 @@ export const extendedRouter = router({
       if (!imageUrl) {
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "A geração da imagem retornou vazia. Tente novamente." });
       }
-      await saveSuggestionThumbnail({
+      const inserted = await saveSuggestionThumbnail({
         analysisId: analysis.id,
         suggestionTitle: suggestion.title,
         imageUrl,
         prompt,
       });
-      return { imageUrl, prompt, suggestionTitle: suggestion.title } as const;
+      // (Rodada 43) Registra o custo exato da thumbnail individual em R$.
+      const [fx, cost] = await Promise.all([import("../db").then(m => m.getUsdBrlRate()), thumbnailCostForGeneration(ctx.user.id)]);
+      // thumbnailCostForGeneration já grava o detalhamento (modelo + valor + câmbio);
+      // anexamos aqui a cotação efetiva usada para manter consistência com o histórico da R42.
+      const fxDetail = `câmbio ${fx.value.toFixed(2).replace(".", ",")} (${fx.source})`;
+      await setThumbnailCost(inserted.id, cost.costBrl, `${cost.costDetail} · ${fxDetail}`);
+      return { imageUrl, prompt, suggestionTitle: suggestion.title, costBrl: cost.costBrl, costDetail: `${cost.costDetail} · ${fxDetail}` } as const;
     }),
 
   /** Gera 5 títulos alternativos com score de viralidade para uma sugestão. */

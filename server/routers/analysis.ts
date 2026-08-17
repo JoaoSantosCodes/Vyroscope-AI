@@ -201,7 +201,9 @@ export const analysisRouter = router({
   /** Lista análises do usuário autenticado (histórico). */
   list: protectedProcedure.query(async ({ ctx }) => {
     const rows = await listAnalysesByUser(ctx.user.id);
-    return rows.map((r) => ({
+    /** (Rodada 43) Thumbnails geradas por análise, com custo individual. */
+    const thumbnails = await Promise.all(rows.map(r => getThumbnailsByAnalysis(r.id)));
+    return rows.map((r, idx) => ({
       id: r.id,
       niche: r.niche,
       status: r.status,
@@ -209,6 +211,12 @@ export const analysisRouter = router({
       /** (Rodada 42) Custo exato da análise em R$ e detalhamento. */
       costBrl: r.costBrl ?? 0,
       costDetail: r.costDetail ?? null,
+      /** (Rodada 43) Thumbnails individuais com custo exato em R$. */
+      thumbnails: thumbnails[idx].map(t => ({
+        suggestionTitle: t.suggestionTitle,
+        costBrl: t.costBrl ?? 0,
+        costDetail: t.costDetail ?? null,
+      })),
       createdAt: r.createdAt.getTime(),
     }));
   }),

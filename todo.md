@@ -387,3 +387,11 @@
 - [x] Frontend: feedback visual de 80% do teto (cor da barra de progresso + banner/toast) na página /uso e no dialog
 - [x] PDF: seção do teto semanal no relatório de uso
 - [x] Testes vitest (bloqueio do teto semanal block/warn/alert, custo por análise, limites; suíte completa), docs, skill, Obsidian rodada-42 e checkpoint final
+
+## Melhorias solicitadas (rodada 43)
+- [x] Backend: detalhamento do custo semanal por modelo de IA (`groupWeekTokensByModel` + thumbnails por modelo; exposto via `profile.getUsageCost` como `weekCostByModel`)
+- [x] Backend: custo exato de cada thumbnail gerada (colunas `cost_brl`/`cost_detail` em `suggestion_thumbnails`, gravado na geração)
+- [x] Frontend: tabela "Detalhamento semanal por modelo de IA" no card Teto de custo semanal da /uso
+- [x] Frontend: histórico mostra o custo exato de cada thumbnail (valores individuais na coluna custo / tooltip)
+- [x] Frontend: filtro/ordenação do histórico por custo (maior custo primeiro, filtro por faixa)
+- [ ] Testes vitest (rodada 43), docs, skill, Obsidian rodada-43 e checkpoint final

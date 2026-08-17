@@ -263,6 +263,10 @@ export const suggestionThumbnails = mysqlTable("suggestion_thumbnails", {
   folderId: int("folderId"),
   /** Ordem manual de exibição (menor valor aparece primeiro; NULL = posição padrão) */
   sortOrder: int("sortOrder"),
+  /** (Rodada 43) Custo exato da geração em R$ (centavos) para rastreabilidade individual */
+  costBrl: int("costBrl").default(0).notNull(),
+  /** (Rodada 43) Detalhamento textual do custo da thumbnail (modelo, câmbio) */
+  costDetail: text("costDetail"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
