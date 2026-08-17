@@ -351,3 +351,11 @@
 - [x] Frontend: botão "Exportar PDF" na página /uso (exportUsagePdf)
 - [x] Frontend: dialog de confirmação indica uso único; toast com overrideRemaining (1 análise)
 - [x] Testes vitest (7 novos em usagePdf.test.ts + 2 corrigidos em analysis-limits.test.ts; 284/284 passando), docs, skill, Obsidian rodada-38 e checkpoint final
+
+## Melhorias solicitadas (rodada 39)
+- [x] Backend: catálogo de preços de modelos LLM (LLM_MODEL_PRICES: preço por 1M tokens entrada/saída em USD) + resolveLlmModel/resolveLlmPrice a partir do modelo configurado em providerSettings/env + helper `estimateMonthlyCostBrl` (tokens do mês × preço médio × câmbio fixo 5,40 BRL/USD, projeção pro-rata até o fim do mês, fallback quando o modelo não está no catálogo)
+- [x] Backend: orçamentos semanal/mensal obedecem `limitAction` (warn|block) — novo `checkAnalysisLimitsExtended` avalia também semanal/mensal em getLimitStatus, retorna needsConfirmation quando warn (mesmo mecanismo de uso único da R38) e bloqueia quando block; run/retry usam a versão estendida
+- [x] Backend: `buildUsagePdf` com seção "Custo estimado de LLM (mês corrente)" (modelo, tokens do mês, custo até hoje, projeção do mês completo) e gráfico de barras diárias (renderUsageChart em pdfkit shapes: âmbar tokens LLM + azul cota YouTube, com legenda e intervalo de datas)
+- [x] Frontend: card "Custo estimado de LLM (mês corrente)" na /uso (R$ até hoje + projeção do mês, badge do modelo com origem do preço e nota do câmbio 5,40)
+- [x] Frontend: texto do modo "Apenas avisar" no dialog Limites atualizado para mencionar limites semanais e mensais (mesmo aviso, mesmo mecanismo de uso único)
+- [x] Testes vitest (4 novos em limits-r39-pure.test.ts, 13 em limits-r39.test.ts, 4 corrigidos/novos em usagePdf.test.ts + 3 em analysis-limits.test.ts; 305/305 passando), docs, skill, Obsidian rodada-39 e checkpoint final

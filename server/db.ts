@@ -1420,6 +1420,9 @@ export type LimitStatus = {
   today: { analyses: number; tokens: number; quota: number };
   /** analyses/tokens/quota: "ok" | "warn" (>=80%) | "blocked" (>=100%) */
   state: { analyses: "ok" | "warn" | "blocked"; tokens: "ok" | "warn" | "blocked"; quota: "ok" | "warn" | "blocked" };
+  /** (Rodada 39) Estado dos orçamentos semanal e mensal */
+  week?: { tokens: "ok" | "warn" | "blocked"; quota: "ok" | "warn" | "blocked"; consumedTokens: number; consumedQuota: number; startIso: string };
+  month?: { tokens: "ok" | "warn" | "blocked"; quota: "ok" | "warn" | "blocked"; consumedTokens: number; consumedQuota: number; startIso: string };
 };
 /** Retorna os limites do usuário (0 = ilimitado). */
 export async function getUserLimits(userId: number): Promise<UserLimits> {
@@ -1605,7 +1608,7 @@ export async function getTodayUsage(userId: number): Promise<{ llm: { tokens: nu
 }
 /** Avalia o estado dos limites (ok / warn >=80% / blocked >=100%) contra o consumo de hoje. */
 export async function getLimitStatus(userId: number): Promise<LimitStatus> {
-  const [limit, today] = await Promise.all([getUserLimits(userId), getTodayUsage(userId)]);
+  const [limit, today, budgets] = await Promise.all([getUserLimits(userId), getTodayUsage(userId), getUsageBudgets(userId)]);
   const analyses = await countAnalysesToday(userId);
   const quotaUnits = (today.llm.units ?? 0) + (today.youtube.units ?? 0);
   const evaluate = (value: number, cap: number): "ok" | "warn" | "blocked" => {
@@ -1629,6 +1632,21 @@ export async function getLimitStatus(userId: number): Promise<LimitStatus> {
       analyses: evaluate(analyses, limit.dailyAnalysisLimit),
       tokens: evaluate(today.llm.tokens, limit.dailyTokenLimit),
       quota: evaluate(quotaUnits, limit.dailyQuotaLimit),
+    },
+    // (Rodada 39) Avalia orçamentos semanal e mensal no mesmo modelo.
+    week: {
+      tokens: evaluate(budgets.week.tokens, limit.weeklyTokenLimit),
+      quota: evaluate(budgets.week.quota, limit.weeklyQuotaLimit),
+      consumedTokens: budgets.week.tokens,
+      consumedQuota: budgets.week.quota,
+      startIso: budgets.weekStartIso,
+    },
+    month: {
+      tokens: evaluate(budgets.month.tokens, limit.monthlyTokenLimit),
+      quota: evaluate(budgets.month.quota, limit.monthlyQuotaLimit),
+      consumedTokens: budgets.month.tokens,
+      consumedQuota: budgets.month.quota,
+      startIso: budgets.monthStartIso,
     },
   };
   // (Rodada 38) Emite alerta proativo in-app quando alguma dimensão atinge
@@ -1783,9 +1801,17 @@ export async function getUsageBudgets(userId: number): Promise<UsageBudgets> {
  * da tentativa em blocked_attempts). */
 export async function getUsageForBlock(
   userId: number,
-  dimension: "analyses" | "tokens" | "quota"
+  dimension: "analyses" | "tokens" | "quota" | "weekly_tokens" | "weekly_quota" | "monthly_tokens" | "monthly_quota"
 ): Promise<number> {
   if (dimension === "analyses") return await countAnalysesToday(userId);
+  if (dimension === "weekly_tokens" || dimension === "monthly_tokens") {
+    const budgets = await getUsageBudgets(userId);
+    return dimension === "weekly_tokens" ? budgets.week.tokens : budgets.month.tokens;
+  }
+  if (dimension === "weekly_quota" || dimension === "monthly_quota") {
+    const budgets = await getUsageBudgets(userId);
+    return dimension === "weekly_quota" ? budgets.week.quota : budgets.month.quota;
+  }
   const today = await getTodayUsage(userId);
   if (dimension === "tokens") return today.llm.tokens ?? 0;
   return (today.llm.units ?? 0) + (today.youtube.units ?? 0);
@@ -1843,6 +1869,53 @@ export async function checkAnalysisLimits(userId: number): Promise<
   }
   if (!hasOverride && limit.dailyQuotaLimit > 0 && state.quota === "blocked") {
     blockedDims.push({ dimension: "quota", reason: `Limite diário de cota YouTube (${limit.dailyQuotaLimit.toLocaleString("pt-BR")} unidades) atingido. O contador zera à meia-noite.` });
+  }
+  if (!blockedDims.length) return { blocked: false };
+  if (limits.limitAction === "warn") {
+    return { needsConfirmation: true, ...blockedDims[0] };
+  }
+  return { blocked: true, ...blockedDims[0] };
+}
+export type BlockDimension = "analyses" | "tokens" | "quota" | "weekly_tokens" | "weekly_quota" | "monthly_tokens" | "monthly_quota";
+/** (Rodada 39) Versão do checkAnalysisLimits que considera também os orçamentos
+ * semanal e mensal — usada pelo run/retry. Quando o limiteAction é "warn", o
+ * primeiro orçamento semanal/mensal atingido retorna needsConfirmation; quando
+ * "block", retorna blocked. Diários têm prioridade sobre períodos. */
+export async function checkAnalysisLimitsExtended(userId: number): Promise<
+  | { blocked: false }
+  | { blocked: true; reason: string; dimension: BlockDimension }
+  | { needsConfirmation: true; reason: string; dimension: BlockDimension }
+> {
+  const { limit, today, state, week, month } = await getLimitStatus(userId);
+  const limits = await getUserLimits(userId);
+  const hasOneTime = (limits.overrideRemaining ?? 0) > 0;
+  if (hasOneTime) {
+    await consumeLimitOverride(userId);
+    return { blocked: false };
+  }
+  const hasOverride = (limits.overrideUntil ?? 0) >= Date.now();
+  const blockedDims: Array<{ dimension: BlockDimension; reason: string }> = [];
+  if (!hasOverride && limit.dailyAnalysisLimit > 0 && today.analyses >= limit.dailyAnalysisLimit) {
+    blockedDims.push({ dimension: "analyses", reason: `Limite de análises do dia (${limit.dailyAnalysisLimit}) atingido. O contador zera à meia-noite.` });
+  }
+  if (!hasOverride && limit.dailyTokenLimit > 0 && state.tokens === "blocked") {
+    blockedDims.push({ dimension: "tokens", reason: `Limite diário de tokens de LLM (${limit.dailyTokenLimit.toLocaleString("pt-BR")}) atingido. O contador zera à meia-noite.` });
+  }
+  if (!hasOverride && limit.dailyQuotaLimit > 0 && state.quota === "blocked") {
+    blockedDims.push({ dimension: "quota", reason: `Limite diário de cota YouTube (${limit.dailyQuotaLimit.toLocaleString("pt-BR")} unidades) atingido. O contador zera à meia-noite.` });
+  }
+  // (Rodada 39) Orçamentos semanal e mensal obedecem o mesmo modo (warn|block).
+  if (!hasOverride && limit.weeklyTokenLimit > 0 && week && week.tokens === "blocked") {
+    blockedDims.push({ dimension: "weekly_tokens", reason: `Orçamento semanal de tokens de LLM (${limit.weeklyTokenLimit.toLocaleString("pt-BR")}) atingido. Renova em 7 dias.` });
+  }
+  if (!hasOverride && limit.weeklyQuotaLimit > 0 && week && week.quota === "blocked") {
+    blockedDims.push({ dimension: "weekly_quota", reason: `Orçamento semanal de cota YouTube (${limit.weeklyQuotaLimit.toLocaleString("pt-BR")} unidades) atingido. Renova em 7 dias.` });
+  }
+  if (!hasOverride && limit.monthlyTokenLimit > 0 && month && month.tokens === "blocked") {
+    blockedDims.push({ dimension: "monthly_tokens", reason: `Orçamento mensal de tokens de LLM (${limit.monthlyTokenLimit.toLocaleString("pt-BR")}) atingido. Renova no dia 1.` });
+  }
+  if (!hasOverride && limit.monthlyQuotaLimit > 0 && month && month.quota === "blocked") {
+    blockedDims.push({ dimension: "monthly_quota", reason: `Orçamento mensal de cota YouTube (${limit.monthlyQuotaLimit.toLocaleString("pt-BR")} unidades) atingido. Renova no dia 1.` });
   }
   if (!blockedDims.length) return { blocked: false };
   if (limits.limitAction === "warn") {
@@ -1995,4 +2068,101 @@ export async function setProviderSettings(
         .onDuplicateKeyUpdate({ set: { value: value.trim() } });
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// (Rodada 39) Projeção de custo em R$ por mês e bloqueio/confirmação de
+// orçamentos semanal e mensal (modo "apenas avisar" estendido).
+// ---------------------------------------------------------------------------
+/** Preço por 1 milhão de tokens (entrada e saída) em USD. Modelos populares. */
+export const LLM_MODEL_PRICES: Record<string, { input: number; output: number }> = {
+  "gpt-4o-mini": { input: 0.15, output: 0.6 },
+  "gpt-4o": { input: 2.5, output: 10 },
+  "chatgpt-4o-latest": { input: 2.5, output: 10 },
+  "gpt-4.1-mini": { input: 0.4, output: 1.6 },
+  "gpt-4.1-nano": { input: 0.1, output: 0.4 },
+  "claude-3-5-sonnet-20241022": { input: 3, output: 15 },
+  "claude-3-5-haiku-20241022": { input: 0.8, output: 4 },
+  "gemini-1.5-flash": { input: 0.075, output: 0.3 },
+  "gemini-1.5-pro": { input: 1.25, output: 5 },
+  "deepseek-chat": { input: 0.27, output: 1.1 },
+  "llama-3.3-70b-versatile": { input: 0.59, output: 0.79 },
+  "openai/gpt-4o-mini": { input: 0.15, output: 0.6 },
+  "openai/gpt-4o": { input: 2.5, output: 10 },
+  "openai/chatgpt-4o-latest": { input: 2.5, output: 10 },
+  "openai/gpt-4.1-mini": { input: 0.4, output: 1.6 },
+  "anthropic/claude-3.5-sonnet": { input: 3, output: 15 },
+  "anthropic/claude-3.5-haiku": { input: 0.8, output: 4 },
+  "google/gemini-1.5-flash": { input: 0.075, output: 0.3 },
+  "deepseek/deepseek-chat": { input: 0.27, output: 1.1 },
+  "groq/llama-3.3-70b-versatile": { input: 0.59, output: 0.79 },
+};
+/** Preço padrão usado quando o modelo configurado não está no catálogo
+ * (mistura conservadora de entrada/saída em USD por 1M tokens). */
+export const LLM_DEFAULT_PRICE_PER_MILLION = 1.5;
+/** Câmbio fixo USD → BRL usado na projeção de custos (atualizável aqui). */
+export const USD_TO_BRL = 5.4;
+/** Modelo padrão quando nenhum provider/override estiver configurado (Forge). */
+export const LLM_DEFAULT_MODEL = "gpt-4o-mini";
+/** (Rodada 39) Estima o custo de tokens em R$: usa preço médio
+ * (input+output)/2 quando não há split entre entrada e saída. */
+export function estimateTokensCostBrl(input: {
+  tokens: number;
+  pricePerMillionInput: number;
+  pricePerMillionOutput: number;
+  usdBrl?: number;
+}): { costBrl: number; tokensPerMillion: number; avgPriceUsd: number } {
+  const tokens = Math.max(0, input.tokens);
+  const avgPriceUsd = (input.pricePerMillionInput + input.pricePerMillionOutput) / 2;
+  const usdBrl = input.usdBrl ?? USD_TO_BRL;
+  const costBrl = (tokens / 1_000_000) * avgPriceUsd * usdBrl;
+  return { costBrl, tokensPerMillion: tokens / 1_000_000, avgPriceUsd };
+}
+/** Resolve o modelo LLM efetivo do usuário: override por settings, env ou padrão. */
+export async function resolveLlmModel(userId: number): Promise<{ model: string; from: "settings" | "env" | "default" }> {
+  const settings = await getProviderSettings(userId);
+  if (settings.llmModel) return { model: settings.llmModel, from: "settings" };
+  if (process.env.OPENAI_MODEL) return { model: process.env.OPENAI_MODEL, from: "env" };
+  return { model: LLM_DEFAULT_MODEL, from: "default" };
+}
+/** Preço por 1M de tokens do modelo resolvido (USD), com fallback do catálogo. */
+export async function resolveLlmPrice(userId: number): Promise<{
+  model: string;
+  from: "settings" | "env" | "default";
+  input: number;
+  output: number;
+  fallback: boolean;
+}> {
+  const { model, from } = await resolveLlmModel(userId);
+  const price = LLM_MODEL_PRICES[model.toLowerCase()];
+  if (price) return { model, from, input: price.input, output: price.output, fallback: false };
+  return { model, from, input: LLM_DEFAULT_PRICE_PER_MILLION, output: LLM_DEFAULT_PRICE_PER_MILLION, fallback: true };
+}
+/** Custo do consumo mensal em R$ + projeção pro-rata do mês completo. */
+export async function estimateMonthlyCostBrl(userId: number): Promise<{
+  model: string;
+  priceFrom: "settings" | "env" | "default";
+  fallback: boolean;
+  monthTokens: number;
+  monthCostBrl: number;
+  /** Projeção pro-rata do mês inteiro pelo ritmo do dia 1 até hoje */
+  projectedMonthCostBrl: number | null;
+  daysElapsed: number;
+}> {
+  const [budgets, price] = await Promise.all([getUsageBudgets(userId), resolveLlmPrice(userId)]);
+  const monthTokens = budgets.month.tokens;
+  const { costBrl } = estimateTokensCostBrl({ tokens: monthTokens, pricePerMillionInput: price.input, pricePerMillionOutput: price.output });
+  const now = new Date();
+  const daysElapsed = Math.max(1, now.getDate());
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const projectedMonthCostBrl = daysElapsed >= daysInMonth ? null : costBrl * (daysInMonth / daysElapsed);
+  return {
+    model: price.model,
+    priceFrom: price.from,
+    fallback: price.fallback,
+    monthTokens,
+    monthCostBrl: costBrl,
+    projectedMonthCostBrl,
+    daysElapsed,
+  };
 }

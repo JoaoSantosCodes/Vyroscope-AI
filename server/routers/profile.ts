@@ -13,6 +13,10 @@ import {
   getUsageSummary,
   getUserStats,
   projectExhaustion,
+  estimateMonthlyCostBrl,
+  USD_TO_BRL,
+  LLM_MODEL_PRICES,
+  LLM_DEFAULT_PRICE_PER_MILLION,
   setProviderSettings,
   setUserLimits,
   updateLocalCode,
@@ -317,6 +321,20 @@ export const profileRouter = router({
       });
       return { ok: true } as const;
     }),
+  /**
+   * (Rodada 39) Projeção de custo do consumo mensal em R$ pelo modelo LLM
+   * configurado (override do usuário > env > padrão), com projeção pro-rata
+   * do mês completo pelo ritmo diário corrente.
+   */
+  getUsageCost: protectedProcedure.query(async ({ ctx }) => {
+    const cost = await estimateMonthlyCostBrl(ctx.user.id);
+    return {
+      ...cost,
+      usdBrl: USD_TO_BRL,
+      catalog: LLM_MODEL_PRICES,
+      fallbackPrice: LLM_DEFAULT_PRICE_PER_MILLION,
+    };
+  }),
   /**
    * (Rodada 37/38) Confirmação manual de limite no modo "apenas avisar":
    * libera o bloqueio APENAS para a próxima análise (uso único) e mantém a

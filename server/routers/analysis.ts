@@ -4,6 +4,8 @@ import { z } from "zod";
 import {
   appendRetryEvent,
   checkAnalysisLimits,
+  checkAnalysisLimitsExtended,
+  type BlockDimension,
   createAnalysis,
   getUserLimits,
   getUsageForBlock,
@@ -33,7 +35,7 @@ import { fetchTrendingVideosForNiche } from "../youtube";
 async function recordBlockedAttemptFor(
   userId: number,
   niche: string,
-  check: { blocked: true; reason: string; dimension: "analyses" | "tokens" | "quota" } | { needsConfirmation: true; reason: string; dimension: "analyses" | "tokens" | "quota" }
+  check: { blocked: true; reason: string; dimension: BlockDimension } | { needsConfirmation: true; reason: string; dimension: BlockDimension }
 ): Promise<number | null> {
   const limits = await getUserLimits(Number(userId));
   const limitValue =
@@ -41,7 +43,15 @@ async function recordBlockedAttemptFor(
       ? limits.dailyAnalysisLimit
       : check.dimension === "tokens"
         ? limits.dailyTokenLimit
-        : limits.dailyQuotaLimit;
+        : check.dimension === "quota"
+          ? limits.dailyQuotaLimit
+          : check.dimension === "weekly_tokens"
+            ? limits.weeklyTokenLimit
+            : check.dimension === "weekly_quota"
+              ? limits.weeklyQuotaLimit
+              : check.dimension === "monthly_tokens"
+                ? limits.monthlyTokenLimit
+                : limits.monthlyQuotaLimit;
   const currentUsage = await getUsageForBlock(Number(userId), check.dimension);
   try {
     await recordBlockedAttempt({
@@ -77,7 +87,8 @@ export const analysisRouter = router({
     const niche = input.niche;
     // (Rodada 36/37) Proteção de custos: bloqueia a análise quando qualquer limite
     // diário atingiu 100%; no modo "apenas avisar" pede confirmação (needsConfirmation).
-    const limitCheck = await checkAnalysisLimits(Number(userId));
+    // (Rodada 39) Considera também orçamentos semanal e mensal.
+    const limitCheck = await checkAnalysisLimitsExtended(Number(userId));
     if ("blocked" in limitCheck && limitCheck.blocked) {
       await recordBlockedAttemptFor(userId, niche, limitCheck);
       await createAnalysis({ id: nanoid(14), userId, niche, status: "failed" }).catch(() => undefined);
@@ -136,7 +147,8 @@ export const analysisRouter = router({
       }
       const userId = ctx.user.id;
       // (Rodada 36/37) O retry também respeita os limites diários.
-      const limitCheck = await checkAnalysisLimits(Number(userId));
+      // (Rodada 39) Considera também orçamentos semanal e mensal.
+      const limitCheck = await checkAnalysisLimitsExtended(Number(userId));
       if ("blocked" in limitCheck && limitCheck.blocked) {
         await recordBlockedAttemptFor(userId, row.niche, limitCheck);
         await createAnalysis({ id: nanoid(14), userId, niche: row.niche, status: "failed" }).catch(() => undefined);

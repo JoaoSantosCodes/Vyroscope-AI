@@ -500,7 +500,7 @@ export default function Profile() {
                       <p className="text-xs text-muted-foreground">
                         {limitAction === "block"
                           ? "Novas análises são interrompidas automaticamente até a meia-noite."
-                          : "Você recebe uma janela de confirmação e pode executar mesmo assim (liberação válida até a meia-noite)."}
+                          : "Você recebe uma janela de confirmação e pode executar mesmo assim (liberação válida para uma única análise). Isso vale para os limites diários, semanais e mensais."}
                       </p>
                     </div>
                     <Separator />

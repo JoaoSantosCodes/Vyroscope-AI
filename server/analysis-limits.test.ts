@@ -33,8 +33,8 @@ const db = vi.hoisted(() => ({
   // (Rodada 38) vínculo da pendência confirmada à análise autorizada.
   getLatestBlockedAttemptId: vi.fn().mockResolvedValue(7),
   confirmBlockedAttempt: vi.fn().mockResolvedValue(undefined),
-  // (Rodada 36) checagem de limites diários — a porta de proteção de custos.
-  checkAnalysisLimits: vi.fn().mockResolvedValue({ blocked: false }),
+  // (Rodada 36) checagem de limites — a porta de proteção de custos.
+  checkAnalysisLimitsExtended: vi.fn().mockResolvedValue({ blocked: false }),
 }));
 vi.mock("./db", () => db);
 vi.mock("./providers", () => ({
@@ -106,7 +106,7 @@ function sampleUser(id = 12): AuthenticatedUser {
 let lastAnalysisState = { status: "running" };
 beforeEach(() => {
   vi.clearAllMocks();
-  db.checkAnalysisLimits.mockResolvedValue({ blocked: false });
+  db.checkAnalysisLimitsExtended.mockResolvedValue({ blocked: false });
   lastAnalysisState = { status: "running" };
   db.updateAnalysis.mockImplementation(async (_id: string, patch: { status?: string }) => {
     if (patch?.status) lastAnalysisState.status = patch.status;
@@ -127,7 +127,7 @@ describe("analysis.run com limites diários (proteção de custos)", () => {
   it("checa os limites do usuário antes de executar a análise", async () => {
     const caller = appRouter.createCaller(createContext(sampleUser()));
     await caller.analysis.run({ niche: "finanças" });
-    expect(db.checkAnalysisLimits).toHaveBeenCalledWith(12);
+    expect(db.checkAnalysisLimitsExtended).toHaveBeenCalledWith(12);
   });
 
   it("permite a análise quando não há bloqueio", async () => {
@@ -137,7 +137,7 @@ describe("analysis.run com limites diários (proteção de custos)", () => {
   });
 
   it("bloqueia com TOO_MANY_REQUESTS e mensagem clara quando o limite foi atingido", async () => {
-    db.checkAnalysisLimits.mockResolvedValue({
+    db.checkAnalysisLimitsExtended.mockResolvedValue({
       blocked: true,
       reason: "Limite de análises do dia (2) atingido. O contador zera à meia-noite.",
     });
@@ -150,7 +150,7 @@ describe("analysis.run com limites diários (proteção de custos)", () => {
   });
 
   it("não cria a análise running quando está bloqueado", async () => {
-    db.checkAnalysisLimits.mockResolvedValue({
+    db.checkAnalysisLimitsExtended.mockResolvedValue({
       blocked: true,
       reason: "Limite diário de tokens atingido.",
     });
@@ -165,11 +165,11 @@ describe("analysis.run com limites diários (proteção de custos)", () => {
   it("rejeita usuários não autenticados antes de qualquer checagem", async () => {
     const caller = appRouter.createCaller(createContext(null));
     await expect(caller.analysis.run({ niche: "finanças" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
-    expect(db.checkAnalysisLimits).not.toHaveBeenCalled();
+    expect(db.checkAnalysisLimitsExtended).not.toHaveBeenCalled();
   });
 
   it("modo 'apenas avisar': grava a tentativa confirmada (uso único) e executa a análise", async () => {
-    db.checkAnalysisLimits.mockResolvedValue({
+    db.checkAnalysisLimitsExtended.mockResolvedValue({
       needsConfirmation: true,
       reason: "Limite diário de tokens atingido. Confirme para executar mesmo assim.",
       dimension: "tokens",
@@ -198,7 +198,7 @@ describe("analysis.run com limites diários (proteção de custos)", () => {
       status: "failed",
       retryLog: null,
     });
-    db.checkAnalysisLimits.mockResolvedValue({
+    db.checkAnalysisLimitsExtended.mockResolvedValue({
       needsConfirmation: true,
       reason: "Limite diário de cota YouTube atingido.",
       dimension: "quota",
@@ -229,7 +229,7 @@ describe("analysis.retry com limites diários", () => {
       status: "failed",
       retryLog: null,
     });
-    db.checkAnalysisLimits.mockResolvedValue({
+    db.checkAnalysisLimitsExtended.mockResolvedValue({
       blocked: true,
       reason: "Limite de tokens do dia atingido.",
     });
@@ -247,5 +247,35 @@ describe("analysis.retry com limites diários", () => {
     db.getAnalysisById.mockResolvedValue(undefined);
     const caller = appRouter.createCaller(createContext(sampleUser()));
     await expect(caller.analysis.retry({ analysisId: "inexistente" })).rejects.toBeTruthy();
+  });
+
+  it("bloqueia por limite SEMANAL com TOO_MANY_REQUESTS (Rodada 39)", async () => {
+    db.getAnalysisById.mockResolvedValue({
+      id: "abc123",
+      userId: 12,
+      niche: "finanças",
+      status: "failed",
+      retryLog: null,
+    });
+    db.checkAnalysisLimitsExtended.mockResolvedValue({
+      blocked: true,
+      reason: "Orçamento semanal de tokens atingido. Liberação na virada da semana.",
+    });
+    const caller = appRouter.createCaller(createContext(sampleUser()));
+    await expect(caller.analysis.retry({ analysisId: "abc123" })).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+  });
+
+  it("pede confirmação por limite MENSAL quando limitAction é 'warn' (Rodada 39)", async () => {
+    db.getLatestBlockedAttemptId.mockResolvedValue(7);
+    db.checkAnalysisLimitsExtended.mockResolvedValue({
+      needsConfirmation: true,
+      reason: "Orçamento mensal de cota YouTube atingido. Confirme para executar mesmo assim.",
+      dimension: "monthly_quota",
+    });
+    db.getAnalysisById.mockResolvedValue({ id: "abc", niche: "finanças", status: "completed", retryLog: null });
+    const caller = appRouter.createCaller(createContext(sampleUser()));
+    const result = await caller.analysis.run({ niche: "finanças" });
+    expect(result.status).toBe("completed");
+    expect(db.confirmBlockedAttempt).toHaveBeenCalledWith(7, expect.objectContaining({ analysisId: result.id }));
   });
 });

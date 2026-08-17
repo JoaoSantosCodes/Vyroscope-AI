@@ -1,5 +1,6 @@
 import PDFDocument from "pdfkit";
 import {
+  estimateMonthlyCostBrl,
   getBlockedAttempts,
   getUserLimits,
   getUsageBudgets,
@@ -43,12 +44,13 @@ export async function buildUsagePdf(userId: number, days = 30): Promise<Buffer> 
 
       const todayIso = new Date().toISOString().slice(0, 10);
 
-      const [summary, series, limits, budgets, blocked] = await Promise.all([
+      const [summary, series, limits, budgets, blocked, cost] = await Promise.all([
         getUsageSummary(userId),
         getUsageDailySeries(userId, Math.min(days, 90)),
         getUserLimits(userId),
         getUsageBudgets(userId),
         getBlockedAttempts(userId, 100),
+        estimateMonthlyCostBrl(userId),
       ]);
 
       const llmT = summary.llm;
@@ -112,6 +114,36 @@ export async function buildUsagePdf(userId: number, days = 30): Promise<Buffer> 
         doc.text(r.requests.toLocaleString("pt-BR"), 480, y);
         y += 20;
       }
+
+      // ===== Custo estimado do mês (Rodada 39) =====
+      const fmtBrl = (v: number) => `R$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      doc.fillColor(COLORS.dark).rect(0, doc.y + 24, doc.page.width, 36).fill();
+      doc.fillColor(COLORS.amber).fontSize(13).font("Helvetica-Bold").text("Custo estimado de LLM (mês corrente)", 54, doc.y + 34);
+      doc.y += 74;
+      doc.fillColor(COLORS.light).fontSize(10).text(`Modelo utilizado: ${cost.model} (${cost.priceFrom === "settings" ? "configurado por você" : cost.priceFrom === "env" ? "padrão do servidor" : "padrão"}${cost.fallback ? ", preço estimado" : ""})`, 54, doc.y);
+      doc.y += 16;
+      doc.text(`Consumo do mês: ${cost.monthTokens.toLocaleString("pt-BR")} tokens`, 54, doc.y);
+      doc.text(`Custo até hoje: ${fmtBrl(cost.monthCostBrl)}`, 300, doc.y);
+      doc.y += 16;
+      const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
+      if (cost.projectedMonthCostBrl !== null) {
+        doc.fillColor(COLORS.amber).fontSize(10).text(
+          `Projeção do mês completo (dia ${cost.daysElapsed} de ${daysInMonth}): ${fmtBrl(cost.projectedMonthCostBrl)} pelo ritmo médio diário`,
+          54,
+          doc.y,
+          { width: doc.page.width - 108 }
+        );
+      } else {
+        doc.fillColor(COLORS.gray).fontSize(10).text("Fim do mês: sem projeção pro-rata.", 54, doc.y);
+      }
+      doc.y += 22;
+
+      // ===== Gráfico de consumo diário (Rodada 39) =====
+      if (doc.y > doc.page.height - 180) doc.addPage();
+      doc.fillColor(COLORS.dark).rect(0, doc.y + 24, doc.page.width, 36).fill();
+      doc.fillColor(COLORS.amber).fontSize(13).font("Helvetica-Bold").text("Gráfico de consumo diário", 54, doc.y + 34);
+      doc.y += 74;
+      renderUsageChart(doc, series.llm, series.youtube, Math.min(days, series.llm.length));
 
       // ===== Orçamentos e projeções =====
       y = kpiY();
@@ -223,4 +255,53 @@ export async function buildUsagePdf(userId: number, days = 30): Promise<Buffer> 
       reject(err);
     }
   });
+}
+
+/** (Rodada 39) Gráfico de barras empilhadas: tokens LLM (âmbar) e cota YouTube
+ * (azul) dos últimos `days` dias. Escala normalizada pelo maior dia. */
+export function renderUsageChart(
+  doc: InstanceType<typeof PDFDocument>,
+  llm: Array<{ date: string; tokens: number; units: number; requests: number }>,
+  youtube: Array<{ date: string; tokens: number; units: number; requests: number }>,
+  days: number
+): void {
+  const chartWidth = doc.page.width - 108;
+  const maxBarHeight = 120;
+  const n = Math.min(days, llm.length);
+  const window = llm.slice(-n);
+  const ytWindow = youtube.slice(-n);
+  if (window.length === 0) {
+    doc.fillColor("#8A8A95").fontSize(10).text("Sem dados de consumo no período.", 54, doc.y);
+    doc.y += 16;
+    return;
+  }
+  let maxCombined = 0;
+  const combined = window.map((d, i) => {
+    const llmVal = d.tokens + d.units;
+    const ytVal = (ytWindow[i]?.tokens ?? 0) + (ytWindow[i]?.units ?? 0);
+    maxCombined = Math.max(maxCombined, llmVal + ytVal);
+    return { date: d.date, llmVal, ytVal };
+  });
+  if (maxCombined === 0) {
+    doc.fillColor("#8A8A95").fontSize(10).text("Nenhum consumo registrado no período.", 54, doc.y);
+    doc.y += 16;
+    return;
+  }
+  const scale = (v: number) => (v / maxCombined) * maxBarHeight;
+  const barWidth = Math.min(26, Math.max(4, Math.floor(chartWidth / n) - 2));
+  const gap = (chartWidth - barWidth * n) / Math.max(1, n - 1);
+  const startX = 54;
+  const yAxis = doc.y;
+  doc.fillColor("#E8A33D").fontSize(9).text("Tokens LLM", startX, yAxis - 14);
+  doc.fillColor("#3D6FE8").text("Cota YouTube", startX + 70, yAxis - 14);
+  doc.moveTo(startX, yAxis - 6).lineTo(startX + chartWidth, yAxis - 6).strokeColor("#8A8A95").lineWidth(0.5).stroke();
+  combined.forEach((c, i) => {
+    const x = startX + i * (barWidth + gap);
+    const lh = scale(c.llmVal);
+    const yh = scale(c.ytVal);
+    if (lh > 0) doc.rect(x, yAxis - lh, barWidth, lh).fillColor("#E8A33D").fill();
+    if (yh > 0) doc.rect(x, yAxis - lh - yh, barWidth, yh).fillColor("#3D6FE8").fill();
+  });
+  doc.fillColor("#8A8A95").fontSize(8).text(`De: ${window[0].date} · Até: ${window[window.length - 1].date}`, startX, yAxis + 6);
+  doc.y = yAxis + 26;
 }

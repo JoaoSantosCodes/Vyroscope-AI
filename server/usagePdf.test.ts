@@ -17,8 +17,8 @@ const db = vi.hoisted(() => ({
   }),
   getUsageDailySeries: vi.fn().mockResolvedValue({
     dates: ["2026-08-01"],
-    llm: [{ tokens: 500, units: 2, requests: 4 }],
-    youtube: [{ tokens: 300, units: 1, requests: 2 }],
+    llm: [{ date: "2026-08-01", tokens: 500, units: 2, requests: 4 }],
+    youtube: [{ date: "2026-08-01", tokens: 300, units: 1, requests: 2 }],
     limitByDay: [{ date: "2026-08-01", analyses: 0, tokens: 100000, quota: 10000 }],
   }),
   getUserLimits: vi.fn().mockResolvedValue({
@@ -64,6 +64,16 @@ const db = vi.hoisted(() => ({
     estimatedDayIso: "2026-08-20",
     daysLeft: 5,
     exhausted: false,
+  }),
+  // (Rodada 39) projeção de custo mensal de LLM em R$.
+  estimateMonthlyCostBrl: vi.fn().mockResolvedValue({
+    model: "gpt-4.1-mini",
+    priceFrom: "catalog",
+    fallback: false,
+    monthTokens: 48000,
+    monthCostBrl: 1.04,
+    projectedMonthCostBrl: 2.15,
+    daysElapsed: 15,
   }),
 }));
 vi.mock("./db", () => db);
@@ -153,5 +163,80 @@ describe("buildUsagePdf (Rodada 38)", () => {
     const text = pdfText(buffer);
     const compact = text.replace(/[\s ]/g, "").toUpperCase();
     expect(compact).toContain("LIMITEATINGIDO");
+  });
+
+  describe("(Rodada 39) custo estimado do mês e gráfico de consumo diário", () => {
+    it("chama estimateMonthlyCostBrl e inclui a seção de custo e o modelo no PDF", async () => {
+      const buffer = await buildUsagePdf(12, 30);
+      expect(db.estimateMonthlyCostBrl).toHaveBeenCalledWith(12);
+      const text = pdfText(buffer);
+      const compact = text.replace(/[\s ]/g, "").toUpperCase();
+      expect(compact).toContain("CUSTOESTIMADODELLM");
+      expect(compact).toContain("GPT-4");
+      expect(text).toContain("1,04");
+      expect(text).toContain("2,15");
+      expect(text).toContain("48.000");
+    });
+
+    it("mostra 'sem projeção pro-rata' quando a projeção é nula", async () => {
+      db.estimateMonthlyCostBrl.mockResolvedValueOnce({
+        model: "gpt-4.1-mini",
+        priceFrom: "catalog",
+        fallback: false,
+        monthTokens: 48000,
+        monthCostBrl: 1.04,
+        projectedMonthCostBrl: null,
+        daysElapsed: 31,
+      });
+      const text = pdfText(await buildUsagePdf(12, 30));
+      expect(text).toContain("sem projeção pro-rata");
+    });
+
+    it("desenha o gráfico de consumo diário quando há dados", async () => {
+      db.getUsageDailySeries.mockResolvedValueOnce({
+        dates: ["2026-08-10", "2026-08-11", "2026-08-12"],
+        llm: [
+          { date: "2026-08-10", tokens: 10000, units: 40, requests: 8 },
+          { date: "2026-08-11", tokens: 20000, units: 80, requests: 16 },
+          { date: "2026-08-12", tokens: 5000, units: 20, requests: 4 },
+        ],
+        youtube: [
+          { date: "2026-08-10", tokens: 1000, units: 10, requests: 2 },
+          { date: "2026-08-11", tokens: 2000, units: 20, requests: 4 },
+          { date: "2026-08-12", tokens: 500, units: 5, requests: 1 },
+        ],
+        limitByDay: [
+          { date: "2026-08-10", analyses: 0, tokens: 0, quota: 0 },
+          { date: "2026-08-11", analyses: 0, tokens: 0, quota: 0 },
+          { date: "2026-08-12", analyses: 0, tokens: 0, quota: 0 },
+        ],
+      });
+      const buffer = await buildUsagePdf(12, 30);
+      // As barras ficam dentro de streams comprimidos; verificar o texto
+      // extraído (título do gráfico, legenda e datas do eixo).
+      const text = pdfText(buffer);
+      const compact = text.replace(/[\s ]/g, "").toUpperCase();
+      expect(compact).toContain("GRÁFICODECONSUMODIÁRIO");
+      expect(compact).toContain("TOKENSLLM");
+      expect(compact).toContain("COTAYOUTUBE");
+      expect(compact).toContain("DE:2026-08-10");
+      expect(compact).toContain("ATÉ:2026-08-12");
+      // O gráfico também inclui o rodapé com o intervalo das datas.
+      // As barras são vetores PDFKit (fillColor em rgb decimal, sem hex no
+      // arquivo); o título, a legenda e o intervalo de datas já confirmam
+      // que o gráfico foi renderizado.
+      expect(buffer).toBeInstanceOf(Buffer);
+    });
+
+    it("não desenha barras quando não há consumo no período", async () => {
+      db.getUsageDailySeries.mockResolvedValueOnce({
+        dates: ["2026-08-10"],
+        llm: [{ tokens: 0, units: 0, requests: 0 }],
+        youtube: [{ tokens: 0, units: 0, requests: 0 }],
+        limitByDay: [{ date: "2026-08-10", analyses: 0, tokens: 0, quota: 0 }],
+      });
+      const text = pdfText(await buildUsagePdf(12, 30));
+      expect(text).toContain("Nenhum consumo registrado no período");
+    });
   });
 });

@@ -24,6 +24,7 @@ import { formatDate } from "@/lib/score";
 import { trpc } from "@/lib/trpc";
 import {
   ChartNoAxesCombined,
+  DollarSign,
   Flame,
   Gauge,
   Loader2,
@@ -73,6 +74,10 @@ export default function Usage() {
   const limitsQuery = trpc.profile.getLimits.useQuery(undefined, {
     enabled: isAuthenticated,
     staleTime: 30_000,
+  });
+  const costQuery = trpc.profile.getUsageCost.useQuery(undefined, {
+    enabled: isAuthenticated,
+    staleTime: 60_000,
   });
 
   const chartData = useMemo(() => {
@@ -235,6 +240,9 @@ export default function Usage() {
             budgets={limits?.budgets?.month}
           />
         </div>
+
+        {/* (Rodada 39) Custo estimado de LLM em R$ para o mês corrente */}
+        <CostEstimateCard cost={costQuery.data} isLoading={costQuery.isLoading} />
 
         {/* Gráfico de tokens LLM */}
         <Card className="border-border/60">
@@ -630,4 +638,68 @@ function formatTooltipRow(name: string, value: number | string): [string, string
   if (name.includes("Média")) return [name, `${value.toLocaleString("pt-BR")}/dia`];
   if (name.includes("YouTube")) return [name, `${value.toLocaleString("pt-BR")} unidades`];
   return [name, `${value.toLocaleString("pt-BR")} tokens`];
+}
+
+const fmtBrl = (v: number) =>
+  v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** (Rodada 39) Card de custo estimado do consumo de LLM do mês corrente em R$,
+ * com projeção pro-rata do mês completo e badge do modelo de preço utilizado. */
+function CostEstimateCard(props: { cost?: { model: string; priceFrom: string; fallback: boolean; monthTokens: number; monthCostBrl: number; projectedMonthCostBrl: number | null; daysElapsed: number }; isLoading: boolean }) {
+  const { cost, isLoading } = props;
+  return (
+    <Card className="border-border/60">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-lg flex items-center gap-2">
+          <DollarSign className="h-5 w-5 text-emerald-400" />
+          Custo estimado de LLM (mês corrente)
+        </CardTitle>
+        <CardDescription>
+          Projeção do custo mensal do consumo de tokens de LLM em Reais, com câmbio fixo de referência e o preço de entrada
+          por milhão de tokens do modelo configurado.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {isLoading ? (
+          <Skeleton className="h-20 w-full" />
+        ) : !cost ? (
+          <p className="text-sm text-muted-foreground">Sem dados de custo disponíveis.</p>
+        ) : (
+          <>
+            <div className="flex items-baseline justify-between">
+              <div>
+                <p className="text-2xl font-bold">{fmtBrl(cost.monthCostBrl)}</p>
+                <p className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                  <span className="rounded-md bg-secondary px-2 py-0.5 font-medium text-secondary-foreground">
+                    {cost.model}
+                  </span>
+                  {cost.priceFrom === "settings" && <span>preço configurado por você</span>}
+                  {cost.priceFrom === "env" && <span>padrão do servidor</span>}
+                  {cost.priceFrom === "catalog" && <span>preço público de referência</span>}
+                  {cost.fallback && (
+                    <span className="rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-300">
+                      valor estimado
+                    </span>
+                  )}
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-sm font-semibold">{fmtBrl(cost.projectedMonthCostBrl ?? cost.monthCostBrl)}</p>
+                <p className="text-xs text-muted-foreground">
+                  {cost.projectedMonthCostBrl !== null
+                    ? `projeção do mês completo (dia ${cost.daysElapsed})`
+                    : "mês em curso sem projeção pro-rata"}
+                </p>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Tokens consumidos no mês: {cost.monthTokens.toLocaleString("pt-BR")} · câmbio de referência: 1 USD = 5,40 BRL.
+              A cota do YouTube não gera custo variável direto nesta aplicação. Se o modelo não estiver no catálogo
+              interno, um preço estimado é aplicado como fallback.
+            </p>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
